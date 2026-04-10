@@ -7,5 +7,10 @@ public record ImportedPoi(
     string? GoogleMapsUrl = null,
     string? Address = null,
     string? Category = null,
-    string? Description = null
+    string? Description = null,
+    double? Rating = null,
+    int? ReviewCount = null,
+    string? Website = null,
+    string? Phone = null,
+    string? ImageUrl = null
 );

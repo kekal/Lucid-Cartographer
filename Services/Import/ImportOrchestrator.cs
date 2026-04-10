@@ -106,6 +106,7 @@ public class ImportOrchestrator
                     Address = imported.Address,
                     Category = imported.Category,
                     Notes = imported.Description,
+                    Rating = imported.Rating.HasValue ? (int)Math.Round(imported.Rating.Value) : null,
                     Status = "imported",
                     AddedDate = DateTime.UtcNow
                 };
@@ -198,6 +199,7 @@ public class ImportOrchestrator
                     Address = imported.Address,
                     Category = imported.Category,
                     Notes = imported.Description,
+                    Rating = imported.Rating.HasValue ? (int)Math.Round(imported.Rating.Value) : null,
                     Status = "imported",
                     AddedDate = DateTime.UtcNow
                 };

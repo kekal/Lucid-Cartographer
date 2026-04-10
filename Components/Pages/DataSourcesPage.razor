@@ -359,23 +359,24 @@
 
         try
         {
-            var pois = await Scraper.ScrapeAsync(_sharedListUrl, count =>
+            var result = await Scraper.ScrapeAsync(_sharedListUrl, count =>
             {
                 _scrapeProgress = count;
                 InvokeAsync(StateHasChanged);
             });
 
-            if (!pois.Any())
+            if (!result.Pois.Any())
             {
                 _importError = "No places found. Make sure the URL is a valid Google Maps list.";
                 return;
             }
 
-            var name = string.IsNullOrWhiteSpace(_collectionName)
-                ? $"Shared List ({pois.Count} places)"
-                : _collectionName;
+            // Use list name from Google Maps if user didn't provide one
+            var name = !string.IsNullOrWhiteSpace(_collectionName)
+                ? _collectionName
+                : result.ListName ?? $"Shared List ({result.Pois.Count} places)";
 
-            _importResult = await ImportOrchestrator.ImportFromScrapedAsync(pois, name, _selectedColor);
+            _importResult = await ImportOrchestrator.ImportFromScrapedAsync(result.Pois, name, _selectedColor);
             await LoadCollections();
             _collectionName = string.Empty;
             _sharedListUrl = string.Empty;

@@ -2,6 +2,12 @@ using Microsoft.Playwright;
 
 namespace LucidCartographer.Services.Import;
 
+public class ScrapeResult
+{
+    public string? ListName { get; set; }
+    public List<ImportedPoi> Pois { get; set; } = new();
+}
+
 public class GoogleMapsListScraper
 {
     private readonly ILogger<GoogleMapsListScraper> _logger;
@@ -11,7 +17,7 @@ public class GoogleMapsListScraper
         _logger = logger;
     }
 
-    public async Task<List<ImportedPoi>> ScrapeAsync(string listUrl, Action<int>? onProgress = null)
+    public async Task<ScrapeResult> ScrapeAsync(string listUrl, Action<int>? onProgress = null)
     {
         _logger.LogInformation("Starting scrape of {Url}", listUrl);
 
@@ -91,6 +97,29 @@ public class GoogleMapsListScraper
             "div.m6QErb",
             "div[aria-label] div.e07Vkf",
         };
+
+        // Extract list name from the page header
+        string? listName = null;
+        try
+        {
+            // Google Maps list title appears in various header elements
+            var titleSelectors = new[] { "h1.fontHeadlineLarge", "h1", "div.fontHeadlineLarge", "div.F63Kk span" };
+            foreach (var sel in titleSelectors)
+            {
+                var titleEl = page.Locator(sel).First;
+                if (await titleEl.IsVisibleAsync(new LocatorIsVisibleOptions { Timeout = 1000 }))
+                {
+                    listName = (await titleEl.InnerTextAsync()).Trim();
+                    if (!string.IsNullOrEmpty(listName) && listName.Length > 1)
+                    {
+                        _logger.LogInformation("Extracted list name: {Name}", listName);
+                        break;
+                    }
+                    listName = null;
+                }
+            }
+        }
+        catch { }
 
         ILocator? scrollContainer = null;
         foreach (var sel in scrollSelectors)
@@ -206,7 +235,7 @@ public class GoogleMapsListScraper
 
                 var item = items[idx];
 
-                // Extract name before clicking
+                // === Extract data from list item (before clicking) ===
                 string name;
                 try
                 {
@@ -219,17 +248,73 @@ public class GoogleMapsListScraper
                 }
                 name = name.Split('\n').FirstOrDefault()?.Trim() ?? "Unknown";
 
-                // Extract category/type if visible
-                string? category = null;
+                // Rating (e.g., "4.9")
+                double? rating = null;
                 try
                 {
-                    var catEl = item.Locator(".W4Efsd .W4Efsd span:not(.MW4etd):not(.UY7F9)").First;
-                    if (await catEl.IsVisibleAsync(new LocatorIsVisibleOptions { Timeout = 500 }))
-                        category = (await catEl.InnerTextAsync()).Trim().TrimEnd('·').Trim();
+                    var ratingEl = item.Locator("span.MW4etd").First;
+                    if (await ratingEl.IsVisibleAsync(new LocatorIsVisibleOptions { Timeout = 300 }))
+                    {
+                        var ratingText = await ratingEl.InnerTextAsync();
+                        if (double.TryParse(ratingText.Trim().Replace(',', '.'), System.Globalization.CultureInfo.InvariantCulture, out var r))
+                            rating = r;
+                    }
                 }
                 catch { }
 
-                // Click the item to navigate to its place page
+                // Review count (e.g., "(9 323)")
+                int? reviewCount = null;
+                try
+                {
+                    var reviewEl = item.Locator("span.UY7F9").First;
+                    if (await reviewEl.IsVisibleAsync(new LocatorIsVisibleOptions { Timeout = 300 }))
+                    {
+                        var reviewText = await reviewEl.InnerTextAsync();
+                        reviewText = new string(reviewText.Where(c => char.IsDigit(c)).ToArray());
+                        if (int.TryParse(reviewText, out var rc))
+                            reviewCount = rc;
+                    }
+                }
+                catch { }
+
+                // Category from list item (e.g., "Muzeum", "Zoo")
+                string? category = null;
+                string? description = null;
+                try
+                {
+                    // Get all text lines from the item
+                    var bodyEls = await item.Locator(".W4Efsd").AllAsync();
+                    foreach (var bodyEl in bodyEls)
+                    {
+                        var text = (await bodyEl.InnerTextAsync()).Trim();
+                        if (string.IsNullOrEmpty(text) || text == name) continue;
+                        // First non-rating text is usually the category
+                        var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                        foreach (var line in lines)
+                        {
+                            var clean = line.Trim(' ', '·', '\u00B7');
+                            if (clean.Length < 2 || clean == name) continue;
+                            if (clean.All(c => char.IsDigit(c) || c == '.' || c == ',' || c == '(' || c == ')' || c == ' ' || c == '★')) continue;
+                            if (category == null)
+                                category = clean;
+                            else if (description == null && clean != category)
+                                description = clean;
+                        }
+                    }
+                }
+                catch { }
+
+                // Image URL
+                string? imageUrl = null;
+                try
+                {
+                    var imgEl = item.Locator("img").First;
+                    if (await imgEl.IsVisibleAsync(new LocatorIsVisibleOptions { Timeout = 300 }))
+                        imageUrl = await imgEl.GetAttributeAsync("src");
+                }
+                catch { }
+
+                // === Click the item to get coordinates + address ===
                 await item.ClickAsync();
 
                 // Wait for URL to update with place data (!3d/!4d)
@@ -240,18 +325,15 @@ public class GoogleMapsListScraper
                     await page.WaitForTimeoutAsync(1000);
                     currentUrl = page.Url;
                     coords = ExtractCoordinates(currentUrl);
-                    // If we got !3d/!4d coords (not just viewport), we're good
                     if (coords != null && currentUrl.Contains("!3d"))
                         break;
                 }
 
-                // Fallback: try to extract coords from the place action buttons
-                // Google Maps place pages have a share/directions button with coords
+                // Fallback: directions button
                 if (coords == null || !currentUrl.Contains("!3d"))
                 {
                     try
                     {
-                        // The directions button href contains the destination coords
                         var dirBtn = page.Locator("a[data-value='Directions'], button[data-tooltip='Directions']").First;
                         if (await dirBtn.IsVisibleAsync(new LocatorIsVisibleOptions { Timeout = 1000 }))
                         {
@@ -266,16 +348,61 @@ public class GoogleMapsListScraper
                     catch { }
                 }
 
+                // Extract address from the detail panel
+                string? address = null;
+                try
+                {
+                    var addrEl = page.Locator("button[data-item-id='address'] .fontBodyMedium, div[data-item-id='address']").First;
+                    if (await addrEl.IsVisibleAsync(new LocatorIsVisibleOptions { Timeout = 1000 }))
+                        address = (await addrEl.InnerTextAsync()).Trim();
+                }
+                catch { }
+
+                // Extract website
+                string? website = null;
+                try
+                {
+                    var webEl = page.Locator("a[data-item-id='authority'] .fontBodyMedium, a[data-item-id='authority']").First;
+                    if (await webEl.IsVisibleAsync(new LocatorIsVisibleOptions { Timeout = 500 }))
+                        website = await webEl.GetAttributeAsync("href") ?? (await webEl.InnerTextAsync()).Trim();
+                }
+                catch { }
+
+                // Extract phone
+                string? phone = null;
+                try
+                {
+                    var phoneEl = page.Locator("button[data-item-id*='phone'] .fontBodyMedium").First;
+                    if (await phoneEl.IsVisibleAsync(new LocatorIsVisibleOptions { Timeout = 500 }))
+                        phone = (await phoneEl.InnerTextAsync()).Trim();
+                }
+                catch { }
+
                 if (coords != null)
                 {
+                    // Build rich description
+                    var descParts = new List<string>();
+                    if (!string.IsNullOrEmpty(description)) descParts.Add(description);
+                    if (!string.IsNullOrEmpty(website)) descParts.Add($"Website: {website}");
+                    if (!string.IsNullOrEmpty(phone)) descParts.Add($"Phone: {phone}");
+                    if (reviewCount.HasValue) descParts.Add($"Reviews: {reviewCount.Value}");
+
                     results.Add(new ImportedPoi(
                         Name: name,
                         Latitude: coords.Value.lat,
                         Longitude: coords.Value.lon,
                         GoogleMapsUrl: currentUrl,
-                        Category: category
+                        Address: address,
+                        Category: category,
+                        Description: descParts.Any() ? string.Join(" | ", descParts) : null,
+                        Rating: rating,
+                        ReviewCount: reviewCount,
+                        Website: website,
+                        Phone: phone,
+                        ImageUrl: imageUrl
                     ));
-                    _logger.LogInformation("[{Idx}/{Total}] {Name} @ {Lat},{Lon}", idx + 1, totalItems, name, coords.Value.lat, coords.Value.lon);
+                    _logger.LogInformation("[{Idx}/{Total}] {Name} ({Cat}) ★{Rating} @ {Lat},{Lon}",
+                        idx + 1, totalItems, name, category ?? "-", rating?.ToString("F1") ?? "-", coords.Value.lat, coords.Value.lon);
                 }
                 else
                 {
@@ -296,8 +423,8 @@ public class GoogleMapsListScraper
             }
         }
 
-        _logger.LogInformation("Successfully scraped {Count} places", results.Count);
-        return results;
+        _logger.LogInformation("Successfully scraped {Count} places from list '{ListName}'", results.Count, listName ?? "unknown");
+        return new ScrapeResult { ListName = listName, Pois = results };
     }
 
     private static (double lat, double lon)? ExtractCoordinates(string url)
