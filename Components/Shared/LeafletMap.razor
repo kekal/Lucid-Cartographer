@@ -1,0 +1,78 @@
+@using LucidCartographer.Data.Entities
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<div id="@_mapElementId" style="width:100%;height:100%;"></div>
+
+@code {
+    [Parameter] public EventCallback<int> OnMarkerSelected { get; set; }
+
+    private string _mapElementId = "leaflet-map";
+    private DotNetObjectReference<LeafletMap>? _dotnetRef;
+    private bool _initialized = false;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotnetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("leafletInterop.initMap", _mapElementId, _dotnetRef);
+            _initialized = true;
+        }
+    }
+
+    public async Task ShowCollectionAsync(int collectionId, List<Poi> pois, string color)
+    {
+        if (!_initialized) return;
+        var dtos = pois.Select(p => new {
+            id = p.Id,
+            name = p.Name,
+            latitude = p.Latitude,
+            longitude = p.Longitude,
+            address = p.Address,
+            googleMapsUrl = p.GoogleMapsUrl
+        }).ToArray();
+        await JS.InvokeVoidAsync("leafletInterop.addCollectionMarkers", collectionId, dtos, color);
+    }
+
+    public async Task HideCollectionAsync(int collectionId)
+    {
+        if (!_initialized) return;
+        await JS.InvokeVoidAsync("leafletInterop.removeCollectionMarkers", collectionId);
+    }
+
+    public async Task FocusOnPoiAsync(double lat, double lon, int zoom = 16)
+    {
+        if (!_initialized) return;
+        await JS.InvokeVoidAsync("leafletInterop.focusOnPoi", lat, lon, zoom);
+    }
+
+    public async Task FitBoundsAsync()
+    {
+        if (!_initialized) return;
+        await JS.InvokeVoidAsync("leafletInterop.fitBounds");
+    }
+
+    public async Task InvalidateSizeAsync()
+    {
+        if (!_initialized) return;
+        await JS.InvokeVoidAsync("leafletInterop.invalidateSize");
+    }
+
+    public async Task HighlightMarkerAsync(int poiId)
+    {
+        if (!_initialized) return;
+        await JS.InvokeVoidAsync("leafletInterop.highlightMarker", poiId);
+    }
+
+    [JSInvokable]
+    public async Task OnMarkerClicked(int poiId)
+    {
+        await OnMarkerSelected.InvokeAsync(poiId);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _dotnetRef?.Dispose();
+    }
+}

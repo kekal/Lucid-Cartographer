@@ -1,0 +1,105 @@
+@using LucidCartographer.Data.Entities
+
+<div class="flex flex-col h-full">
+    @* Table Header *@
+    <div class="flex items-center justify-between px-4 py-2 flex-shrink-0 bg-surface-container-low/50">
+        <div class="flex items-center gap-2">
+            <span class="font-bold font-headline text-sm">Filtered Results</span>
+            <span class="text-xs text-on-surface-variant bg-surface-container-high px-2 py-0.5 rounded-full">@Pois.Count items</span>
+        </div>
+        <div class="flex items-center gap-2">
+            @if (ShowSortByDistance)
+            {
+                <button class="text-xs text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1"
+                        @onclick="() => OnSortByDistanceClicked.InvokeAsync()">
+                    <span class="material-symbols-outlined text-sm">sort</span>
+                    Sort by Distance
+                </button>
+            }
+        </div>
+    </div>
+
+    @* Table Content *@
+    <div class="flex-1 overflow-y-auto">
+        @if (!Pois.Any())
+        {
+            <div class="p-8 text-center text-on-surface-variant text-sm">
+                <span class="material-symbols-outlined text-3xl mb-2 block">location_off</span>
+                <p>No POIs to display. Toggle collection visibility or import data.</p>
+            </div>
+        }
+        else
+        {
+            <table class="w-full text-sm">
+                <thead class="sticky top-0 bg-surface z-10">
+                    <tr class="text-left text-xs text-on-surface-variant">
+                        <th class="px-4 py-2 font-medium">Location Name</th>
+                        <th class="px-4 py-2 font-medium">Coordinates</th>
+                        <th class="px-4 py-2 font-medium">Collection</th>
+                        <th class="px-4 py-2 font-medium">Added</th>
+                        <th class="px-4 py-2 font-medium text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var poi in Pois.Take(200))
+                    {
+                        <tr class="hover:bg-surface-container-low transition-colors cursor-pointer @(SelectedPoiId == poi.Id ? "bg-surface-container" : "")"
+                            @onclick="() => OnPoiSelected.InvokeAsync(poi.Id)">
+                            <td class="px-4 py-2.5">
+                                <div class="flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-base text-on-surface-variant">location_on</span>
+                                    <div>
+                                        <div class="font-medium">@poi.Name</div>
+                                        @if (!string.IsNullOrEmpty(poi.Address))
+                                        {
+                                            <div class="text-xs text-on-surface-variant">@poi.Address</div>
+                                        }
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="px-4 py-2.5 text-xs text-on-surface-variant font-mono">
+                                @poi.Latitude.ToString("F4"), @poi.Longitude.ToString("F4")
+                            </td>
+                            <td class="px-4 py-2.5">
+                                @if (CollectionName != null)
+                                {
+                                    <span class="text-xs px-2 py-0.5 rounded-full bg-surface-container-high">@CollectionName</span>
+                                }
+                            </td>
+                            <td class="px-4 py-2.5 text-xs text-on-surface-variant">@poi.AddedDate.ToString("MMM dd, yyyy")</td>
+                            <td class="px-4 py-2.5 text-right">
+                                <a href="@(poi.GoogleMapsUrl ?? $"https://www.google.com/maps/search/?api=1&query={poi.Latitude},{poi.Longitude}")"
+                                   target="_blank" rel="noopener"
+                                   class="text-primary hover:text-primary-container transition-colors p-1 inline-block"
+                                   @onclick:stopPropagation="true">
+                                    <span class="material-symbols-outlined text-base">open_in_new</span>
+                                </a>
+                                <button class="text-on-surface-variant hover:text-primary transition-colors p-1"
+                                        @onclick:stopPropagation="true"
+                                        @onclick="() => OnFocusClicked.InvokeAsync(poi.Id)">
+                                    <span class="material-symbols-outlined text-base">my_location</span>
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            @if (Pois.Count > 200)
+            {
+                <div class="p-3 text-center text-xs text-on-surface-variant">
+                    Showing 200 of @Pois.Count results
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public List<Poi> Pois { get; set; } = new();
+    [Parameter] public int? SelectedPoiId { get; set; }
+    [Parameter] public string? CollectionName { get; set; }
+    [Parameter] public bool ShowSortByDistance { get; set; } = false;
+    [Parameter] public EventCallback<int> OnPoiSelected { get; set; }
+    [Parameter] public EventCallback<int> OnFocusClicked { get; set; }
+    [Parameter] public EventCallback OnSortByDistanceClicked { get; set; }
+}

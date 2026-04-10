@@ -1,0 +1,115 @@
+@using LucidCartographer.Data.Entities
+
+@if (Poi != null)
+{
+    <div class="flex flex-col h-full bg-white">
+        @* Header *@
+        <div class="flex items-center justify-between p-4 flex-shrink-0">
+            <h3 class="font-bold font-headline">Location Details</h3>
+            <button class="p-1 rounded hover:bg-surface-container-low transition-colors"
+                    @onclick="() => OnClose.InvokeAsync()">
+                <span class="material-symbols-outlined">close</span>
+            </button>
+        </div>
+
+        @* Content *@
+        <div class="flex-1 overflow-y-auto px-4 pb-4">
+            @* Name & Address *@
+            <h4 class="text-lg font-bold font-headline mb-1">@Poi.Name</h4>
+            @if (!string.IsNullOrEmpty(Poi.Address))
+            {
+                <p class="text-sm text-on-surface-variant mb-3">@Poi.Address</p>
+            }
+
+            @* Status & Category *@
+            <div class="flex flex-wrap gap-2 mb-4">
+                @if (!string.IsNullOrEmpty(Poi.Status))
+                {
+                    <span class="text-xs px-2.5 py-1 rounded-full font-medium
+                        @(Poi.Status == "visited" ? "bg-secondary/10 text-secondary" :
+                          Poi.Status == "want_to_go" ? "bg-primary/10 text-primary" :
+                          "bg-surface-container-high text-on-surface-variant")">
+                        @Poi.Status.Replace("_", " ")
+                    </span>
+                }
+                @if (!string.IsNullOrEmpty(Poi.Category))
+                {
+                    <span class="text-xs px-2.5 py-1 rounded-full bg-surface-container-high text-on-surface-variant">
+                        @Poi.Category
+                    </span>
+                }
+            </div>
+
+            @* Rating *@
+            @if (Poi.Rating.HasValue)
+            {
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="text-sm font-medium">Rating</span>
+                    <div class="flex gap-0.5">
+                        @for (int i = 1; i <= 5; i++)
+                        {
+                            var starIndex = i;
+                            <span class="material-symbols-outlined text-base @(starIndex <= Poi.Rating.Value ? "text-yellow-500" : "text-surface-container-highest")"
+                                  style="font-variation-settings: 'FILL' @(starIndex <= Poi.Rating.Value ? 1 : 0)">
+                                star
+                            </span>
+                        }
+                    </div>
+                </div>
+            }
+
+            @* Coordinates *@
+            <div class="bg-surface-container-low rounded-lg p-3 mb-4">
+                <div class="text-xs text-on-surface-variant mb-1">Coordinates</div>
+                <div class="font-mono text-sm">@Poi.Latitude.ToString("F6"), @Poi.Longitude.ToString("F6")</div>
+            </div>
+
+            @* Notes *@
+            @if (!string.IsNullOrEmpty(Poi.Notes))
+            {
+                <div class="mb-4">
+                    <div class="text-xs text-on-surface-variant mb-1 uppercase tracking-wider">Notes</div>
+                    <p class="text-sm">@Poi.Notes</p>
+                </div>
+            }
+
+            @* Tags *@
+            @if (!string.IsNullOrEmpty(Poi.Tags))
+            {
+                <div class="mb-4">
+                    <div class="text-xs text-on-surface-variant mb-1 uppercase tracking-wider">Tags</div>
+                    <div class="flex flex-wrap gap-1">
+                        @foreach (var tag in Poi.Tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                        {
+                            <span class="text-xs px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant">@tag</span>
+                        }
+                    </div>
+                </div>
+            }
+
+            @* Dates *@
+            <div class="text-xs text-on-surface-variant space-y-1">
+                <div>Added: @Poi.AddedDate.ToString("MMMM dd, yyyy")</div>
+                @if (Poi.VisitedDate.HasValue)
+                {
+                    <div>Visited: @Poi.VisitedDate.Value.ToString("MMMM dd, yyyy")</div>
+                }
+            </div>
+        </div>
+
+        @* Footer: Google Maps button *@
+        <div class="p-4 flex-shrink-0">
+            <a href="@(Poi.GoogleMapsUrl ?? $"https://www.google.com/maps/search/?api=1&query={Poi.Latitude},{Poi.Longitude}")"
+               target="_blank" rel="noopener"
+               class="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg bg-gradient-to-r from-primary to-primary-container text-white font-medium text-sm hover:shadow-lg transition-all">
+                <span class="material-symbols-outlined text-base">open_in_new</span>
+                Open in Google Maps
+            </a>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Poi? Poi { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+}

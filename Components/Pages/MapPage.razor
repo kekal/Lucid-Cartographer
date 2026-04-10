@@ -1,0 +1,197 @@
+@page "/"
+@rendermode InteractiveServer
+@using LucidCartographer.Data.Entities
+@using LucidCartographer.Services
+@using Microsoft.AspNetCore.WebUtilities
+@inject PoiService PoiService
+@inject NavigationManager Navigation
+
+<PageTitle>Map - Lucid Cartographer</PageTitle>
+
+<div class="flex h-full">
+    @* Left Sidebar — Collections *@
+    <div class="w-60 flex-shrink-0 bg-surface-container-low flex flex-col">
+        <CollectionSidebar Collections="_collections"
+                          SelectedCollectionId="_selectedCollectionId"
+                          OnCollectionSelected="HandleCollectionSelected"
+                          OnVisibilityToggled="HandleVisibilityToggled" />
+    </div>
+
+    @* Center + Bottom *@
+    <div class="flex-1 flex flex-col min-w-0">
+        @* Active filter chips *@
+        <div class="flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-sm z-10 flex-shrink-0">
+            @foreach (var col in _collections.Where(c => c.IsVisible))
+            {
+                <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium text-white"
+                      style="background-color: @col.Color">
+                    @col.Name
+                    <button @onclick="() => HandleVisibilityToggled(col.Id)" class="hover:opacity-80">
+                        <span class="material-symbols-outlined text-xs">close</span>
+                    </button>
+                </span>
+            }
+            @if (_collections.Any(c => c.IsVisible))
+            {
+                <button class="text-xs text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1"
+                        @onclick="FitMapBounds">
+                    <span class="material-symbols-outlined text-sm">fit_screen</span>
+                    Fit All
+                </button>
+            }
+        </div>
+
+        @* Map *@
+        <div class="flex-1 relative min-h-0">
+            <LeafletMap @ref="_leafletMap" OnMarkerSelected="HandleMarkerSelected" />
+        </div>
+
+        @* Bottom Table *@
+        <div class="h-64 flex-shrink-0 bg-white shadow-inner overflow-hidden" style="border-top: 1px solid #e5e8ee;">
+            <PoiTable Pois="_visiblePois"
+                     SelectedPoiId="_selectedPoiId"
+                     CollectionName="@_selectedCollectionName"
+                     OnPoiSelected="HandlePoiSelected"
+                     OnFocusClicked="HandleFocusPoi" />
+        </div>
+    </div>
+
+    @* Right Detail Pane *@
+    @if (_selectedPoi != null)
+    {
+        <div class="w-80 flex-shrink-0 shadow-lg overflow-hidden" style="border-left: 1px solid #e5e8ee;">
+            <PoiDetailPane Poi="_selectedPoi" OnClose="CloseDetailPane" />
+        </div>
+    }
+</div>
+
+@code {
+    private LeafletMap? _leafletMap;
+    private List<PoiCollection> _collections = new();
+    private List<Poi> _visiblePois = new();
+    private int? _selectedCollectionId;
+    private int? _selectedPoiId;
+    private string? _selectedCollectionName;
+    private Poi? _selectedPoi;
+    private bool _mapLoaded = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _collections = await PoiService.GetCollectionsAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var uri = Navigation.ToAbsoluteUri(Navigation.Uri);
+        if (QueryHelpers.ParseQuery(uri.Query).TryGetValue("search", out var searchValues))
+        {
+            var search = searchValues.FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                _visiblePois = await PoiService.SearchAsync(search);
+                _selectedCollectionName = $"Search: {search}";
+            }
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Small delay to ensure map is initialized
+            await Task.Delay(200);
+            _mapLoaded = true;
+            await LoadVisibleCollections();
+        }
+    }
+
+    private async Task LoadVisibleCollections()
+    {
+        if (_leafletMap == null || !_mapLoaded) return;
+
+        var grouped = await PoiService.GetVisiblePoisGroupedAsync();
+        _visiblePois.Clear();
+
+        foreach (var col in _collections)
+        {
+            if (col.IsVisible && grouped.ContainsKey(col.Id))
+            {
+                await _leafletMap.ShowCollectionAsync(col.Id, grouped[col.Id], col.Color);
+                _visiblePois.AddRange(grouped[col.Id]);
+            }
+            else
+            {
+                await _leafletMap.HideCollectionAsync(col.Id);
+            }
+        }
+        StateHasChanged();
+    }
+
+    private async Task HandleVisibilityToggled(int collectionId)
+    {
+        await PoiService.ToggleVisibilityAsync(collectionId);
+        _collections = await PoiService.GetCollectionsAsync();
+        await LoadVisibleCollections();
+    }
+
+    private async Task HandleCollectionSelected(int collectionId)
+    {
+        _selectedCollectionId = collectionId;
+        var col = _collections.FirstOrDefault(c => c.Id == collectionId);
+        _selectedCollectionName = col?.Name;
+
+        // Load and show just this collection's POIs in the table
+        var pois = await PoiService.GetPoisByCollectionAsync(collectionId);
+        _visiblePois = pois;
+        StateHasChanged();
+    }
+
+    private async Task HandleMarkerSelected(int poiId)
+    {
+        await SelectPoi(poiId);
+    }
+
+    private async Task HandlePoiSelected(int poiId)
+    {
+        await SelectPoi(poiId);
+        if (_leafletMap != null)
+        {
+            var poi = _selectedPoi;
+            if (poi != null)
+            {
+                await _leafletMap.HighlightMarkerAsync(poiId);
+            }
+        }
+    }
+
+    private async Task HandleFocusPoi(int poiId)
+    {
+        await SelectPoi(poiId);
+        if (_leafletMap != null && _selectedPoi != null)
+        {
+            await _leafletMap.FocusOnPoiAsync(_selectedPoi.Latitude, _selectedPoi.Longitude);
+        }
+    }
+
+    private async Task SelectPoi(int poiId)
+    {
+        _selectedPoiId = poiId;
+        _selectedPoi = await PoiService.GetPoiAsync(poiId);
+        StateHasChanged();
+    }
+
+    private void CloseDetailPane()
+    {
+        _selectedPoi = null;
+        _selectedPoiId = null;
+        StateHasChanged();
+    }
+
+    private async Task FitMapBounds()
+    {
+        if (_leafletMap != null)
+        {
+            await _leafletMap.FitBoundsAsync();
+        }
+    }
+}

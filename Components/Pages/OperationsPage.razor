@@ -1,0 +1,356 @@
+@page "/operations"
+@rendermode InteractiveServer
+@using LucidCartographer.Data.Entities
+@using LucidCartographer.Services
+@using LucidCartographer.Services.Operations
+@using LucidCartographer.Services.Export
+@inject PoiService PoiService
+@inject KmlExporter KmlExporter
+@inject IJSRuntime JS
+@inject SetOperationService SetOperationService
+
+<PageTitle>Operations - Lucid Cartographer</PageTitle>
+
+<div class="flex h-full">
+    @* Left Panel — Operation Config *@
+    <div class="w-80 flex-shrink-0 bg-surface-container-low p-6 flex flex-col gap-6 overflow-y-auto">
+        @* Source Selection *@
+        <div>
+            <h3 class="text-lg font-bold font-headline mb-4 flex items-center gap-2">
+                <span class="material-symbols-outlined text-primary">source</span>
+                Source Selection
+            </h3>
+
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-1.5">Source Dataset A</label>
+                    <select @bind="_collectionAId"
+                            class="w-full px-3 py-2 rounded-lg bg-surface-container-highest border-0 text-on-surface text-sm focus:ring-2 focus:ring-primary">
+                        <option value="0">Select collection...</option>
+                        @foreach (var col in _collections)
+                        {
+                            <option value="@col.Id">@col.Name (@col.PoiCount pts)</option>
+                        }
+                    </select>
+                    @if (_collectionAId > 0)
+                    {
+                        <p class="text-xs text-on-surface-variant mt-1">
+                            <span class="material-symbols-outlined text-xs align-middle">check_circle</span>
+                            @_collections.FirstOrDefault(c => c.Id == _collectionAId)?.PoiCount data points loaded
+                        </p>
+                    }
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-1.5">Source Dataset B</label>
+                    <select @bind="_collectionBId"
+                            class="w-full px-3 py-2 rounded-lg bg-surface-container-highest border-0 text-on-surface text-sm focus:ring-2 focus:ring-primary">
+                        <option value="0">Select collection...</option>
+                        @foreach (var col in _collections)
+                        {
+                            <option value="@col.Id">@col.Name (@col.PoiCount pts)</option>
+                        }
+                    </select>
+                    @if (_collectionBId > 0)
+                    {
+                        <p class="text-xs text-on-surface-variant mt-1">
+                            <span class="material-symbols-outlined text-xs align-middle">check_circle</span>
+                            @_collections.FirstOrDefault(c => c.Id == _collectionBId)?.PoiCount data points loaded
+                        </p>
+                    }
+                </div>
+            </div>
+        </div>
+
+        @* Logical Operations *@
+        <div>
+            <h3 class="text-sm font-bold font-headline mb-3 flex items-center gap-2">
+                <span class="material-symbols-outlined text-primary text-base">hub</span>
+                Logical Operations
+            </h3>
+            <div class="grid grid-cols-2 gap-3">
+                <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(_activeOp == SetOperation.Subtract ? "ring-2 ring-primary" : "")"
+                        @onclick="() => RunOperation(SetOperation.Subtract)"
+                        disabled="@(!CanRunBinaryOp)">
+                    <span class="material-symbols-outlined text-2xl @(CanRunBinaryOp ? "text-tertiary" : "text-outline")">remove_circle</span>
+                    <span class="text-xs font-medium">A − B</span>
+                    <span class="text-[10px] text-on-surface-variant">Difference</span>
+                </button>
+
+                <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(_activeOp == SetOperation.Intersect ? "ring-2 ring-primary" : "")"
+                        @onclick="() => RunOperation(SetOperation.Intersect)"
+                        disabled="@(!CanRunBinaryOp)">
+                    <span class="material-symbols-outlined text-2xl @(CanRunBinaryOp ? "text-secondary" : "text-outline")">join_inner</span>
+                    <span class="text-xs font-medium">A ∩ B</span>
+                    <span class="text-[10px] text-on-surface-variant">Intersection</span>
+                </button>
+
+                <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(_activeOp == SetOperation.Union ? "ring-2 ring-primary" : "")"
+                        @onclick="() => RunOperation(SetOperation.Union)"
+                        disabled="@(!CanRunBinaryOp)">
+                    <span class="material-symbols-outlined text-2xl @(CanRunBinaryOp ? "text-primary" : "text-outline")">join_full</span>
+                    <span class="text-xs font-medium">A ∪ B</span>
+                    <span class="text-[10px] text-on-surface-variant">Union</span>
+                </button>
+
+                <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(_activeOp == SetOperation.Dedup ? "ring-2 ring-primary" : "")"
+                        @onclick="() => RunOperation(SetOperation.Dedup)"
+                        disabled="@(_collectionAId == 0)">
+                    <span class="material-symbols-outlined text-2xl @(_collectionAId > 0 ? "text-primary-container" : "text-outline")">filter_alt</span>
+                    <span class="text-xs font-medium">Dedup</span>
+                    <span class="text-[10px] text-on-surface-variant">Deduplicate</span>
+                </button>
+            </div>
+        </div>
+
+        @* Spatial Tolerance *@
+        <div>
+            <label class="block text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-2">
+                Spatial Tolerance: @_toleranceMeters.ToString("F0")m
+            </label>
+            <input type="range" min="10" max="500" step="10" @bind="_toleranceMeters" @bind:event="oninput"
+                   class="w-full accent-primary" />
+            <p class="text-[10px] text-on-surface-variant mt-1">
+                Adjusting tolerance merges proximate markers based on spatial logic.
+            </p>
+        </div>
+    </div>
+
+    @* Right Panel — Results *@
+    <div class="flex-1 flex flex-col min-w-0 p-6">
+        @if (_isProcessing)
+        {
+            <div class="flex items-center justify-center h-full">
+                <div class="text-center">
+                    <div class="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+                    <p class="text-on-surface-variant">Processing operation...</p>
+                </div>
+            </div>
+        }
+        else if (_result == null)
+        {
+            <div class="flex items-center justify-center h-full text-on-surface-variant">
+                <div class="text-center">
+                    <span class="material-symbols-outlined text-6xl mb-4 block">calculate</span>
+                    <p class="text-lg font-headline font-bold mb-1">Select datasets and run an operation</p>
+                    <p class="text-sm">Choose collections A and B, then click an operation button.</p>
+                </div>
+            </div>
+        }
+        else
+        {
+            @* Result Header *@
+            <div class="flex items-center justify-between mb-4 flex-shrink-0">
+                <div>
+                    <h3 class="text-lg font-bold font-headline">
+                        Result Preview: @GetOperationLabel()
+                    </h3>
+                    <p class="text-sm text-on-surface-variant">@_result.Description &bull; @_resultPois.Count points</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button class="px-4 py-2 rounded-lg bg-surface-container-high text-on-surface text-sm font-medium hover:bg-surface-container-highest transition-colors flex items-center gap-2"
+                            @onclick="ExportResult" disabled="@(!_resultPois.Any())">
+                        <span class="material-symbols-outlined text-base">download</span>
+                        Export Result
+                    </button>
+                    <button class="px-4 py-2 rounded-lg bg-gradient-to-r from-primary to-primary-container text-white text-sm font-medium hover:shadow-lg transition-all flex items-center gap-2"
+                            @onclick="CommitToLayer" disabled="@(!_resultPois.Any())">
+                        <span class="material-symbols-outlined text-base">layers</span>
+                        Commit to Layer
+                    </button>
+                </div>
+            </div>
+
+            @* Commit dialog *@
+            @if (_showCommitDialog)
+            {
+                <div class="mb-4 p-4 bg-surface-container-low rounded-xl flex-shrink-0">
+                    <h4 class="font-bold font-headline text-sm mb-3">Save as new collection</h4>
+                    <div class="flex gap-3 items-end">
+                        <div class="flex-1">
+                            <label class="block text-xs text-on-surface-variant mb-1">Name</label>
+                            <input type="text" @bind="_commitName" placeholder="e.g., Filtered Places"
+                                   class="w-full px-3 py-2 rounded-lg bg-surface-container-highest border-0 text-sm focus:ring-2 focus:ring-primary" />
+                        </div>
+                        <button class="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium"
+                                @onclick="DoCommit">Save</button>
+                        <button class="px-4 py-2 rounded-lg bg-surface-container-high text-sm"
+                                @onclick="() => _showCommitDialog = false">Cancel</button>
+                    </div>
+                    @if (_commitSuccess != null)
+                    {
+                        <p class="text-sm text-secondary mt-2 flex items-center gap-1">
+                            <span class="material-symbols-outlined text-sm">check_circle</span>
+                            @_commitSuccess
+                        </p>
+                    }
+                </div>
+            }
+
+            @* Results Table *@
+            <div class="flex-1 overflow-y-auto bg-white rounded-xl">
+                <table class="w-full text-sm">
+                    <thead class="sticky top-0 bg-white z-10">
+                        <tr class="text-left text-xs text-on-surface-variant">
+                            <th class="px-4 py-3 font-medium w-8"></th>
+                            <th class="px-4 py-3 font-medium">POI Name</th>
+                            <th class="px-4 py-3 font-medium">Coordinates (Lat, Lng)</th>
+                            <th class="px-4 py-3 font-medium">Source ID</th>
+                            <th class="px-4 py-3 font-medium text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var poi in _resultPois.Take(500))
+                        {
+                            <tr class="hover:bg-surface-container-low transition-colors @(_discardedIds.Contains(poi.Id) ? "opacity-30 line-through" : "")">
+                                <td class="px-4 py-2.5">
+                                    <div class="w-2.5 h-2.5 rounded-full bg-secondary"></div>
+                                </td>
+                                <td class="px-4 py-2.5">
+                                    <div class="font-medium">@poi.Name</div>
+                                    @if (!string.IsNullOrEmpty(poi.Address))
+                                    {
+                                        <div class="text-xs text-on-surface-variant">@poi.Address</div>
+                                    }
+                                </td>
+                                <td class="px-4 py-2.5 font-mono text-xs text-on-surface-variant">
+                                    @poi.Latitude.ToString("F4"), @poi.Longitude.ToString("F4")
+                                </td>
+                                <td class="px-4 py-2.5 text-xs text-on-surface-variant">@poi.Id</td>
+                                <td class="px-4 py-2.5 text-right">
+                                    <a href="@(poi.GoogleMapsUrl ?? $"https://www.google.com/maps/search/?api=1&query={poi.Latitude},{poi.Longitude}")"
+                                       target="_blank" rel="noopener"
+                                       class="text-primary hover:underline text-xs font-medium mr-3">Focus</a>
+                                    @if (!_discardedIds.Contains(poi.Id))
+                                    {
+                                        <button class="text-tertiary hover:underline text-xs font-medium"
+                                                @onclick="() => DiscardPoi(poi.Id)">Discard</button>
+                                    }
+                                    else
+                                    {
+                                        <button class="text-secondary hover:underline text-xs font-medium"
+                                                @onclick="() => RestorePoi(poi.Id)">Restore</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @if (_resultPois.Count > 500)
+                {
+                    <div class="p-3 text-center text-xs text-on-surface-variant">
+                        Showing 500 of @_resultPois.Count results
+                    </div>
+                }
+            </div>
+
+            <div class="flex-shrink-0 pt-3 text-xs text-on-surface-variant text-right">
+                Showing @_resultPois.Count(p => !_discardedIds.Contains(p.Id)) of @_resultPois.Count result points
+                @if (_discardedIds.Any())
+                {
+                    <span> &bull; @_discardedIds.Count discarded</span>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<PoiCollection> _collections = new();
+    private int _collectionAId;
+    private int _collectionBId;
+    private double _toleranceMeters = 100;
+    private SetOperation? _activeOp;
+    private OperationResult? _result;
+    private List<Poi> _resultPois = new();
+    private HashSet<int> _discardedIds = new();
+    private bool _isProcessing;
+
+    private bool _showCommitDialog;
+    private string _commitName = string.Empty;
+    private string? _commitSuccess;
+
+    private bool CanRunBinaryOp => _collectionAId > 0 && _collectionBId > 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _collections = await PoiService.GetCollectionsAsync();
+    }
+
+    private async Task RunOperation(SetOperation operation)
+    {
+        _activeOp = operation;
+        _isProcessing = true;
+        _result = null;
+        _resultPois.Clear();
+        _discardedIds.Clear();
+        _showCommitDialog = false;
+        _commitSuccess = null;
+        StateHasChanged();
+
+        try
+        {
+            _result = await SetOperationService.ExecuteAsync(
+                operation,
+                _collectionAId,
+                operation == SetOperation.Dedup ? null : _collectionBId,
+                _toleranceMeters);
+            _resultPois = _result.Pois;
+        }
+        catch (Exception ex)
+        {
+            _result = new OperationResult { Description = $"Error: {ex.Message}" };
+        }
+        finally
+        {
+            _isProcessing = false;
+        }
+    }
+
+    private void DiscardPoi(int poiId)
+    {
+        _discardedIds.Add(poiId);
+    }
+
+    private void RestorePoi(int poiId)
+    {
+        _discardedIds.Remove(poiId);
+    }
+
+    private void CommitToLayer()
+    {
+        _showCommitDialog = true;
+        _commitSuccess = null;
+        var colAName = _collections.FirstOrDefault(c => c.Id == _collectionAId)?.Name ?? "A";
+        _commitName = $"{GetOperationLabel()} — {colAName}";
+    }
+
+    private async Task DoCommit()
+    {
+        var poisToSave = _resultPois.Where(p => !_discardedIds.Contains(p.Id)).ToList();
+        var saved = await SetOperationService.CommitResultAsync(poisToSave, _commitName);
+        _commitSuccess = $"Saved \"{saved.Name}\" with {saved.PoiCount} POIs";
+        _collections = await PoiService.GetCollectionsAsync();
+    }
+
+    private async Task ExportResult()
+    {
+        var poisToExport = _resultPois.Where(p => !_discardedIds.Contains(p.Id)).ToList();
+        if (!poisToExport.Any()) return;
+
+        var bytes = KmlExporter.Export(poisToExport, _commitName ?? "Operation Result");
+        var fileName = $"export_{DateTime.Now:yyyyMMdd_HHmmss}.kml";
+
+        // Trigger browser download via JS
+        await JS.InvokeVoidAsync("downloadFile", fileName, "application/vnd.google-earth.kml+xml", Convert.ToBase64String(bytes));
+    }
+
+    private string GetOperationLabel() => _activeOp switch
+    {
+        SetOperation.Subtract => "A − B",
+        SetOperation.Intersect => "A ∩ B",
+        SetOperation.Union => "A ∪ B",
+        SetOperation.Dedup => "Dedup",
+        _ => ""
+    };
+}

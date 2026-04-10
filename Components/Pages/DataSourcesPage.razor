@@ -1,0 +1,398 @@
+@page "/datasources"
+@rendermode InteractiveServer
+@using LucidCartographer.Services
+@using LucidCartographer.Services.Import
+@using LucidCartographer.Data.Entities
+@inject ImportOrchestrator ImportOrchestrator
+@inject PoiService PoiService
+@inject GoogleMapsListScraper Scraper
+
+<PageTitle>Data Sources - Lucid Cartographer</PageTitle>
+
+<div class="p-6 max-w-6xl mx-auto">
+    @* Header *@
+    <div class="mb-8">
+        <h2 class="text-2xl font-bold font-headline text-on-surface">Data &amp; Imports</h2>
+        <p class="text-on-surface-variant mt-1">Import geospatial datasets and manage your location data sources.</p>
+    </div>
+
+    @* Import Cards *@
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        @* GPX/KML Upload Card *@
+        <div class="bg-surface-container-low rounded-xl p-5 cursor-pointer hover:bg-surface-container transition-colors @(_activeCard == "file" ? "ring-2 ring-primary" : "")"
+             @onclick='() => ShowUpload("file")'>
+            <div class="flex items-center gap-3 mb-3">
+                <div class="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                    <span class="material-symbols-outlined text-primary">upload_file</span>
+                </div>
+                <h3 class="font-bold font-headline">KML/GPX Upload</h3>
+            </div>
+            <p class="text-sm text-on-surface-variant">Import GPX or KML files from browser extensions, Google My Maps exports, or other tools.</p>
+        </div>
+
+        @* Google Takeout Card *@
+        <div class="bg-surface-container-low rounded-xl p-5 cursor-pointer hover:bg-surface-container transition-colors @(_activeCard == "takeout" ? "ring-2 ring-primary" : "")"
+             @onclick='() => ShowUpload("takeout")'>
+            <div class="flex items-center gap-3 mb-3">
+                <div class="w-10 h-10 rounded-lg bg-secondary/10 flex items-center justify-center">
+                    <span class="material-symbols-outlined text-secondary">cloud_download</span>
+                </div>
+                <h3 class="font-bold font-headline">Google Takeout</h3>
+            </div>
+            <p class="text-sm text-on-surface-variant">Import your saved places from Google Takeout GeoJSON export.</p>
+        </div>
+
+        @* Shared List Card *@
+        <div class="bg-surface-container-low rounded-xl p-5 cursor-pointer hover:bg-surface-container transition-colors @(_activeCard == "shared" ? "ring-2 ring-primary" : "")"
+             @onclick='() => ShowUpload("shared")'>
+            <div class="flex items-center gap-3 mb-3">
+                <div class="w-10 h-10 rounded-lg bg-primary-container/10 flex items-center justify-center">
+                    <span class="material-symbols-outlined text-primary-container">public</span>
+                </div>
+                <h3 class="font-bold font-headline">Shared Google List</h3>
+            </div>
+            <p class="text-sm text-on-surface-variant">Paste a Google Maps list URL — the app scrapes all places automatically.</p>
+        </div>
+    </div>
+
+    @* Upload Area (shown when active) *@
+    @if (_showUpload)
+    {
+        <div class="bg-surface-container-low rounded-xl p-6 mb-8">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="font-bold font-headline text-lg">@_uploadTitle</h3>
+                <button class="text-on-surface-variant hover:text-on-surface" @onclick="CloseUpload">
+                    <span class="material-symbols-outlined">close</span>
+                </button>
+            </div>
+
+            @* Instructions per card type *@
+            @if (_activeCard == "takeout")
+            {
+                <div class="mb-4 p-4 rounded-lg bg-secondary/5">
+                    <h4 class="font-bold text-sm mb-2 flex items-center gap-2">
+                        <span class="material-symbols-outlined text-secondary text-base">info</span>
+                        How to export from Google Takeout
+                    </h4>
+                    <ol class="text-sm text-on-surface-variant space-y-1 list-decimal list-inside">
+                        <li>Go to <a href="https://takeout.google.com" target="_blank" rel="noopener" class="text-primary underline">takeout.google.com</a></li>
+                        <li>Click "Deselect all", then scroll down and check <strong>"Saved"</strong> (for custom lists) and <strong>"Maps (your places)"</strong> (for starred places)</li>
+                        <li>Click "Next step" → "Create export" → Download the ZIP</li>
+                        <li>Unzip and find <strong>Saved Places.json</strong> (GeoJSON) — upload it below</li>
+                    </ol>
+                </div>
+            }
+            else if (_activeCard == "shared")
+            {
+                <div class="mb-4 p-4 rounded-lg bg-primary/5">
+                    <h4 class="font-bold text-sm mb-2 flex items-center gap-2">
+                        <span class="material-symbols-outlined text-primary text-base">link</span>
+                        Paste a Google Maps list URL
+                    </h4>
+                    <p class="text-sm text-on-surface-variant mb-3">
+                        Works with shared lists, your own lists, or any Google Maps list URL. The app will open it in a headless browser and extract all places automatically.
+                    </p>
+                    <div class="flex gap-2">
+                        <input type="text" @bind="_sharedListUrl" placeholder="https://maps.app.goo.gl/... or https://www.google.com/maps/..."
+                               class="flex-1 px-3 py-2 rounded-lg bg-surface-container-highest border-0 text-on-surface placeholder:text-outline text-sm focus:ring-2 focus:ring-primary focus:bg-white transition-colors" />
+                        <button class="px-4 py-2 rounded-lg bg-gradient-to-r from-primary to-primary-container text-white text-sm font-medium hover:shadow-lg transition-all flex items-center gap-2 flex-shrink-0"
+                                @onclick="ScrapeSharedList"
+                                disabled="@(_isScraping || string.IsNullOrWhiteSpace(_sharedListUrl))">
+                            @if (_isScraping)
+                            {
+                                <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                <span>Scraping...</span>
+                            }
+                            else
+                            {
+                                <span class="material-symbols-outlined text-base">download</span>
+                                <span>Import</span>
+                            }
+                        </button>
+                    </div>
+                    @if (_scrapeProgress > 0 && _isScraping)
+                    {
+                        <p class="text-xs text-on-surface-variant mt-2">
+                            <span class="material-symbols-outlined text-xs align-middle">hourglass_top</span>
+                            Scrolling list... @_scrapeProgress places found so far
+                        </p>
+                    }
+                </div>
+            }
+            else if (_activeCard == "file")
+            {
+                <div class="mb-4 p-4 rounded-lg bg-primary/5">
+                    <p class="text-sm text-on-surface-variant">
+                        Upload any geo file: <strong>GPX</strong> (from browser extensions), <strong>KML/KMZ</strong> (from Google My Maps → Export to KML), <strong>GeoJSON</strong>, or <strong>CSV</strong> (must contain lat/lon columns).
+                    </p>
+                </div>
+            }
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="block text-sm font-medium text-on-surface-variant mb-1">Collection Name</label>
+                    <input type="text" @bind="_collectionName" placeholder="e.g., Poland Top Places"
+                           class="w-full px-3 py-2 rounded-lg bg-surface-container-highest border-0 text-on-surface placeholder:text-outline focus:ring-2 focus:ring-primary focus:bg-white transition-colors" />
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-on-surface-variant mb-1">Color</label>
+                    <div class="flex gap-2">
+                        @foreach (var color in _availableColors)
+                        {
+                            <button class="w-8 h-8 rounded-full transition-transform @(color == _selectedColor ? "ring-2 ring-offset-2 ring-primary scale-110" : "hover:scale-110")"
+                                    style="background-color: @color"
+                                    @onclick="() => _selectedColor = color">
+                            </button>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <div class="border-2 border-dashed border-outline-variant rounded-xl p-8 text-center hover:border-primary hover:bg-primary/5 transition-colors">
+                <span class="material-symbols-outlined text-4xl text-on-surface-variant mb-2 block">cloud_upload</span>
+                <p class="text-on-surface-variant mb-2">Drag and drop a file here, or click to browse</p>
+                <p class="text-sm text-outline">@_acceptDescription</p>
+                <InputFile OnChange="HandleFileSelected" accept="@_acceptExtensions"
+                           class="mt-3" />
+            </div>
+
+            @if (_isImporting)
+            {
+                <div class="mt-4 flex items-center gap-3 text-primary">
+                    <div class="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                    <span>Importing @_importingFileName...</span>
+                </div>
+            }
+
+            @if (_importResult != null)
+            {
+                <div class="mt-4 p-4 rounded-lg @(_importResult.AddedCount > 0 ? "bg-secondary/10 text-secondary" : "bg-surface-container")">
+                    <div class="flex items-center gap-2">
+                        <span class="material-symbols-outlined">check_circle</span>
+                        <span class="font-medium">Import complete</span>
+                    </div>
+                    <p class="text-sm mt-1">
+                        @_importResult.TotalParsed parsed &bull;
+                        @_importResult.AddedCount new POIs added &bull;
+                        @_importResult.SkippedCount duplicates linked
+                    </p>
+                </div>
+            }
+
+            @if (_importError != null)
+            {
+                <div class="mt-4 p-4 rounded-lg bg-tertiary/10 text-tertiary">
+                    <div class="flex items-center gap-2">
+                        <span class="material-symbols-outlined">error</span>
+                        <span class="font-medium">Import failed</span>
+                    </div>
+                    <p class="text-sm mt-1">@_importError</p>
+                </div>
+            }
+        </div>
+    }
+
+    @* Managed Sources Table *@
+    <div>
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-bold font-headline">Managed Sources</h3>
+            <span class="text-sm text-on-surface-variant">@_collections.Count dataset(s)</span>
+        </div>
+
+        @if (_collections.Count == 0)
+        {
+            <div class="bg-surface-container-low rounded-xl p-8 text-center text-on-surface-variant">
+                <span class="material-symbols-outlined text-4xl mb-2 block">folder_open</span>
+                <p>No datasets imported yet. Use the import cards above to get started.</p>
+            </div>
+        }
+        else
+        {
+            <div class="bg-surface-container-low rounded-xl overflow-hidden">
+                <table class="w-full">
+                    <thead>
+                        <tr class="text-left text-sm text-on-surface-variant">
+                            <th class="px-4 py-3 font-medium">Dataset Name</th>
+                            <th class="px-4 py-3 font-medium">Source</th>
+                            <th class="px-4 py-3 font-medium text-right">Points</th>
+                            <th class="px-4 py-3 font-medium">Date</th>
+                            <th class="px-4 py-3 font-medium text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var col in _collections)
+                        {
+                            <tr class="hover:bg-surface-container transition-colors">
+                                <td class="px-4 py-3">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-3 h-3 rounded-full" style="background-color: @col.Color"></div>
+                                        <span class="font-medium">@col.Name</span>
+                                    </div>
+                                </td>
+                                <td class="px-4 py-3 text-sm text-on-surface-variant">@(col.SourceType ?? "manual")</td>
+                                <td class="px-4 py-3 text-sm text-right">@col.PoiCount.ToString("N0")</td>
+                                <td class="px-4 py-3 text-sm text-on-surface-variant">@col.CreatedDate.ToString("MMM dd, yyyy")</td>
+                                <td class="px-4 py-3 text-right">
+                                    <button class="text-tertiary hover:bg-tertiary/10 p-1 rounded-lg transition-colors"
+                                            @onclick="() => DeleteCollection(col.Id)">
+                                        <span class="material-symbols-outlined text-sm">delete</span>
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<PoiCollection> _collections = new();
+    private bool _showUpload = false;
+    private string _activeCard = "file";
+    private string _collectionName = string.Empty;
+    private string _selectedColor = "#005bbf";
+    private bool _isImporting = false;
+    private string? _importingFileName;
+    private ImportResult? _importResult;
+    private string? _importError;
+    private string _sharedListUrl = string.Empty;
+    private bool _isScraping = false;
+    private int _scrapeProgress = 0;
+
+    private string _uploadTitle => _activeCard switch
+    {
+        "takeout" => "Import from Google Takeout",
+        "shared" => "Import Shared Google Maps List",
+        _ => "Import File"
+    };
+
+    private string _acceptExtensions => _activeCard switch
+    {
+        "takeout" => ".geojson,.json",
+        "shared" => ".gpx",
+        _ => ".gpx,.kml,.kmz,.geojson,.json,.csv"
+    };
+
+    private string _acceptDescription => _activeCard switch
+    {
+        "takeout" => "Upload Saved Places.json from Google Takeout export",
+        "shared" => "Upload GPX file from the Firefox extension",
+        _ => "Supports GPX, KML, KMZ, GeoJSON, CSV"
+    };
+
+    private readonly string[] _availableColors = new[]
+    {
+        "#005bbf", "#006e2c", "#b81d17", "#7c3aed", "#ca8a04", "#0891b2", "#be185d", "#4b5563"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCollections();
+    }
+
+    private async Task LoadCollections()
+    {
+        _collections = await PoiService.GetCollectionsAsync();
+    }
+
+    private void ShowUpload(string card)
+    {
+        _activeCard = card;
+        _showUpload = true;
+        _importResult = null;
+        _importError = null;
+    }
+
+    private void CloseUpload()
+    {
+        _showUpload = false;
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file == null) return;
+
+        if (string.IsNullOrWhiteSpace(_collectionName))
+        {
+            _collectionName = Path.GetFileNameWithoutExtension(file.Name);
+        }
+
+        _isImporting = true;
+        _importingFileName = file.Name;
+        _importResult = null;
+        _importError = null;
+        StateHasChanged();
+
+        try
+        {
+            using var stream = file.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024); // 50MB max
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            ms.Position = 0;
+
+            _importResult = await ImportOrchestrator.ImportAsync(ms, file.Name, _collectionName, _selectedColor);
+            await LoadCollections();
+            _collectionName = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _importError = ex.Message;
+        }
+        finally
+        {
+            _isImporting = false;
+        }
+    }
+
+    private async Task ScrapeSharedList()
+    {
+        if (string.IsNullOrWhiteSpace(_sharedListUrl)) return;
+
+        _isScraping = true;
+        _scrapeProgress = 0;
+        _importResult = null;
+        _importError = null;
+        StateHasChanged();
+
+        try
+        {
+            var pois = await Scraper.ScrapeAsync(_sharedListUrl, count =>
+            {
+                _scrapeProgress = count;
+                InvokeAsync(StateHasChanged);
+            });
+
+            if (!pois.Any())
+            {
+                _importError = "No places found. Make sure the URL is a valid Google Maps list.";
+                return;
+            }
+
+            var name = string.IsNullOrWhiteSpace(_collectionName)
+                ? $"Shared List ({pois.Count} places)"
+                : _collectionName;
+
+            _importResult = await ImportOrchestrator.ImportFromScrapedAsync(pois, name, _selectedColor);
+            await LoadCollections();
+            _collectionName = string.Empty;
+            _sharedListUrl = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _importError = $"Scraping failed: {ex.Message}";
+        }
+        finally
+        {
+            _isScraping = false;
+        }
+    }
+
+    private async Task DeleteCollection(int id)
+    {
+        await PoiService.DeleteCollectionAsync(id);
+        await LoadCollections();
+    }
+}

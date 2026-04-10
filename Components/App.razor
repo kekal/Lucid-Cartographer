@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="LucidCartographer.styles.css" />
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary': '#005bbf',
+                        'primary-container': '#1a73e8',
+                        'secondary': '#006e2c',
+                        'secondary-container': '#86f898',
+                        'tertiary': '#b81d17',
+                        'surface': '#f7f9ff',
+                        'surface-container-low': '#f1f4fa',
+                        'surface-container': '#ebeef4',
+                        'surface-container-high': '#e5e8ee',
+                        'surface-container-highest': '#dfe3e8',
+                        'on-surface': '#181c20',
+                        'on-surface-variant': '#414754',
+                        'outline': '#727785',
+                        'outline-variant': '#c1c6d6',
+                    },
+                    fontFamily: {
+                        'headline': ['Manrope', 'sans-serif'],
+                        'body': ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <HeadOutlet />
+</head>
+<body class="font-body text-on-surface bg-surface">
+    <Routes />
+    <script src="js/leafletInterop.js"></script>
+    <script src="_framework/blazor.web.js"></script>
+    <script>
+        function downloadFile(filename, contentType, base64Data) {
+            var link = document.createElement('a');
+            link.download = filename;
+            link.href = 'data:' + contentType + ';base64,' + base64Data;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    </script>
+</body>
+</html>
