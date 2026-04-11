@@ -41,17 +41,24 @@
                     }
                 </div>
 
-                <div>
-                    <label class="block text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-1.5">Source Dataset B</label>
+                <div class="@(_isDedupMode ? "opacity-40 pointer-events-none" : "")">
+                    <label class="block text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-1.5">
+                        Source Dataset B
+                        @if (_isDedupMode)
+                        {
+                            <span class="text-outline normal-case tracking-normal"> — not used for Dedup</span>
+                        }
+                    </label>
                     <select @bind="_collectionBId"
-                            class="w-full px-3 py-2 rounded-lg bg-surface-container-highest border-0 text-on-surface text-sm focus:ring-2 focus:ring-primary">
+                            disabled="@_isDedupMode"
+                            class="w-full px-3 py-2 rounded-lg bg-surface-container-highest border-0 text-on-surface text-sm focus:ring-2 focus:ring-primary disabled:cursor-not-allowed">
                         <option value="0">Select collection...</option>
                         @foreach (var col in _collections)
                         {
                             <option value="@col.Id">@col.Name (@col.PoiCount pts)</option>
                         }
                     </select>
-                    @if (_collectionBId > 0)
+                    @if (_collectionBId > 0 && !_isDedupMode)
                     {
                         <p class="text-xs text-on-surface-variant mt-1">
                             <span class="material-symbols-outlined text-xs align-middle">check_circle</span>
@@ -70,25 +77,25 @@
             </h3>
             <div class="grid grid-cols-2 gap-3">
                 <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(_activeOp == SetOperation.Subtract ? "ring-2 ring-primary" : "")"
-                        @onclick="() => RunOperation(SetOperation.Subtract)"
-                        disabled="@(!CanRunBinaryOp)">
-                    <span class="material-symbols-outlined text-2xl @(CanRunBinaryOp ? "text-tertiary" : "text-outline")">remove_circle</span>
+                        @onclick="() => HandleBinaryOpClick(SetOperation.Subtract)"
+                        disabled="@(_collectionAId == 0)">
+                    <span class="material-symbols-outlined text-2xl @(_collectionAId > 0 ? "text-tertiary" : "text-outline")">remove_circle</span>
                     <span class="text-xs font-medium">A − B</span>
                     <span class="text-[10px] text-on-surface-variant">Difference</span>
                 </button>
 
                 <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(_activeOp == SetOperation.Intersect ? "ring-2 ring-primary" : "")"
-                        @onclick="() => RunOperation(SetOperation.Intersect)"
-                        disabled="@(!CanRunBinaryOp)">
-                    <span class="material-symbols-outlined text-2xl @(CanRunBinaryOp ? "text-secondary" : "text-outline")">join_inner</span>
+                        @onclick="() => HandleBinaryOpClick(SetOperation.Intersect)"
+                        disabled="@(_collectionAId == 0)">
+                    <span class="material-symbols-outlined text-2xl @(_collectionAId > 0 ? "text-secondary" : "text-outline")">join_inner</span>
                     <span class="text-xs font-medium">A ∩ B</span>
                     <span class="text-[10px] text-on-surface-variant">Intersection</span>
                 </button>
 
                 <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(_activeOp == SetOperation.Union ? "ring-2 ring-primary" : "")"
-                        @onclick="() => RunOperation(SetOperation.Union)"
-                        disabled="@(!CanRunBinaryOp)">
-                    <span class="material-symbols-outlined text-2xl @(CanRunBinaryOp ? "text-primary" : "text-outline")">join_full</span>
+                        @onclick="() => HandleBinaryOpClick(SetOperation.Union)"
+                        disabled="@(_collectionAId == 0)">
+                    <span class="material-symbols-outlined text-2xl @(_collectionAId > 0 ? "text-primary" : "text-outline")">join_full</span>
                     <span class="text-xs font-medium">A ∪ B</span>
                     <span class="text-[10px] text-on-surface-variant">Union</span>
                 </button>
@@ -269,6 +276,7 @@
     private bool _showCommitDialog;
     private string _commitName = string.Empty;
     private string? _commitSuccess;
+    private bool _isDedupMode = false;
 
     private bool CanRunBinaryOp => _collectionAId > 0 && _collectionBId > 0;
 
@@ -277,8 +285,19 @@
         _collections = await PoiService.GetCollectionsAsync();
     }
 
+    private async Task HandleBinaryOpClick(SetOperation operation)
+    {
+        _isDedupMode = false;
+        if (_collectionBId > 0)
+        {
+            await RunOperation(operation);
+        }
+    }
+
     private async Task RunOperation(SetOperation operation)
     {
+        _isDedupMode = operation == SetOperation.Dedup;
+
         _activeOp = operation;
         _isProcessing = true;
         _result = null;
