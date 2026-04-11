@@ -69,7 +69,7 @@ public class GoogleMapsListScraper
             foreach (var sel in consentSelectors)
             {
                 var btn = page.Locator(sel).First;
-                if (await btn.IsVisibleAsync(new LocatorIsVisibleOptions { Timeout = 1000 }))
+                if (await btn.IsVisibleAsync())
                 {
                     _logger.LogInformation("Clicking consent button: {Selector}", sel);
                     await btn.ClickAsync();
@@ -107,7 +107,7 @@ public class GoogleMapsListScraper
             foreach (var sel in titleSelectors)
             {
                 var titleEl = page.Locator(sel).First;
-                if (await titleEl.IsVisibleAsync(new LocatorIsVisibleOptions { Timeout = 1000 }))
+                if (await titleEl.IsVisibleAsync())
                 {
                     listName = (await titleEl.InnerTextAsync()).Trim();
                     if (!string.IsNullOrEmpty(listName) && listName.Length > 1)
@@ -125,7 +125,7 @@ public class GoogleMapsListScraper
         foreach (var sel in scrollSelectors)
         {
             var loc = page.Locator(sel).First;
-            if (await loc.IsVisibleAsync(new LocatorIsVisibleOptions { Timeout = 2000 }))
+            if (await loc.IsVisibleAsync())
             {
                 scrollContainer = loc;
                 _logger.LogInformation("Found scroll container: {Selector}", sel);
@@ -253,7 +253,7 @@ public class GoogleMapsListScraper
                 try
                 {
                     var ratingEl = item.Locator("span.MW4etd").First;
-                    if (await ratingEl.IsVisibleAsync(new LocatorIsVisibleOptions { Timeout = 300 }))
+                    if (await ratingEl.IsVisibleAsync())
                     {
                         var ratingText = await ratingEl.InnerTextAsync();
                         if (double.TryParse(ratingText.Trim().Replace(',', '.'), System.Globalization.CultureInfo.InvariantCulture, out var r))
@@ -267,7 +267,7 @@ public class GoogleMapsListScraper
                 try
                 {
                     var reviewEl = item.Locator("span.UY7F9").First;
-                    if (await reviewEl.IsVisibleAsync(new LocatorIsVisibleOptions { Timeout = 300 }))
+                    if (await reviewEl.IsVisibleAsync())
                     {
                         var reviewText = await reviewEl.InnerTextAsync();
                         reviewText = new string(reviewText.Where(c => char.IsDigit(c)).ToArray());
@@ -309,7 +309,7 @@ public class GoogleMapsListScraper
                 try
                 {
                     var imgEl = item.Locator("img").First;
-                    if (await imgEl.IsVisibleAsync(new LocatorIsVisibleOptions { Timeout = 300 }))
+                    if (await imgEl.IsVisibleAsync())
                         imageUrl = await imgEl.GetAttributeAsync("src");
                 }
                 catch { }
@@ -335,7 +335,7 @@ public class GoogleMapsListScraper
                     try
                     {
                         var dirBtn = page.Locator("a[data-value='Directions'], button[data-tooltip='Directions']").First;
-                        if (await dirBtn.IsVisibleAsync(new LocatorIsVisibleOptions { Timeout = 1000 }))
+                        if (await dirBtn.IsVisibleAsync())
                         {
                             var dirHref = await dirBtn.GetAttributeAsync("href");
                             if (dirHref != null)
@@ -353,7 +353,7 @@ public class GoogleMapsListScraper
                 try
                 {
                     var addrEl = page.Locator("button[data-item-id='address'] .fontBodyMedium, div[data-item-id='address']").First;
-                    if (await addrEl.IsVisibleAsync(new LocatorIsVisibleOptions { Timeout = 1000 }))
+                    if (await addrEl.IsVisibleAsync())
                         address = (await addrEl.InnerTextAsync()).Trim();
                 }
                 catch { }
@@ -363,7 +363,7 @@ public class GoogleMapsListScraper
                 try
                 {
                     var webEl = page.Locator("a[data-item-id='authority'] .fontBodyMedium, a[data-item-id='authority']").First;
-                    if (await webEl.IsVisibleAsync(new LocatorIsVisibleOptions { Timeout = 500 }))
+                    if (await webEl.IsVisibleAsync())
                         website = await webEl.GetAttributeAsync("href") ?? (await webEl.InnerTextAsync()).Trim();
                 }
                 catch { }
@@ -373,7 +373,7 @@ public class GoogleMapsListScraper
                 try
                 {
                     var phoneEl = page.Locator("button[data-item-id*='phone'] .fontBodyMedium").First;
-                    if (await phoneEl.IsVisibleAsync(new LocatorIsVisibleOptions { Timeout = 500 }))
+                    if (await phoneEl.IsVisibleAsync())
                         phone = (await phoneEl.InnerTextAsync()).Trim();
                 }
                 catch { }
