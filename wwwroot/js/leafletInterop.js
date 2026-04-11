@@ -54,7 +54,7 @@ window.leafletInterop = {
 
             marker.on('click', function () {
                 if (self.dotnetRef) {
-                    self.dotnetRef.invokeMethodAsync('OnMarkerClicked', poi.id);
+                    self.dotnetRef.invokeMethodAsync('OnMarkerClickedJs', poi.id);
                 }
             });
 

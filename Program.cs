@@ -28,6 +28,7 @@ builder.Services.AddScoped<GpxExporter>();
 builder.Services.AddScoped<PoiMatcher>();
 builder.Services.AddScoped<SetOperationService>();
 builder.Services.AddScoped<GoogleMapsListScraper>();
+builder.Services.AddScoped<IMapService, LeafletMapService>();
 
 var app = builder.Build();
 

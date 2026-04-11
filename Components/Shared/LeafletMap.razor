@@ -1,6 +1,7 @@
 @using LucidCartographer.Data.Entities
-@inject IJSRuntime JS
-@implements IAsyncDisposable
+@using LucidCartographer.Services
+@inject IMapService MapService
+@implements IDisposable
 
 <div id="@_mapElementId" style="width:100%;height:100%;"></div>
 
@@ -8,15 +9,14 @@
     [Parameter] public EventCallback<int> OnMarkerSelected { get; set; }
 
     private string _mapElementId = "leaflet-map";
-    private DotNetObjectReference<LeafletMap>? _dotnetRef;
     private bool _initialized = false;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
-            _dotnetRef = DotNetObjectReference.Create(this);
-            await JS.InvokeVoidAsync("leafletInterop.initMap", _mapElementId, _dotnetRef);
+            MapService.OnMarkerClicked += HandleMarkerClicked;
+            await MapService.InitMapAsync(_mapElementId);
             _initialized = true;
         }
     }
@@ -24,55 +24,46 @@
     public async Task ShowCollectionAsync(int collectionId, List<Poi> pois, string color)
     {
         if (!_initialized) return;
-        var dtos = pois.Select(p => new {
-            id = p.Id,
-            name = p.Name,
-            latitude = p.Latitude,
-            longitude = p.Longitude,
-            address = p.Address,
-            googleMapsUrl = p.GoogleMapsUrl
-        }).ToArray();
-        await JS.InvokeVoidAsync("leafletInterop.addCollectionMarkers", collectionId, dtos, color);
+        await MapService.ShowCollectionAsync(collectionId, pois, color);
     }
 
     public async Task HideCollectionAsync(int collectionId)
     {
         if (!_initialized) return;
-        await JS.InvokeVoidAsync("leafletInterop.removeCollectionMarkers", collectionId);
+        await MapService.HideCollectionAsync(collectionId);
     }
 
     public async Task FocusOnPoiAsync(double lat, double lon, int zoom = 16)
     {
         if (!_initialized) return;
-        await JS.InvokeVoidAsync("leafletInterop.focusOnPoi", lat, lon, zoom);
+        await MapService.FocusOnPoiAsync(lat, lon, zoom);
     }
 
     public async Task FitBoundsAsync()
     {
         if (!_initialized) return;
-        await JS.InvokeVoidAsync("leafletInterop.fitBounds");
+        await MapService.FitBoundsAsync();
     }
 
     public async Task InvalidateSizeAsync()
     {
         if (!_initialized) return;
-        await JS.InvokeVoidAsync("leafletInterop.invalidateSize");
+        await MapService.InvalidateSizeAsync();
     }
 
     public async Task HighlightMarkerAsync(int poiId)
     {
         if (!_initialized) return;
-        await JS.InvokeVoidAsync("leafletInterop.highlightMarker", poiId);
+        await MapService.HighlightMarkerAsync(poiId);
     }
 
-    [JSInvokable]
-    public async Task OnMarkerClicked(int poiId)
+    private async void HandleMarkerClicked(int poiId)
     {
-        await OnMarkerSelected.InvokeAsync(poiId);
+        await InvokeAsync(async () => await OnMarkerSelected.InvokeAsync(poiId));
     }
 
-    public async ValueTask DisposeAsync()
+    public void Dispose()
     {
-        _dotnetRef?.Dispose();
+        MapService.OnMarkerClicked -= HandleMarkerClicked;
     }
 }
