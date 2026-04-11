@@ -380,13 +380,6 @@ public class GoogleMapsListScraper
 
                 if (coords != null)
                 {
-                    // Build rich description
-                    var descParts = new List<string>();
-                    if (!string.IsNullOrEmpty(description)) descParts.Add(description);
-                    if (!string.IsNullOrEmpty(website)) descParts.Add($"Website: {website}");
-                    if (!string.IsNullOrEmpty(phone)) descParts.Add($"Phone: {phone}");
-                    if (reviewCount.HasValue) descParts.Add($"Reviews: {reviewCount.Value}");
-
                     results.Add(new ImportedPoi(
                         Name: name,
                         Latitude: coords.Value.lat,
@@ -394,7 +387,7 @@ public class GoogleMapsListScraper
                         GoogleMapsUrl: currentUrl,
                         Address: address,
                         Category: category,
-                        Description: descParts.Any() ? string.Join(" | ", descParts) : null,
+                        Description: description,
                         Rating: rating,
                         ReviewCount: reviewCount,
                         Website: website,

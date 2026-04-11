@@ -14,14 +14,25 @@
 
         @* Content *@
         <div class="flex-1 overflow-y-auto px-4 pb-4">
+            @* Image *@
+            @if (!string.IsNullOrEmpty(Poi.ImageUrl))
+            {
+                <div class="mb-3 rounded-lg overflow-hidden">
+                    <img src="@Poi.ImageUrl" alt="@Poi.Name" class="w-full h-40 object-cover" />
+                </div>
+            }
+
             @* Name & Address *@
             <h4 class="text-lg font-bold font-headline mb-1">@Poi.Name</h4>
             @if (!string.IsNullOrEmpty(Poi.Address))
             {
-                <p class="text-sm text-on-surface-variant mb-3">@Poi.Address</p>
+                <p class="text-sm text-on-surface-variant mb-3 flex items-start gap-1.5">
+                    <span class="material-symbols-outlined text-sm mt-0.5 flex-shrink-0">location_on</span>
+                    @Poi.Address
+                </p>
             }
 
-            @* Status & Category *@
+            @* Status & Category chips *@
             <div class="flex flex-wrap gap-2 mb-4">
                 @if (!string.IsNullOrEmpty(Poi.Status))
                 {
@@ -40,16 +51,61 @@
                 }
             </div>
 
-            @* Rating *@
-            @if (Poi.Rating.HasValue)
+            @* Google Rating + Reviews *@
+            @if (Poi.GoogleRating.HasValue)
             {
                 <div class="flex items-center gap-2 mb-4">
-                    <span class="text-sm font-medium">Rating</span>
+                    <span class="text-lg font-bold text-on-surface">@Poi.GoogleRating.Value.ToString("F1")</span>
                     <div class="flex gap-0.5">
                         @for (int i = 1; i <= 5; i++)
                         {
                             var starIndex = i;
-                            <span class="material-symbols-outlined text-base @(starIndex <= Poi.Rating.Value ? "text-yellow-500" : "text-surface-container-highest")"
+                            var filled = starIndex <= Math.Round(Poi.GoogleRating.Value);
+                            <span class="material-symbols-outlined text-base @(filled ? "text-yellow-500" : "text-surface-container-highest")"
+                                  style="font-variation-settings: 'FILL' @(filled ? 1 : 0)">
+                                star
+                            </span>
+                        }
+                    </div>
+                    @if (Poi.ReviewCount.HasValue)
+                    {
+                        <span class="text-xs text-on-surface-variant">(@Poi.ReviewCount.Value.ToString("N0") reviews)</span>
+                    }
+                </div>
+            }
+
+            @* Contact info *@
+            @if (!string.IsNullOrEmpty(Poi.Website) || !string.IsNullOrEmpty(Poi.Phone))
+            {
+                <div class="space-y-2 mb-4">
+                    @if (!string.IsNullOrEmpty(Poi.Website))
+                    {
+                        <a href="@Poi.Website" target="_blank" rel="noopener"
+                           class="flex items-center gap-2 text-sm text-primary hover:underline">
+                            <span class="material-symbols-outlined text-base">language</span>
+                            @TruncateUrl(Poi.Website)
+                        </a>
+                    }
+                    @if (!string.IsNullOrEmpty(Poi.Phone))
+                    {
+                        <div class="flex items-center gap-2 text-sm text-on-surface">
+                            <span class="material-symbols-outlined text-base text-on-surface-variant">phone</span>
+                            @Poi.Phone
+                        </div>
+                    }
+                </div>
+            }
+
+            @* Personal Rating *@
+            @if (Poi.Rating.HasValue)
+            {
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="text-xs text-on-surface-variant uppercase tracking-wider">Your rating</span>
+                    <div class="flex gap-0.5">
+                        @for (int i = 1; i <= 5; i++)
+                        {
+                            var starIndex = i;
+                            <span class="material-symbols-outlined text-base @(starIndex <= Poi.Rating.Value ? "text-primary" : "text-surface-container-highest")"
                                   style="font-variation-settings: 'FILL' @(starIndex <= Poi.Rating.Value ? 1 : 0)">
                                 star
                             </span>
@@ -112,4 +168,10 @@
 @code {
     [Parameter] public Poi? Poi { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
+
+    private static string TruncateUrl(string url)
+    {
+        url = url.Replace("https://", "").Replace("http://", "").TrimEnd('/');
+        return url.Length > 35 ? url[..35] + "..." : url;
+    }
 }

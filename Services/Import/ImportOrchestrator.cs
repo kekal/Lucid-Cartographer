@@ -106,7 +106,11 @@ public class ImportOrchestrator
                     Address = imported.Address,
                     Category = imported.Category,
                     Notes = imported.Description,
-                    Rating = imported.Rating.HasValue ? (int)Math.Round(imported.Rating.Value) : null,
+                    GoogleRating = imported.Rating,
+                    ReviewCount = imported.ReviewCount,
+                    Website = imported.Website,
+                    Phone = imported.Phone,
+                    ImageUrl = imported.ImageUrl,
                     Status = "imported",
                     AddedDate = DateTime.UtcNow
                 };
@@ -199,7 +203,11 @@ public class ImportOrchestrator
                     Address = imported.Address,
                     Category = imported.Category,
                     Notes = imported.Description,
-                    Rating = imported.Rating.HasValue ? (int)Math.Round(imported.Rating.Value) : null,
+                    GoogleRating = imported.Rating,
+                    ReviewCount = imported.ReviewCount,
+                    Website = imported.Website,
+                    Phone = imported.Phone,
+                    ImageUrl = imported.ImageUrl,
                     Status = "imported",
                     AddedDate = DateTime.UtcNow
                 };
