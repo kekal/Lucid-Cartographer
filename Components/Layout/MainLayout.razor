@@ -1,5 +1,4 @@
 @inherits LayoutComponentBase
-@inject NavigationManager Navigation
 
 <div class="h-screen flex flex-col overflow-hidden">
     @* Top Header *@
@@ -28,13 +27,11 @@
             </nav>
         </div>
         <div class="flex items-center gap-3">
-            <div class="relative">
+            <form action="/" method="get" class="relative">
                 <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-base">search</span>
-                <input type="text" placeholder="Search POIs..."
-                       @bind="_searchQuery" @bind:event="oninput"
-                       @onkeydown="HandleSearchKeydown"
+                <input type="text" name="search" placeholder="Search POIs..."
                        class="pl-9 pr-4 py-1.5 rounded-full bg-surface-container-low text-sm text-on-surface placeholder:text-outline focus:ring-2 focus:ring-primary focus:bg-white transition-colors w-48 focus:w-64" />
-            </div>
+            </form>
             <button class="p-2 rounded-full hover:bg-surface-container-low transition-colors">
                 <span class="material-symbols-outlined text-on-surface-variant">settings</span>
             </button>
@@ -46,15 +43,3 @@
         @Body
     </main>
 </div>
-
-@code {
-    private string _searchQuery = string.Empty;
-
-    private void HandleSearchKeydown(KeyboardEventArgs e)
-    {
-        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(_searchQuery))
-        {
-            Navigation.NavigateTo($"/?search={Uri.EscapeDataString(_searchQuery)}");
-        }
-    }
-}
