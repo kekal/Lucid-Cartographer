@@ -26,8 +26,8 @@ builder.Services.AddScoped<IImportOrchestrator, ImportOrchestrator>();
 builder.Services.AddSingleton<IFileExporter, KmlExporter>();
 builder.Services.AddSingleton<IFileExporter, GpxExporter>();
 builder.Services.AddSingleton<KmlExporter>();
-builder.Services.AddScoped<PoiMatcher>();
-builder.Services.AddScoped<SetOperationService>();
+builder.Services.AddScoped<IPoiMatcher, PoiMatcher>();
+builder.Services.AddScoped<ISetOperationService, SetOperationService>();
 builder.Services.AddScoped<IGoogleMapsListScraper, GoogleMapsListScraper>();
 builder.Services.AddScoped<IMapService, LeafletMapService>();
 
