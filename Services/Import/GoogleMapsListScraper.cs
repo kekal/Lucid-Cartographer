@@ -8,7 +8,7 @@ public class ScrapeResult
     public List<ImportedPoi> Pois { get; set; } = new();
 }
 
-public class GoogleMapsListScraper
+public class GoogleMapsListScraper : IGoogleMapsListScraper
 {
     private readonly ILogger<GoogleMapsListScraper> _logger;
 
