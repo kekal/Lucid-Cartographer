@@ -65,6 +65,10 @@
                             @_collections.FirstOrDefault(c => c.Id == _collectionBId)?.PoiCount data points loaded
                         </p>
                     }
+                    @if (_selectBHint != null)
+                    {
+                        <p class="text-xs text-tertiary mt-1 font-medium">@_selectBHint</p>
+                    }
                 </div>
             </div>
         </div>
@@ -285,12 +289,20 @@
         _collections = await PoiService.GetCollectionsAsync();
     }
 
+    private string? _selectBHint;
+
     private async Task HandleBinaryOpClick(SetOperation operation)
     {
         _isDedupMode = false;
+        _selectBHint = null;
         if (_collectionBId > 0)
         {
             await RunOperation(operation);
+        }
+        else
+        {
+            _selectBHint = "Select Source B first";
+            StateHasChanged();
         }
     }
 
