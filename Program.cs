@@ -17,7 +17,7 @@ var dbPath = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Pr
     : "data/cartographer.db";
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
     options.UseSqlite($"Data Source={dbPath}"));
-builder.Services.AddScoped<PoiService>();
+builder.Services.AddScoped<IPoiService, PoiService>();
 builder.Services.AddScoped<IFileImporter, GpxImporter>();
 builder.Services.AddScoped<IFileImporter, KmlImporter>();
 builder.Services.AddScoped<IFileImporter, GeoJsonImporter>();
