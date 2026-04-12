@@ -11,6 +11,17 @@
 
 <PageTitle>Operations - Lucid Cartographer</PageTitle>
 
+@if (_isLoading)
+{
+    <div class="flex items-center justify-center h-full">
+        <div class="text-center">
+            <div class="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+            <p class="text-on-surface-variant">Loading collections...</p>
+        </div>
+    </div>
+}
+else
+{
 <div class="flex h-full">
     @* Left Panel — Operation Config *@
     <div class="w-80 flex-shrink-0 bg-surface-container-low p-6 flex flex-col gap-6 overflow-y-auto">
@@ -81,33 +92,37 @@
             </h3>
             <div class="grid grid-cols-2 gap-3">
                 <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(_activeOp == SetOperation.Subtract ? "ring-2 ring-primary" : "")"
+                        aria-label="Subtract: A minus B (Difference)"
                         @onclick="() => HandleBinaryOpClick(SetOperation.Subtract)"
                         disabled="@(_collectionAId == 0)">
-                    <span class="material-symbols-outlined text-2xl @(_collectionAId > 0 ? "text-tertiary" : "text-outline")">remove_circle</span>
+                    <span class="material-symbols-outlined text-2xl @(_collectionAId > 0 ? "text-tertiary" : "text-outline")" aria-hidden="true">remove_circle</span>
                     <span class="text-xs font-medium">A − B</span>
                     <span class="text-[10px] text-on-surface-variant">Difference</span>
                 </button>
 
                 <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(_activeOp == SetOperation.Intersect ? "ring-2 ring-primary" : "")"
+                        aria-label="Intersect: A intersect B"
                         @onclick="() => HandleBinaryOpClick(SetOperation.Intersect)"
                         disabled="@(_collectionAId == 0)">
-                    <span class="material-symbols-outlined text-2xl @(_collectionAId > 0 ? "text-secondary" : "text-outline")">join_inner</span>
+                    <span class="material-symbols-outlined text-2xl @(_collectionAId > 0 ? "text-secondary" : "text-outline")" aria-hidden="true">join_inner</span>
                     <span class="text-xs font-medium">A ∩ B</span>
                     <span class="text-[10px] text-on-surface-variant">Intersection</span>
                 </button>
 
                 <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(_activeOp == SetOperation.Union ? "ring-2 ring-primary" : "")"
+                        aria-label="Union: A union B"
                         @onclick="() => HandleBinaryOpClick(SetOperation.Union)"
                         disabled="@(_collectionAId == 0)">
-                    <span class="material-symbols-outlined text-2xl @(_collectionAId > 0 ? "text-primary" : "text-outline")">join_full</span>
+                    <span class="material-symbols-outlined text-2xl @(_collectionAId > 0 ? "text-primary" : "text-outline")" aria-hidden="true">join_full</span>
                     <span class="text-xs font-medium">A ∪ B</span>
                     <span class="text-[10px] text-on-surface-variant">Union</span>
                 </button>
 
                 <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(_activeOp == SetOperation.Dedup ? "ring-2 ring-primary" : "")"
+                        aria-label="Deduplicate collection A"
                         @onclick="() => RunOperation(SetOperation.Dedup)"
                         disabled="@(_collectionAId == 0)">
-                    <span class="material-symbols-outlined text-2xl @(_collectionAId > 0 ? "text-primary-container" : "text-outline")">filter_alt</span>
+                    <span class="material-symbols-outlined text-2xl @(_collectionAId > 0 ? "text-primary-container" : "text-outline")" aria-hidden="true">filter_alt</span>
                     <span class="text-xs font-medium">Dedup</span>
                     <span class="text-[10px] text-on-surface-variant">Deduplicate</span>
                 </button>
@@ -120,6 +135,7 @@
                 Spatial Tolerance: @_toleranceMeters.ToString("F0")m
             </label>
             <input type="range" min="10" max="500" step="10" @bind="_toleranceMeters" @bind:event="oninput"
+                   id="tolerance-slider" aria-label="Spatial tolerance in meters"
                    class="w-full accent-primary" />
             <p class="text-[10px] text-on-surface-variant mt-1">
                 Adjusting tolerance merges proximate markers based on spatial logic.
@@ -211,11 +227,11 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var poi in _resultPois.Take(500))
+                        @foreach (var poi in _resultPois.Take(MaxResultDisplayRows))
                         {
-                            <tr class="hover:bg-surface-container-low transition-colors @(_discardedIds.Contains(poi.Id) ? "opacity-30 line-through" : "")">
+                            <tr @key="poi.Id" class="hover:bg-surface-container-low transition-colors @(_discardedIds.Contains(poi.Id) ? "opacity-30 line-through" : "")">
                                 <td class="px-4 py-2.5">
-                                    <div class="w-2.5 h-2.5 rounded-full bg-secondary"></div>
+                                    <div class="w-2.5 h-2.5 rounded-full bg-secondary" aria-hidden="true"></div>
                                 </td>
                                 <td class="px-4 py-2.5">
                                     <div class="font-medium">@poi.Name</div>
@@ -229,17 +245,20 @@
                                 </td>
                                 <td class="px-4 py-2.5 text-xs text-on-surface-variant">@poi.Id</td>
                                 <td class="px-4 py-2.5 text-right">
-                                    <a href="@(poi.GoogleMapsUrl ?? $"https://www.google.com/maps/search/?api=1&query={poi.Latitude},{poi.Longitude}")"
+                                    <a href="@GetGoogleMapsUrl(poi)"
                                        target="_blank" rel="noopener"
+                                       aria-label="@($"Open {poi.Name} in Google Maps")"
                                        class="text-primary hover:underline text-xs font-medium mr-3">Focus</a>
                                     @if (!_discardedIds.Contains(poi.Id))
                                     {
                                         <button class="text-tertiary hover:underline text-xs font-medium"
+                                                aria-label="@($"Discard {poi.Name}")"
                                                 @onclick="() => DiscardPoi(poi.Id)">Discard</button>
                                     }
                                     else
                                     {
                                         <button class="text-secondary hover:underline text-xs font-medium"
+                                                aria-label="@($"Restore {poi.Name}")"
                                                 @onclick="() => RestorePoi(poi.Id)">Restore</button>
                                     }
                                 </td>
@@ -247,10 +266,10 @@
                         }
                     </tbody>
                 </table>
-                @if (_resultPois.Count > 500)
+                @if (_resultPois.Count > MaxResultDisplayRows)
                 {
                     <div class="p-3 text-center text-xs text-on-surface-variant">
-                        Showing 500 of @_resultPois.Count results
+                        Showing @MaxResultDisplayRows of @_resultPois.Count results
                     </div>
                 }
             </div>
@@ -265,8 +284,12 @@
         }
     </div>
 </div>
+}
 
 @code {
+    // MED-01: Named constants for magic numbers
+    private const int MaxResultDisplayRows = 500;
+
     private List<PoiCollection> _collections = new();
     private int _collectionAId;
     private int _collectionBId;
@@ -276,17 +299,19 @@
     private List<Poi> _resultPois = new();
     private HashSet<int> _discardedIds = new();
     private bool _isProcessing;
+    private bool _isLoading = true;
 
     private bool _showCommitDialog;
     private string _commitName = string.Empty;
     private string? _commitSuccess;
     private bool _isDedupMode = false;
 
-    private bool CanRunBinaryOp => _collectionAId > 0 && _collectionBId > 0;
+    // MED-05: Removed unused CanRunBinaryOp property
 
     protected override async Task OnInitializedAsync()
     {
         _collections = await PoiService.GetCollectionsAsync();
+        _isLoading = false;
     }
 
     private string? _selectBHint;
@@ -373,7 +398,7 @@
         var fileName = $"export_{DateTime.Now:yyyyMMdd_HHmmss}.kml";
 
         // Trigger browser download via JS
-        await JS.InvokeVoidAsync("downloadFile", fileName, "application/vnd.google-earth.kml+xml", Convert.ToBase64String(bytes));
+        await JS.InvokeVoidAsync("LucidCartographer.downloadFile", fileName, "application/vnd.google-earth.kml+xml", Convert.ToBase64String(bytes));
     }
 
     private string GetOperationLabel() => _activeOp switch
@@ -384,4 +409,17 @@
         SetOperation.Dedup => "Dedup",
         _ => ""
     };
+
+    // HIGH-05/LOW-10: Shared Google Maps URL helper with validation
+    private static string GetGoogleMapsUrl(Poi poi)
+    {
+        if (!string.IsNullOrEmpty(poi.GoogleMapsUrl))
+            return poi.GoogleMapsUrl;
+
+        if (double.IsNaN(poi.Latitude) || double.IsNaN(poi.Longitude)
+            || double.IsInfinity(poi.Latitude) || double.IsInfinity(poi.Longitude))
+            return "#";
+
+        return $"https://www.google.com/maps/search/?api=1&query={poi.Latitude},{poi.Longitude}";
+    }
 }

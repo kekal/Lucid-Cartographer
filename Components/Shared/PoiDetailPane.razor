@@ -7,8 +7,9 @@
         <div class="flex items-center justify-between p-4 flex-shrink-0">
             <h3 class="font-bold font-headline">Location Details</h3>
             <button class="p-1 rounded hover:bg-surface-container-low transition-colors"
+                    aria-label="Close detail pane"
                     @onclick="() => OnClose.InvokeAsync()">
-                <span class="material-symbols-outlined">close</span>
+                <span class="material-symbols-outlined" aria-hidden="true">close</span>
             </button>
         </div>
 
@@ -54,9 +55,9 @@
             @* Google Rating + Reviews *@
             @if (Poi.GoogleRating.HasValue)
             {
-                <div class="flex items-center gap-2 mb-4">
+                <div class="flex items-center gap-2 mb-4" role="img" aria-label="@($"Google rating: {Poi.GoogleRating.Value:F1} out of 5 stars")">
                     <span class="text-lg font-bold text-on-surface">@Poi.GoogleRating.Value.ToString("F1")</span>
-                    <div class="flex gap-0.5">
+                    <div class="flex gap-0.5" aria-hidden="true">
                         @for (int i = 1; i <= 5; i++)
                         {
                             var starIndex = i;
@@ -99,9 +100,9 @@
             @* Personal Rating *@
             @if (Poi.Rating.HasValue)
             {
-                <div class="flex items-center gap-2 mb-4">
+                <div class="flex items-center gap-2 mb-4" role="img" aria-label="@($"Your rating: {Poi.Rating.Value} out of 5 stars")">
                     <span class="text-xs text-on-surface-variant uppercase tracking-wider">Your rating</span>
-                    <div class="flex gap-0.5">
+                    <div class="flex gap-0.5" aria-hidden="true">
                         @for (int i = 1; i <= 5; i++)
                         {
                             var starIndex = i;
@@ -155,10 +156,10 @@
 
         @* Footer: Google Maps button *@
         <div class="p-4 flex-shrink-0">
-            <a href="@(Poi.GoogleMapsUrl ?? $"https://www.google.com/maps/search/?api=1&query={Poi.Latitude},{Poi.Longitude}")"
+            <a href="@GetGoogleMapsUrl(Poi)"
                target="_blank" rel="noopener"
                class="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg bg-gradient-to-r from-primary to-primary-container text-white font-medium text-sm hover:shadow-lg transition-all">
-                <span class="material-symbols-outlined text-base">open_in_new</span>
+                <span class="material-symbols-outlined text-base" aria-hidden="true">open_in_new</span>
                 Open in Google Maps
             </a>
         </div>
@@ -166,12 +167,38 @@
 }
 
 @code {
-    [Parameter] public Poi? Poi { get; set; }
+    private const int MaxUrlDisplayLength = 35;
+
+    [Parameter, EditorRequired] public Poi? Poi { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
 
+    // LOW-08: Improved URL truncation using Uri class
     private static string TruncateUrl(string url)
     {
-        url = url.Replace("https://", "").Replace("http://", "").TrimEnd('/');
-        return url.Length > 35 ? url[..35] + "..." : url;
+        try
+        {
+            var uri = new Uri(url);
+            var display = uri.Host + uri.PathAndQuery.TrimEnd('/');
+            return display.Length > MaxUrlDisplayLength ? display[..MaxUrlDisplayLength] + "..." : display;
+        }
+        catch
+        {
+            // Fallback for malformed URLs
+            url = url.Replace("https://", "").Replace("http://", "").TrimEnd('/');
+            return url.Length > MaxUrlDisplayLength ? url[..MaxUrlDisplayLength] + "..." : url;
+        }
+    }
+
+    // HIGH-05/LOW-10: Shared Google Maps URL helper with validation
+    private static string GetGoogleMapsUrl(Poi poi)
+    {
+        if (!string.IsNullOrEmpty(poi.GoogleMapsUrl))
+            return poi.GoogleMapsUrl;
+
+        if (double.IsNaN(poi.Latitude) || double.IsNaN(poi.Longitude)
+            || double.IsInfinity(poi.Latitude) || double.IsInfinity(poi.Longitude))
+            return "#";
+
+        return $"https://www.google.com/maps/search/?api=1&query={poi.Latitude},{poi.Longitude}";
     }
 }

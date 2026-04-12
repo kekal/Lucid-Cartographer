@@ -4,9 +4,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
+    <!-- TODO [CRIT-01]: Replace Tailwind CDN with a build-time compiled CSS file (see REVIEW_ARCHITECTURE.md HIGH-05).
+         The CDN runtime ships the entire Tailwind engine to every client, bloats payload, causes FOUC, and breaks CSP. -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+    <!-- TODO [CRIT-02]: Self-host Leaflet assets in wwwroot/lib/ and add SRI integrity attributes.
+         Unpinned CDN without integrity= allows supply-chain attacks (see REVIEW_ARCHITECTURE.md HIGH-05). -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <link rel="stylesheet" href="app.css" />
@@ -46,14 +50,15 @@
     <script src="js/leafletInterop.js"></script>
     <script src="_framework/blazor.web.js"></script>
     <script>
-        function downloadFile(filename, contentType, base64Data) {
+        window.LucidCartographer = window.LucidCartographer || {};
+        window.LucidCartographer.downloadFile = function(filename, contentType, base64Data) {
             var link = document.createElement('a');
             link.download = filename;
             link.href = 'data:' + contentType + ';base64,' + base64Data;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-        }
+        };
     </script>
 </body>
 </html>

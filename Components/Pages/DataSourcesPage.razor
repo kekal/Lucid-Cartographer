@@ -61,8 +61,8 @@
         <div class="bg-surface-container-low rounded-xl p-6 mb-8">
             <div class="flex items-center justify-between mb-4">
                 <h3 class="font-bold font-headline text-lg">@_uploadTitle</h3>
-                <button class="text-on-surface-variant hover:text-on-surface" @onclick="CloseUpload">
-                    <span class="material-symbols-outlined">close</span>
+                <button class="text-on-surface-variant hover:text-on-surface" @onclick="CloseUpload" aria-label="Close import panel">
+                    <span class="material-symbols-outlined" aria-hidden="true">close</span>
                 </button>
             </div>
 
@@ -141,6 +141,8 @@
                         {
                             <button class="w-8 h-8 rounded-full transition-transform @(color == _selectedColor ? "ring-2 ring-offset-2 ring-primary scale-110" : "hover:scale-110")"
                                     style="background-color: @color"
+                                    aria-label="@($"Select color {color}")"
+                                    aria-pressed="@(color == _selectedColor ? "true" : "false")"
                                     @onclick="() => _selectedColor = color">
                             </button>
                         }
@@ -222,10 +224,10 @@
                     <tbody>
                         @foreach (var col in _collections)
                         {
-                            <tr class="hover:bg-surface-container transition-colors">
+                            <tr @key="col.Id" class="hover:bg-surface-container transition-colors">
                                 <td class="px-4 py-3">
                                     <div class="flex items-center gap-3">
-                                        <div class="w-3 h-3 rounded-full" style="background-color: @col.Color"></div>
+                                        <div class="w-3 h-3 rounded-full" style="background-color: @col.Color" aria-hidden="true"></div>
                                         <span class="font-medium">@col.Name</span>
                                     </div>
                                 </td>
@@ -233,10 +235,28 @@
                                 <td class="px-4 py-3 text-sm text-right">@col.PoiCount.ToString("N0")</td>
                                 <td class="px-4 py-3 text-sm text-on-surface-variant">@col.CreatedDate.ToString("MMM dd, yyyy")</td>
                                 <td class="px-4 py-3 text-right">
-                                    <button class="text-tertiary hover:bg-tertiary/10 p-1 rounded-lg transition-colors"
-                                            @onclick="() => DeleteCollection(col.Id)">
-                                        <span class="material-symbols-outlined text-sm">delete</span>
-                                    </button>
+                                    @if (_pendingDeleteId == col.Id)
+                                    {
+                                        <span class="text-xs text-tertiary font-medium mr-1">Delete?</span>
+                                        <button class="text-tertiary hover:bg-tertiary/10 p-1 rounded-lg transition-colors text-xs font-medium"
+                                                aria-label="@($"Confirm delete {col.Name}")"
+                                                @onclick="() => ConfirmDelete(col.Id)">
+                                            Yes
+                                        </button>
+                                        <button class="text-on-surface-variant hover:bg-surface-container-high p-1 rounded-lg transition-colors text-xs font-medium ml-1"
+                                                aria-label="Cancel delete"
+                                                @onclick="CancelDelete">
+                                            No
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <button class="text-tertiary hover:bg-tertiary/10 p-1 rounded-lg transition-colors"
+                                                aria-label="@($"Delete {col.Name}")"
+                                                @onclick="() => RequestDelete(col.Id)">
+                                            <span class="material-symbols-outlined text-sm" aria-hidden="true">delete</span>
+                                        </button>
+                                    }
                                 </td>
                             </tr>
                         }
@@ -328,7 +348,11 @@
 
         try
         {
-            using var stream = file.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024); // 50MB max
+            // HIGH-08 TODO: 50MB buffered entirely in memory per upload per circuit.
+            // Multiple concurrent users uploading large files can OOM the server.
+            // Replace with streaming/chunked upload for production use.
+            const long MaxUploadSizeBytes = 50 * 1024 * 1024; // 50MB max
+            using var stream = file.OpenReadStream(maxAllowedSize: MaxUploadSizeBytes);
             using var ms = new MemoryStream();
             await stream.CopyToAsync(ms);
             ms.Position = 0;
@@ -362,7 +386,13 @@
             var result = await Scraper.ScrapeAsync(_sharedListUrl, count =>
             {
                 _scrapeProgress = count;
-                InvokeAsync(StateHasChanged);
+                // HIGH-06: InvokeAsync returns Task; use ContinueWith to log failures
+                // since the Action<int> callback signature prevents await.
+                _ = InvokeAsync(StateHasChanged).ContinueWith(t =>
+                {
+                    if (t.IsFaulted)
+                        System.Diagnostics.Debug.WriteLine($"Scrape progress render failed: {t.Exception?.Message}");
+                }, TaskScheduler.Default);
             });
 
             if (!result.Pois.Any())
@@ -391,8 +421,22 @@
         }
     }
 
-    private async Task DeleteCollection(int id)
+    // HIGH-03: Delete confirmation — two-step delete to prevent accidental data loss
+    private int? _pendingDeleteId;
+
+    private void RequestDelete(int id)
     {
+        _pendingDeleteId = id;
+    }
+
+    private void CancelDelete()
+    {
+        _pendingDeleteId = null;
+    }
+
+    private async Task ConfirmDelete(int id)
+    {
+        _pendingDeleteId = null;
         await PoiService.DeleteCollectionAsync(id);
         await LoadCollections();
     }

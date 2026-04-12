@@ -5,9 +5,22 @@
 @using Microsoft.AspNetCore.WebUtilities
 @inject IPoiService PoiService
 @inject NavigationManager Navigation
+@implements IAsyncDisposable
 
 <PageTitle>Map - Lucid Cartographer</PageTitle>
 
+@if (_isLoading)
+{
+    @* HIGH-04: Show loading state during initial data fetch *@
+    <div class="flex items-center justify-center h-full">
+        <div class="text-center">
+            <div class="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+            <p class="text-on-surface-variant">Loading collections...</p>
+        </div>
+    </div>
+}
+else
+{
 <div class="flex h-full">
     @* Left Sidebar — Collections *@
     <div class="w-60 flex-shrink-0 bg-surface-container-low flex flex-col">
@@ -23,19 +36,21 @@
         <div class="flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-sm z-10 flex-shrink-0">
             @foreach (var col in _collections.Where(c => c.IsVisible))
             {
-                <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium text-white"
+                <span @key="col.Id" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium text-white"
                       style="background-color: @col.Color">
                     @col.Name
-                    <button @onclick="() => HandleVisibilityToggled(col.Id)" class="hover:opacity-80">
-                        <span class="material-symbols-outlined text-xs">close</span>
+                    <button @onclick="() => HandleVisibilityToggled(col.Id)" class="hover:opacity-80"
+                            aria-label="@($"Hide {col.Name}")">
+                        <span class="material-symbols-outlined text-xs" aria-hidden="true">close</span>
                     </button>
                 </span>
             }
             @if (_collections.Any(c => c.IsVisible))
             {
                 <button class="text-xs text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1"
-                        @onclick="FitMapBounds">
-                    <span class="material-symbols-outlined text-sm">fit_screen</span>
+                        @onclick="FitMapBounds"
+                        aria-label="Fit map to all visible collections">
+                    <span class="material-symbols-outlined text-sm" aria-hidden="true">fit_screen</span>
                     Fit All
                 </button>
             }
@@ -47,7 +62,7 @@
         </div>
 
         @* Bottom Table *@
-        <div class="h-64 flex-shrink-0 bg-white shadow-inner overflow-hidden" style="border-top: 1px solid #e5e8ee;">
+        <div class="h-64 flex-shrink-0 bg-white shadow-inner overflow-hidden border-t border-surface-container-high">
             <PoiTable Pois="_visiblePois"
                      SelectedPoiId="_selectedPoiId"
                      CollectionName="@_selectedCollectionName"
@@ -59,26 +74,28 @@
     @* Right Detail Pane *@
     @if (_selectedPoi != null)
     {
-        <div class="w-80 flex-shrink-0 shadow-lg overflow-hidden" style="border-left: 1px solid #e5e8ee;">
+        <div class="w-80 flex-shrink-0 shadow-lg overflow-hidden border-l border-surface-container-high">
             <PoiDetailPane Poi="_selectedPoi" OnClose="CloseDetailPane" />
         </div>
     }
 </div>
+}
 
 @code {
     private LeafletMap? _leafletMap;
-    private List<PoiCollection> _collections = new();
-    private List<Poi> _visiblePois = new();
+    private IReadOnlyList<PoiCollection> _collections = Array.Empty<PoiCollection>();
+    private IReadOnlyList<Poi> _visiblePois = Array.Empty<Poi>();
     private int? _selectedCollectionId;
     private int? _selectedPoiId;
     private string? _selectedCollectionName;
     private Poi? _selectedPoi;
-    private bool _mapLoaded = false;
+    private bool _isLoading = true;
     private bool _isSearchActive = false;
 
     protected override async Task OnInitializedAsync()
     {
         _collections = await PoiService.GetCollectionsAsync();
+        _isLoading = false;
     }
 
     protected override async Task OnParametersSetAsync()
@@ -100,11 +117,10 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
+        if (firstRender && _leafletMap != null)
         {
-            // Small delay to ensure map is initialized
-            await Task.Delay(200);
-            _mapLoaded = true;
+            // CRIT-05: Wait for the map JS initialization signal instead of Task.Delay(200)
+            await _leafletMap.WaitForInitAsync();
             if (!_isSearchActive)
             {
                 await LoadVisibleCollections();
@@ -114,23 +130,25 @@
 
     private async Task LoadVisibleCollections()
     {
-        if (_leafletMap == null || !_mapLoaded) return;
+        if (_leafletMap == null || !_leafletMap.IsInitialized) return;
 
         var grouped = await PoiService.GetVisiblePoisGroupedAsync();
-        _visiblePois.Clear();
+        // HIGH-01: Create a new list each time so Blazor detects the parameter change
+        var newPois = new List<Poi>();
 
         foreach (var col in _collections)
         {
             if (col.IsVisible && grouped.ContainsKey(col.Id))
             {
                 await _leafletMap.ShowCollectionAsync(col.Id, grouped[col.Id], col.Color);
-                _visiblePois.AddRange(grouped[col.Id]);
+                newPois.AddRange(grouped[col.Id]);
             }
             else
             {
                 await _leafletMap.HideCollectionAsync(col.Id);
             }
         }
+        _visiblePois = newPois;
         StateHasChanged();
     }
 
@@ -147,10 +165,8 @@
         var col = _collections.FirstOrDefault(c => c.Id == collectionId);
         _selectedCollectionName = col?.Name;
 
-        // Load and show just this collection's POIs in the table
-        var pois = await PoiService.GetPoisByCollectionAsync(collectionId);
-        _visiblePois = pois;
-        StateHasChanged();
+        // HIGH-01: Assign a new list for proper Blazor change detection
+        _visiblePois = await PoiService.GetPoisByCollectionAsync(collectionId);
     }
 
     private async Task HandleMarkerSelected(int poiId)
@@ -161,13 +177,9 @@
     private async Task HandlePoiSelected(int poiId)
     {
         await SelectPoi(poiId);
-        if (_leafletMap != null)
+        if (_leafletMap != null && _selectedPoi != null)
         {
-            var poi = _selectedPoi;
-            if (poi != null)
-            {
-                await _leafletMap.HighlightMarkerAsync(poiId);
-            }
+            await _leafletMap.HighlightMarkerAsync(poiId);
         }
     }
 
@@ -184,14 +196,12 @@
     {
         _selectedPoiId = poiId;
         _selectedPoi = await PoiService.GetPoiAsync(poiId);
-        StateHasChanged();
     }
 
     private void CloseDetailPane()
     {
         _selectedPoi = null;
         _selectedPoiId = null;
-        StateHasChanged();
     }
 
     private async Task FitMapBounds()
@@ -199,6 +209,15 @@
         if (_leafletMap != null)
         {
             await _leafletMap.FitBoundsAsync();
+        }
+    }
+
+    // CRIT-06: Implement IAsyncDisposable to clean up map resources
+    public async ValueTask DisposeAsync()
+    {
+        if (_leafletMap != null)
+        {
+            await _leafletMap.DisposeAsync();
         }
     }
 }

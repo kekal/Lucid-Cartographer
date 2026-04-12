@@ -7,16 +7,6 @@
             <span class="font-bold font-headline text-sm">Filtered Results</span>
             <span class="text-xs text-on-surface-variant bg-surface-container-high px-2 py-0.5 rounded-full">@Pois.Count items</span>
         </div>
-        <div class="flex items-center gap-2">
-            @if (ShowSortByDistance)
-            {
-                <button class="text-xs text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1"
-                        @onclick="() => OnSortByDistanceClicked.InvokeAsync()">
-                    <span class="material-symbols-outlined text-sm">sort</span>
-                    Sort by Distance
-                </button>
-            }
-        </div>
     </div>
 
     @* Table Content *@
@@ -24,30 +14,31 @@
         @if (!Pois.Any())
         {
             <div class="p-8 text-center text-on-surface-variant text-sm">
-                <span class="material-symbols-outlined text-3xl mb-2 block">location_off</span>
+                <span class="material-symbols-outlined text-3xl mb-2 block" aria-hidden="true">location_off</span>
                 <p>No POIs to display. Toggle collection visibility or import data.</p>
             </div>
         }
         else
         {
-            <table class="w-full text-sm">
+            <table class="w-full text-sm" aria-label="Points of interest">
                 <thead class="sticky top-0 bg-surface z-10">
                     <tr class="text-left text-xs text-on-surface-variant">
-                        <th class="px-4 py-2 font-medium">Location Name</th>
-                        <th class="px-4 py-2 font-medium">Coordinates</th>
-                        <th class="px-4 py-2 font-medium">Collection</th>
-                        <th class="px-4 py-2 font-medium">Added</th>
-                        <th class="px-4 py-2 font-medium text-right">Actions</th>
+                        <th class="px-4 py-2 font-medium" scope="col">Location Name</th>
+                        <th class="px-4 py-2 font-medium" scope="col">Coordinates</th>
+                        <th class="px-4 py-2 font-medium" scope="col">Collection</th>
+                        <th class="px-4 py-2 font-medium" scope="col">Added</th>
+                        <th class="px-4 py-2 font-medium text-right" scope="col">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var poi in Pois.Take(200))
+                    @foreach (var poi in Pois.Take(MaxDisplayRows))
                     {
-                        <tr class="hover:bg-surface-container-low transition-colors cursor-pointer @(SelectedPoiId == poi.Id ? "bg-surface-container" : "")"
+                        <tr @key="poi.Id"
+                            class="hover:bg-surface-container-low transition-colors cursor-pointer @(SelectedPoiId == poi.Id ? "bg-surface-container" : "")"
                             @onclick="() => OnPoiSelected.InvokeAsync(poi.Id)">
                             <td class="px-4 py-2.5">
                                 <div class="flex items-center gap-2">
-                                    <span class="material-symbols-outlined text-base text-on-surface-variant">location_on</span>
+                                    <span class="material-symbols-outlined text-base text-on-surface-variant" aria-hidden="true">location_on</span>
                                     <div>
                                         <div class="font-medium">@poi.Name</div>
                                         @if (!string.IsNullOrEmpty(poi.Address))
@@ -68,26 +59,28 @@
                             </td>
                             <td class="px-4 py-2.5 text-xs text-on-surface-variant">@poi.AddedDate.ToString("MMM dd, yyyy")</td>
                             <td class="px-4 py-2.5 text-right">
-                                <a href="@(poi.GoogleMapsUrl ?? $"https://www.google.com/maps/search/?api=1&query={poi.Latitude},{poi.Longitude}")"
+                                <a href="@GetGoogleMapsUrl(poi)"
                                    target="_blank" rel="noopener"
                                    class="text-primary hover:text-primary-container transition-colors p-1 inline-block"
+                                   aria-label="@($"Open {poi.Name} in Google Maps")"
                                    @onclick:stopPropagation="true">
-                                    <span class="material-symbols-outlined text-base">open_in_new</span>
+                                    <span class="material-symbols-outlined text-base" aria-hidden="true">open_in_new</span>
                                 </a>
                                 <button class="text-on-surface-variant hover:text-primary transition-colors p-1"
+                                        aria-label="@($"Focus map on {poi.Name}")"
                                         @onclick:stopPropagation="true"
                                         @onclick="() => OnFocusClicked.InvokeAsync(poi.Id)">
-                                    <span class="material-symbols-outlined text-base">my_location</span>
+                                    <span class="material-symbols-outlined text-base" aria-hidden="true">my_location</span>
                                 </button>
                             </td>
                         </tr>
                     }
                 </tbody>
             </table>
-            @if (Pois.Count > 200)
+            @if (Pois.Count > MaxDisplayRows)
             {
                 <div class="p-3 text-center text-xs text-on-surface-variant">
-                    Showing 200 of @Pois.Count results
+                    Showing @MaxDisplayRows of @Pois.Count results
                 </div>
             }
         }
@@ -95,11 +88,26 @@
 </div>
 
 @code {
-    [Parameter] public List<Poi> Pois { get; set; } = new();
+    // MED-01: Extract magic number to named constant
+    private const int MaxDisplayRows = 200;
+
+    // HIGH-01/MED-06: Use IReadOnlyList and EditorRequired
+    [Parameter, EditorRequired] public IReadOnlyList<Poi> Pois { get; set; } = Array.Empty<Poi>();
     [Parameter] public int? SelectedPoiId { get; set; }
     [Parameter] public string? CollectionName { get; set; }
-    [Parameter] public bool ShowSortByDistance { get; set; } = false;
     [Parameter] public EventCallback<int> OnPoiSelected { get; set; }
     [Parameter] public EventCallback<int> OnFocusClicked { get; set; }
-    [Parameter] public EventCallback OnSortByDistanceClicked { get; set; }
+
+    // HIGH-05/LOW-10: Shared Google Maps URL helper (DRY)
+    private static string GetGoogleMapsUrl(Poi poi)
+    {
+        if (!string.IsNullOrEmpty(poi.GoogleMapsUrl))
+            return poi.GoogleMapsUrl;
+
+        if (double.IsNaN(poi.Latitude) || double.IsNaN(poi.Longitude)
+            || double.IsInfinity(poi.Latitude) || double.IsInfinity(poi.Longitude))
+            return "#";
+
+        return $"https://www.google.com/maps/search/?api=1&query={poi.Latitude},{poi.Longitude}";
+    }
 }

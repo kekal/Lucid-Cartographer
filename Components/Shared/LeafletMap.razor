@@ -1,23 +1,41 @@
 @using LucidCartographer.Data.Entities
 @using LucidCartographer.Services
 @inject IMapService MapService
-@implements IDisposable
+@implements IAsyncDisposable
 
 <div id="@_mapElementId" style="width:100%;height:100%;"></div>
 
 @code {
     [Parameter] public EventCallback<int> OnMarkerSelected { get; set; }
 
-    private string _mapElementId = "leaflet-map";
+    private string _mapElementId = $"leaflet-map-{Guid.NewGuid():N}";
     private bool _initialized = false;
+    private readonly TaskCompletionSource _initTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
+    /// Returns a Task that completes when the map JS initialization is done.
+    /// Parents should await this instead of using Task.Delay.
+    /// </summary>
+    public Task WaitForInitAsync() => _initTcs.Task;
+
+    public bool IsInitialized => _initialized;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
             MapService.OnMarkerClicked += HandleMarkerClicked;
-            await MapService.InitMapAsync(_mapElementId);
-            _initialized = true;
+            try
+            {
+                await MapService.InitMapAsync(_mapElementId);
+                _initialized = true;
+                _initTcs.TrySetResult();
+            }
+            catch (Exception ex)
+            {
+                _initTcs.TrySetException(ex);
+                throw;
+            }
         }
     }
 
@@ -57,13 +75,23 @@
         await MapService.HighlightMarkerAsync(poiId);
     }
 
+    // CRIT-03 fix: async void is required by the Action<int> delegate signature,
+    // but we wrap in try/catch so exceptions don't silently vanish.
     private async void HandleMarkerClicked(int poiId)
     {
-        await InvokeAsync(async () => await OnMarkerSelected.InvokeAsync(poiId));
+        try
+        {
+            await InvokeAsync(async () => await OnMarkerSelected.InvokeAsync(poiId));
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error handling marker click for POI {poiId}: {ex.Message}");
+        }
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         MapService.OnMarkerClicked -= HandleMarkerClicked;
+        _initTcs.TrySetCanceled();
     }
 }

@@ -5,41 +5,67 @@
     <header class="bg-white/80 backdrop-blur-md shadow-sm flex justify-between items-center px-6 h-16 flex-shrink-0 z-50">
         <div class="flex items-center gap-8">
             <h1 class="text-xl font-extrabold tracking-tight font-headline text-on-surface">Lucid Cartographer</h1>
-            <nav class="flex items-center gap-1">
-                <NavLink class="px-3 py-2 text-lg font-bold font-headline rounded-lg transition-colors hover:bg-surface-container-low"
+            <nav class="flex items-center gap-1" aria-label="Main navigation">
+                <NavLink class="px-3 py-2 text-lg font-bold font-headline rounded-lg transition-colors hover:bg-surface-container-low "
+                         style="text-decoration:none;"
                          href="" Match="NavLinkMatch.All"
-                         ActiveClass="text-primary border-b-2 border-primary"
-                         style="text-decoration:none;">
+                         ActiveClass="text-primary border-b-2 border-primary">
                     Map
                 </NavLink>
-                <NavLink class="px-3 py-2 text-lg font-bold font-headline rounded-lg transition-colors hover:bg-surface-container-low"
+                <NavLink class="px-3 py-2 text-lg font-bold font-headline rounded-lg transition-colors hover:bg-surface-container-low "
+                         style="text-decoration:none;"
                          href="datasources"
-                         ActiveClass="text-primary border-b-2 border-primary"
-                         style="text-decoration:none;">
+                         ActiveClass="text-primary border-b-2 border-primary">
                     Data Sources
                 </NavLink>
-                <NavLink class="px-3 py-2 text-lg font-bold font-headline rounded-lg transition-colors hover:bg-surface-container-low"
+                <NavLink class="px-3 py-2 text-lg font-bold font-headline rounded-lg transition-colors hover:bg-surface-container-low "
+                         style="text-decoration:none;"
                          href="operations"
-                         ActiveClass="text-primary border-b-2 border-primary"
-                         style="text-decoration:none;">
+                         ActiveClass="text-primary border-b-2 border-primary">
                     Operations
                 </NavLink>
             </nav>
         </div>
         <div class="flex items-center gap-3">
-            <form action="/" method="get" class="relative" data-enhance="false">
-                <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-base">search</span>
-                <input type="text" name="search" placeholder="Search POIs..."
+            <form action="/" method="get" class="relative" data-enhance="false" role="search">
+                <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-base" aria-hidden="true">search</span>
+                <input type="text" name="search" placeholder="Search POIs..." aria-label="Search POIs"
                        class="pl-9 pr-4 py-1.5 rounded-full bg-surface-container-low text-sm text-on-surface placeholder:text-outline focus:ring-2 focus:ring-primary focus:bg-white transition-colors w-48 focus:w-64" />
             </form>
-            <button class="p-2 rounded-full hover:bg-surface-container-low transition-colors">
-                <span class="material-symbols-outlined text-on-surface-variant">settings</span>
+            <button class="p-2 rounded-full hover:bg-surface-container-low transition-colors" aria-label="Settings">
+                <span class="material-symbols-outlined text-on-surface-variant" aria-hidden="true">settings</span>
             </button>
         </div>
     </header>
 
-    @* Content Area *@
+    @* Content Area — CRIT-04: Wrap @Body in ErrorBoundary *@
     <main class="flex-1 overflow-auto">
-        @Body
+        <ErrorBoundary @ref="_errorBoundary">
+            <ChildContent>
+                @Body
+            </ChildContent>
+            <ErrorContent Context="ex">
+                <div class="flex items-center justify-center h-full p-8">
+                    <div class="text-center max-w-md">
+                        <span class="material-symbols-outlined text-6xl text-tertiary mb-4 block">error</span>
+                        <h2 class="text-xl font-bold font-headline mb-2 text-on-surface">Something went wrong</h2>
+                        <p class="text-sm text-on-surface-variant mb-4">An unexpected error occurred. Please try again.</p>
+                        <button class="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:shadow-lg transition-all"
+                                @onclick="RecoverFromError">
+                            Try Again
+                        </button>
+                    </div>
+                </div>
+            </ErrorContent>
+        </ErrorBoundary>
     </main>
 </div>
+
+@code {
+    private ErrorBoundary? _errorBoundary;
+
+    private void RecoverFromError()
+    {
+        _errorBoundary?.Recover();
+    }
+}
