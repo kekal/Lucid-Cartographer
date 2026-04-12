@@ -1,6 +1,7 @@
-namespace LucidCartographer.Services.Import;
-
-public interface IGoogleMapsListScraper
+namespace LucidCartographer.Services.Import
 {
-    Task<ScrapeResult> ScrapeAsync(string listUrl, Action<int>? onProgress = null);
+    public interface IGoogleMapsListScraper
+    {
+        Task<ScrapeResult> ScrapeAsync(string listUrl, Action<int>? onProgress = null);
+    }
 }

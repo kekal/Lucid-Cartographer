@@ -1,8 +1,9 @@
-namespace LucidCartographer.Services.Import;
-
-public interface IFileImporter
+namespace LucidCartographer.Services.Import
 {
-    string FormatName { get; }
-    string[] SupportedExtensions { get; }
-    Task<List<ImportedPoi>> ParseAsync(Stream fileStream, string fileName);
+    public interface IFileImporter
+    {
+        string FormatName { get; }
+        string[] SupportedExtensions { get; }
+        Task<List<ImportedPoi>> ParseAsync(Stream fileStream, string fileName);
+    }
 }
