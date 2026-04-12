@@ -44,9 +44,44 @@ services:
 6. The web app image drops from ~300MB to ~100MB and no longer needs Chromium OS dependencies.
 7. This also mitigates CRIT-03 (authentication) — the scraper is not exposed externally, only the web app is. And it isolates the SSRF risk to an internal-only container.
 
-### CRIT-03: No authentication or authorization whatsoever
+### CRIT-03: No in-app authentication
 **File:** `Program.cs`
-**Detail:** There is zero authentication middleware. No `AddAuthentication()`, no `AddAuthorization()`, no `[Authorize]` attributes. Anyone who can reach port 8080 can import data, scrape Google Maps lists, delete entire collections, and export everything. This is a personal tool today but one `docker-compose.yml` port-forward away from being a public data exfiltration point.
+**Detail:** Zero authentication middleware. All other services on this NAS have their own auth — this one should too for consistency and defense in depth.
+**Fix — Validate Cloudflare Access JWT (zero friction, no second login):**
+The app runs behind Cloudflare Zero Trust. Cloudflare sends a signed `CF-Access-JWT-Assertion` header with every authenticated request. The app validates this JWT transparently — the user never sees a second login.
+```csharp
+// In Program.cs
+builder.Services.AddAuthentication("CloudflareAccess")
+    .AddJwtBearer("CloudflareAccess", options =>
+    {
+        options.Authority = "https://<your-team>.cloudflareaccess.com";
+        options.Audience = "<your-app-aud-tag>"; // From Cloudflare Access app config
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                // Cloudflare sends JWT in this header, not Authorization
+                context.Token = context.Request.Headers["CF-Access-JWT-Assertion"];
+                return Task.CompletedTask;
+            }
+        };
+    });
+builder.Services.AddAuthorization();
+
+// After app.Build():
+app.UseAuthentication();
+app.UseAuthorization();
+```
+Add `[Authorize]` to pages or use a global fallback policy:
+```csharp
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+});
+```
+This rejects any request that didn't come through Cloudflare Access — no second login, no friction, consistent with all other services.
 
 ### CRIT-04: `EnsureCreatedAsync` used instead of migrations
 **File:** `Program.cs`, lines 36-41
