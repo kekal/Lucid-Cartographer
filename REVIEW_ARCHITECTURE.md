@@ -15,6 +15,34 @@
 ### CRIT-02: Playwright bundled in the production web application package
 **File:** `LucidCartographer.csproj`, line 17
 **Detail:** `Microsoft.Playwright` (v1.49.0) is referenced as a normal runtime dependency. Playwright downloads ~200+ MB of Chromium binaries. This means your production Docker image ships with an entire headless browser engine. Playwright is used only by `GoogleMapsListScraper`, which runs server-side scraping of Google Maps lists. This is a scraping concern that should be extracted to a separate worker/microservice, not embedded in the web app. At the very least, the Dockerfile needs to install Playwright's OS dependencies (`playwright install-deps chromium`), which it does NOT do, meaning the scraper is silently broken in the Docker image.
+**Fix — Sidecar container architecture:**
+```
+┌─────────────────────┐     HTTP API     ┌────────────────────┐
+│  LucidCartographer   │ ──────────────> │  Scraper Service    │
+│  (Blazor, ~50MB)     │                 │  (Playwright+Chromium│
+│  no Playwright dep   │                 │   ~300MB)            │
+└─────────────────────┘                 └────────────────────┘
+```
+1. Create a new .NET minimal API project `LucidCartographer.Scraper` with a single `POST /scrape` endpoint that accepts `{ url: string }` and returns `ScrapeResult` JSON.
+2. Move `GoogleMapsListScraper.cs` and the `Microsoft.Playwright` package reference to the new project.
+3. In the web app, replace the real scraper implementation with an `HttpGoogleMapsListScraper` that calls the sidecar's HTTP API via `HttpClient`.
+4. Update `docker-compose.yml` to run both containers:
+```yaml
+services:
+  cartographer:
+    build: ./LucidCartographer
+    ports: ["8080:8080"]
+    volumes: ["./data:/data"]
+    depends_on: [scraper]
+  scraper:
+    build: ./LucidCartographer.Scraper
+    # No exposed ports — only reachable from the internal Docker network
+    environment:
+      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+```
+5. The scraper container installs Chromium in its Dockerfile: `RUN playwright install-deps chromium && playwright install chromium`.
+6. The web app image drops from ~300MB to ~100MB and no longer needs Chromium OS dependencies.
+7. This also mitigates CRIT-03 (authentication) — the scraper is not exposed externally, only the web app is. And it isolates the SSRF risk to an internal-only container.
 
 ### CRIT-03: No authentication or authorization whatsoever
 **File:** `Program.cs`
