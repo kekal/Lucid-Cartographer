@@ -12,6 +12,10 @@ namespace LucidCartographer.Services.Import
     {
         private const string DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
+        // HIGH-07: Limit to one concurrent scrape to prevent multiple Chromium instances
+        // exhausting server memory. Additional requests will wait in the queue.
+        private static readonly SemaphoreSlim _scrapeSemaphore = new(1, 1);
+
         private static readonly string[] AllowedUrlPrefixes =
         [
             "https://www.google.com/maps/",
@@ -41,6 +45,20 @@ namespace LucidCartographer.Services.Import
             if (!AllowedUrlPrefixes.Any(prefix => trimmedUrl.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
                 throw new ArgumentException("URL must be a Google Maps URL (https://www.google.com/maps/... or https://maps.app.goo.gl/...).", nameof(listUrl));
 
+            // HIGH-07: Acquire semaphore to ensure only one scrape runs at a time
+            await _scrapeSemaphore.WaitAsync(cancellationToken);
+            try
+            {
+                return await ScrapeInternalAsync(trimmedUrl, onProgress, cancellationToken);
+            }
+            finally
+            {
+                _scrapeSemaphore.Release();
+            }
+        }
+
+        private async Task<ScrapeResult> ScrapeInternalAsync(string trimmedUrl, Action<int>? onProgress, CancellationToken cancellationToken)
+        {
             _logger.LogInformation("Starting scrape of {Url}", trimmedUrl);
 
             using var playwright = await Playwright.CreateAsync();
