@@ -46,42 +46,41 @@ services:
 
 ### CRIT-03: No in-app authentication
 **File:** `Program.cs`
-**Detail:** Zero authentication middleware. All other services on this NAS have their own auth — this one should too for consistency and defense in depth.
-**Fix — Validate Cloudflare Access JWT (zero friction, no second login):**
-The app runs behind Cloudflare Zero Trust. Cloudflare sends a signed `CF-Access-JWT-Assertion` header with every authenticated request. The app validates this JWT transparently — the user never sees a second login.
+**Detail:** Zero authentication middleware. All other NAS services have their own auth. Cloudflare Zero Trust tunnel provides connectivity only, NOT authentication. Anyone with the subdomain URL has full access (confirmed by testing from anonymous tab).
+**Fix — Simple password + cookie middleware:**
+Single-user personal tool needs minimal auth: a password from an environment variable, verified once, stored in a cookie.
 ```csharp
-// In Program.cs
-builder.Services.AddAuthentication("CloudflareAccess")
-    .AddJwtBearer("CloudflareAccess", options =>
-    {
-        options.Authority = "https://<your-team>.cloudflareaccess.com";
-        options.Audience = "<your-app-aud-tag>"; // From Cloudflare Access app config
-        options.Events = new JwtBearerEvents
-        {
-            OnMessageReceived = context =>
-            {
-                // Cloudflare sends JWT in this header, not Authorization
-                context.Token = context.Request.Headers["CF-Access-JWT-Assertion"];
-                return Task.CompletedTask;
-            }
-        };
-    });
-builder.Services.AddAuthorization();
-
-// After app.Build():
-app.UseAuthentication();
-app.UseAuthorization();
-```
-Add `[Authorize]` to pages or use a global fallback policy:
-```csharp
-builder.Services.AddAuthorization(options =>
+// Program.cs — add before app.UseAntiforgery()
+app.Use(async (context, next) =>
 {
-    options.FallbackPolicy = new AuthorizationPolicyBuilder()
-        .RequireAuthenticatedUser()
-        .Build();
+    var path = context.Request.Path.Value ?? "";
+
+    // Allow the login page and static assets
+    if (path == "/login" || path.StartsWith("/_framework") || path.StartsWith("/css"))
+    {
+        await next();
+        return;
+    }
+
+    // Check auth cookie
+    if (context.Request.Cookies["cartographer_auth"] == "authenticated")
+    {
+        await next();
+        return;
+    }
+
+    context.Response.Redirect("/login");
 });
 ```
-This rejects any request that didn't come through Cloudflare Access — no second login, no friction, consistent with all other services.
+Login page: single password field, compares against `CARTOGRAPHER_PASSWORD` env var, sets a long-lived HttpOnly cookie. No user management, no database, no JWT.
+```yaml
+# docker-compose.yml
+services:
+  cartographer:
+    environment:
+      - CARTOGRAPHER_PASSWORD=your-secret-here
+```
+Consistent with other NAS services that each handle their own auth.
 
 ### CRIT-04: `EnsureCreatedAsync` used instead of migrations
 **File:** `Program.cs`, lines 36-41
