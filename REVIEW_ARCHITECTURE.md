@@ -112,7 +112,28 @@ Consistent with other NAS services that each handle their own auth.
 
 ### HIGH-05: Leaflet and Google Fonts loaded from unpkg/CDNs without SRI
 **File:** `Components/App.razor`, lines 10-11
-**Detail:** `https://unpkg.com/leaflet@1.9.4/dist/leaflet.js` and multiple Google Fonts URLs are loaded without Subresource Integrity (SRI) hashes. A CDN compromise would inject arbitrary JavaScript into every session. Pin versions with SRI or self-host.
+**Detail:** `https://unpkg.com/leaflet@1.9.4/dist/leaflet.js` and multiple Google Fonts URLs are loaded without Subresource Integrity (SRI) hashes. A CDN compromise would inject arbitrary JavaScript into every session. Also creates a hard dependency on external CDN availability — the app breaks if unpkg or Google Fonts are unreachable.
+**Fix — Self-host all static assets:**
+1. Download and bundle into `wwwroot/lib/`:
+```
+wwwroot/lib/leaflet/leaflet.js        (from unpkg.com/leaflet@1.9.4)
+wwwroot/lib/leaflet/leaflet.css
+wwwroot/lib/leaflet/images/            (marker icons)
+wwwroot/lib/fonts/manrope.woff2       (from Google Fonts)
+wwwroot/lib/fonts/inter.woff2
+wwwroot/lib/fonts/material-symbols.woff2
+wwwroot/css/tailwind.css               (pre-built with Tailwind CLI, not CDN runtime)
+```
+2. Replace CDN `<script>`/`<link>` tags in `App.razor` with local paths:
+```html
+<link rel="stylesheet" href="lib/leaflet/leaflet.css" />
+<script src="lib/leaflet/leaflet.js"></script>
+<link rel="stylesheet" href="css/tailwind.css" />
+<link rel="stylesheet" href="lib/fonts/fonts.css" />
+```
+3. For Tailwind: replace `cdn.tailwindcss.com` (runtime JIT, CRIT-01) with a build-time `npx tailwindcss -o wwwroot/css/tailwind.css --minify` step. This also fixes CRIT-01.
+4. For fonts: create `wwwroot/lib/fonts/fonts.css` with `@font-face` declarations pointing to local `.woff2` files.
+5. Benefits: zero CDN dependency, works fully offline, no SRI needed, faster loads (no DNS lookups), Docker image is self-contained, also resolves HIGH-06 (CSP becomes trivial when all assets are same-origin).
 
 ### HIGH-06: No Content-Security-Policy header
 **File:** `Program.cs`

@@ -16,7 +16,8 @@
 The Tailwind CDN script is a **development-only** tool. It ships the entire Tailwind runtime to every client, bloats initial payload, causes FOUC (flash of unstyled content), and will break under CSP policies. Must use a build-time Tailwind compile step that produces a purged CSS file. This alone disqualifies the app from any serious deployment.
 
 ### CRIT-02: Unpinned CDN dependencies with no SRI (`App.razor:10-11`)
-Leaflet is loaded from `unpkg.com` with no `integrity` attribute and no version lock beyond `@1.9.4`. A CDN compromise delivers arbitrary JS into every session. All CDN scripts must have `integrity` and `crossorigin` attributes, or better yet, be self-hosted.
+Leaflet is loaded from `unpkg.com` with no `integrity` attribute and no version lock beyond `@1.9.4`. A CDN compromise delivers arbitrary JS into every session.
+**Fix:** Self-host all static assets (Leaflet, fonts, Tailwind CSS) in `wwwroot/lib/`. Pre-build Tailwind with CLI instead of CDN runtime. See `REVIEW_ARCHITECTURE.md` HIGH-05 for full implementation plan.
 
 ### CRIT-03: `async void` event handler in LeafletMap (`LeafletMap.razor:60`)
 ```csharp
