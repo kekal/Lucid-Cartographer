@@ -4,11 +4,22 @@ using System.Xml.Linq;
 
 namespace LucidCartographer.Services.Export
 {
-    public class KmlExporter
+    public class KmlExporter : IFileExporter
     {
         private static readonly XNamespace Kml = "http://www.opengis.net/kml/2.2";
 
+        public string FormatName => "KML";
+        public string FileExtension => ".kml";
+        public string ContentType => "application/vnd.google-earth.kml+xml";
+
         public byte[] Export(List<Poi> pois, string documentName = "Lucid Cartographer Export")
+        {
+            using var ms = new MemoryStream();
+            ExportAsync(pois, ms, documentName).GetAwaiter().GetResult();
+            return ms.ToArray();
+        }
+
+        public Task ExportAsync(List<Poi> pois, Stream output, string documentName = "Lucid Cartographer Export")
         {
             var doc = new XDocument(
                 new XDeclaration("1.0", "UTF-8", null),
@@ -20,9 +31,8 @@ namespace LucidCartographer.Services.Export
                 )
             );
 
-            using var ms = new MemoryStream();
-            doc.Save(ms);
-            return ms.ToArray();
+            doc.Save(output);
+            return Task.CompletedTask;
         }
 
         public byte[] ExportGroupedByCategory(List<Poi> pois, string documentName = "Lucid Cartographer Export")
@@ -49,7 +59,7 @@ namespace LucidCartographer.Services.Export
             return ms.ToArray();
         }
 
-        private IEnumerable<XElement> GeneratePlacemarks(List<Poi> pois)
+        private static IEnumerable<XElement> GeneratePlacemarks(List<Poi> pois)
         {
             return pois.Select(poi =>
                 new XElement(Kml + "Placemark",

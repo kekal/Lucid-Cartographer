@@ -4,17 +4,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace LucidCartographer.Services.Import
 {
-    public class ImportResult
+    public class ImportOrchestrator : IImportOrchestrator
     {
-        public int AddedCount { get; set; }
-        public int SkippedCount { get; set; }
-        public int TotalParsed { get; set; }
-        public int CollectionId { get; set; }
-        public string CollectionName { get; set; } = string.Empty;
-    }
+        private const string DefaultColor = "#005bbf";
+        private const string ImportedStatus = "imported";
+        private const double ProximityThresholdMeters = 100;
 
-    public class ImportOrchestrator
-    {
         private readonly IDbContextFactory<AppDbContext> _factory;
         private readonly IEnumerable<IFileImporter> _importers;
 
@@ -30,71 +25,135 @@ namespace LucidCartographer.Services.Import
             return _importers.FirstOrDefault(i => i.SupportedExtensions.Contains(ext));
         }
 
-        public async Task<ImportResult> ImportAsync(Stream fileStream, string fileName, string collectionName, string color = "#005bbf")
+        public async Task<ImportResult> ImportAsync(Stream fileStream, string fileName, string collectionName, string color = DefaultColor, CancellationToken cancellationToken = default)
         {
             var importer = GetImporter(fileName)
                 ?? throw new ArgumentException($"No importer found for file: {fileName}");
 
-            var parsed = await importer.ParseAsync(fileStream, fileName);
+            var parsed = await importer.ParseAsync(fileStream, fileName, cancellationToken);
 
-            await using var db = await _factory.CreateDbContextAsync();
+            return await PersistImportedPoisAsync(
+                parsed,
+                collectionName,
+                color,
+                $"{importer.FormatName.ToLower()}_import",
+                fileName,
+                cancellationToken);
+        }
+
+        public async Task<ImportResult> ImportFromScrapedAsync(List<ImportedPoi> parsed, string collectionName, string color = DefaultColor, CancellationToken cancellationToken = default)
+        {
+            return await PersistImportedPoisAsync(
+                parsed,
+                collectionName,
+                color,
+                "google_maps_scrape",
+                sourceFileName: null,
+                cancellationToken);
+        }
+
+        /// <summary>
+        /// Shared persistence logic: creates a collection, deduplicates POIs against existing data,
+        /// and batch-inserts new POIs. Called by both ImportAsync and ImportFromScrapedAsync.
+        /// </summary>
+        private async Task<ImportResult> PersistImportedPoisAsync(
+            List<ImportedPoi> parsed,
+            string collectionName,
+            string color,
+            string sourceType,
+            string? sourceFileName,
+            CancellationToken cancellationToken)
+        {
+            // Validate coordinate ranges -- skip POIs with out-of-range values
+            var validParsed = parsed.Where(p =>
+                p.Latitude >= -90 && p.Latitude <= 90 &&
+                p.Longitude >= -180 && p.Longitude <= 180).ToList();
+
+            await using var db = await _factory.CreateDbContextAsync(cancellationToken);
 
             var collection = new PoiCollection
             {
                 Name = collectionName,
                 Color = color,
-                SourceType = $"{importer.FormatName.ToLower()}_import",
-                SourceFileName = fileName,
+                SourceType = sourceType,
+                SourceFileName = sourceFileName,
                 CreatedDate = DateTime.UtcNow
             };
             db.PoiCollections.Add(collection);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(cancellationToken);
+
+            // Pre-load existing POIs for dedup to avoid N+1 queries
+            var importedUrls = validParsed
+                .Where(p => !string.IsNullOrEmpty(p.GoogleMapsUrl))
+                .Select(p => NormalizeGoogleMapsUrl(p.GoogleMapsUrl!))
+                .Distinct()
+                .ToHashSet();
+
+            var existingByUrl = importedUrls.Count > 0
+                ? await db.Pois
+                    .Where(p => p.GoogleMapsUrl != null && importedUrls.Contains(p.GoogleMapsUrl))
+                    .ToDictionaryAsync(p => p.GoogleMapsUrl!, cancellationToken)
+                : new Dictionary<string, Poi>();
+
+            var importedNames = validParsed
+                .Select(p => p.Name.ToLower().Trim())
+                .Distinct()
+                .ToList();
+
+            var existingByName = importedNames.Count > 0
+                ? await db.Pois
+                    .Where(p => importedNames.Contains(p.Name.ToLower()))
+                    .ToListAsync(cancellationToken)
+                : new List<Poi>();
+
+            var existingLinks = await db.PoiCollectionItems
+                .Where(ci => ci.PoiCollectionId == collection.Id)
+                .Select(ci => ci.PoiId)
+                .ToHashSetAsync(cancellationToken);
 
             var added = 0;
             var skipped = 0;
+            var newPois = new List<(Poi poi, int parsedIndex)>();
+            var linksToAdd = new List<PoiCollectionItem>();
 
-            foreach (var imported in parsed)
+            for (int i = 0; i < validParsed.Count; i++)
             {
-                // Try to find existing POI
+                cancellationToken.ThrowIfCancellationRequested();
+                var imported = validParsed[i];
+
                 Poi? existing = null;
 
                 // Tier 1: Match by Google Maps URL
                 if (!string.IsNullOrEmpty(imported.GoogleMapsUrl))
                 {
                     var normalizedUrl = NormalizeGoogleMapsUrl(imported.GoogleMapsUrl);
-                    existing = await db.Pois
-                        .FirstOrDefaultAsync(p => p.GoogleMapsUrl != null && p.GoogleMapsUrl == normalizedUrl);
+                    existingByUrl.TryGetValue(normalizedUrl, out existing);
                 }
 
-                // Tier 2: Match by name + proximity (100m)
+                // Tier 2: Match by name + proximity
                 if (existing == null)
                 {
-                    var candidates = await db.Pois
-                        .Where(p => p.Name.ToLower() == imported.Name.ToLower().Trim())
-                        .ToListAsync();
-
-                    existing = candidates.FirstOrDefault(c =>
-                        GeoUtils.HaversineDistance(c.Latitude, c.Longitude, imported.Latitude, imported.Longitude) < 100);
+                    var nameLower = imported.Name.ToLower().Trim();
+                    existing = existingByName.FirstOrDefault(c =>
+                        c.Name.ToLower() == nameLower &&
+                        GeoUtils.HaversineDistance(c.Latitude, c.Longitude, imported.Latitude, imported.Longitude) < ProximityThresholdMeters);
                 }
 
                 if (existing != null)
                 {
-                    // POI exists -- just link to collection if not already linked
-                    var alreadyLinked = await db.PoiCollectionItems
-                        .AnyAsync(ci => ci.PoiId == existing.Id && ci.PoiCollectionId == collection.Id);
-                    if (!alreadyLinked)
+                    if (!existingLinks.Contains(existing.Id))
                     {
-                        db.PoiCollectionItems.Add(new PoiCollectionItem
+                        linksToAdd.Add(new PoiCollectionItem
                         {
                             PoiId = existing.Id,
                             PoiCollectionId = collection.Id
                         });
+                        existingLinks.Add(existing.Id);
                     }
                     skipped++;
                 }
                 else
                 {
-                    // Create new POI
                     var poi = new Poi
                     {
                         Name = imported.Name,
@@ -111,120 +170,44 @@ namespace LucidCartographer.Services.Import
                         Website = imported.Website,
                         Phone = imported.Phone,
                         ImageUrl = imported.ImageUrl,
-                        Status = "imported",
+                        Status = ImportedStatus,
                         AddedDate = DateTime.UtcNow
                     };
                     db.Pois.Add(poi);
-                    await db.SaveChangesAsync(); // Save to get the ID
+                    newPois.Add((poi, i));
 
-                    db.PoiCollectionItems.Add(new PoiCollectionItem
-                    {
-                        PoiId = poi.Id,
-                        PoiCollectionId = collection.Id
-                    });
+                    // Add to in-memory lookup so subsequent items in this batch can dedup against it
+                    if (poi.GoogleMapsUrl != null && !existingByUrl.ContainsKey(poi.GoogleMapsUrl))
+                        existingByUrl[poi.GoogleMapsUrl] = poi;
+                    existingByName.Add(poi);
+
                     added++;
                 }
             }
 
-            collection.PoiCount = added + skipped; // Total POIs in this collection
-            await db.SaveChangesAsync();
-
-            return new ImportResult
+            // Batch save all new POIs at once to get IDs
+            if (newPois.Count > 0)
             {
-                AddedCount = added,
-                SkippedCount = skipped,
-                TotalParsed = parsed.Count,
-                CollectionId = collection.Id,
-                CollectionName = collectionName
-            };
-        }
+                await db.SaveChangesAsync(cancellationToken);
+            }
 
-        public async Task<ImportResult> ImportFromScrapedAsync(List<ImportedPoi> parsed, string collectionName, string color = "#005bbf")
-        {
-            await using var db = await _factory.CreateDbContextAsync();
-
-            var collection = new PoiCollection
+            // Now create links for new POIs (IDs are populated after SaveChanges)
+            foreach (var (poi, _) in newPois)
             {
-                Name = collectionName,
-                Color = color,
-                SourceType = "google_maps_scrape",
-                CreatedDate = DateTime.UtcNow
-            };
-            db.PoiCollections.Add(collection);
-            await db.SaveChangesAsync();
+                linksToAdd.Add(new PoiCollectionItem
+                {
+                    PoiId = poi.Id,
+                    PoiCollectionId = collection.Id
+                });
+            }
 
-            var added = 0;
-            var skipped = 0;
-
-            foreach (var imported in parsed)
+            if (linksToAdd.Count > 0)
             {
-                Poi? existing = null;
-
-                if (!string.IsNullOrEmpty(imported.GoogleMapsUrl))
-                {
-                    var normalizedUrl = NormalizeGoogleMapsUrl(imported.GoogleMapsUrl);
-                    existing = await db.Pois
-                        .FirstOrDefaultAsync(p => p.GoogleMapsUrl != null && p.GoogleMapsUrl == normalizedUrl);
-                }
-
-                if (existing == null)
-                {
-                    var candidates = await db.Pois
-                        .Where(p => p.Name.ToLower() == imported.Name.ToLower().Trim())
-                        .ToListAsync();
-                    existing = candidates.FirstOrDefault(c =>
-                        GeoUtils.HaversineDistance(c.Latitude, c.Longitude, imported.Latitude, imported.Longitude) < 100);
-                }
-
-                if (existing != null)
-                {
-                    var alreadyLinked = await db.PoiCollectionItems
-                        .AnyAsync(ci => ci.PoiId == existing.Id && ci.PoiCollectionId == collection.Id);
-                    if (!alreadyLinked)
-                    {
-                        db.PoiCollectionItems.Add(new PoiCollectionItem
-                        {
-                            PoiId = existing.Id,
-                            PoiCollectionId = collection.Id
-                        });
-                    }
-                    skipped++;
-                }
-                else
-                {
-                    var poi = new Poi
-                    {
-                        Name = imported.Name,
-                        Latitude = imported.Latitude,
-                        Longitude = imported.Longitude,
-                        GoogleMapsUrl = !string.IsNullOrEmpty(imported.GoogleMapsUrl)
-                            ? NormalizeGoogleMapsUrl(imported.GoogleMapsUrl)
-                            : null,
-                        Address = imported.Address,
-                        Category = imported.Category,
-                        Notes = imported.Description,
-                        GoogleRating = imported.Rating,
-                        ReviewCount = imported.ReviewCount,
-                        Website = imported.Website,
-                        Phone = imported.Phone,
-                        ImageUrl = imported.ImageUrl,
-                        Status = "imported",
-                        AddedDate = DateTime.UtcNow
-                    };
-                    db.Pois.Add(poi);
-                    await db.SaveChangesAsync();
-
-                    db.PoiCollectionItems.Add(new PoiCollectionItem
-                    {
-                        PoiId = poi.Id,
-                        PoiCollectionId = collection.Id
-                    });
-                    added++;
-                }
+                db.PoiCollectionItems.AddRange(linksToAdd);
             }
 
             collection.PoiCount = added + skipped;
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(cancellationToken);
 
             return new ImportResult
             {
@@ -238,15 +221,26 @@ namespace LucidCartographer.Services.Import
 
         private static string NormalizeGoogleMapsUrl(string url)
         {
-            // Remove tracking parameters, normalize protocol
             url = url.Trim();
             if (url.StartsWith("http://"))
                 url = "https://" + url[7..];
 
-            // Remove trailing slashes
             url = url.TrimEnd('/');
 
             return url;
+        }
+    }
+
+    internal static class AsyncEnumerableExtensions
+    {
+        public static async Task<HashSet<T>> ToHashSetAsync<T>(this IQueryable<T> source, CancellationToken cancellationToken = default)
+        {
+            var set = new HashSet<T>();
+            await foreach (var item in source.AsAsyncEnumerable().WithCancellation(cancellationToken))
+            {
+                set.Add(item);
+            }
+            return set;
         }
     }
 }

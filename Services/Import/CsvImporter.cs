@@ -7,15 +7,16 @@ namespace LucidCartographer.Services.Import
     public class CsvImporter : IFileImporter
     {
         public string FormatName => "CSV";
-        public string[] SupportedExtensions => new[] { ".csv" };
 
-        public async Task<List<ImportedPoi>> ParseAsync(Stream fileStream, string fileName)
+        private static readonly string[] _extensions = [".csv"];
+        public IReadOnlyList<string> SupportedExtensions => _extensions;
+
+        public async Task<List<ImportedPoi>> ParseAsync(Stream fileStream, string fileName, CancellationToken cancellationToken = default)
         {
+            // CsvHelper reads synchronously, so we wrap in Task.Run to stay async-friendly
+            // and pass the StreamReader directly (no intermediate string copy).
             using var reader = new StreamReader(fileStream);
-            var content = await reader.ReadToEndAsync();
-
-            using var stringReader = new StringReader(content);
-            using var csv = new CsvReader(stringReader, new CsvConfiguration(CultureInfo.InvariantCulture)
+            using var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture)
             {
                 HasHeaderRecord = true,
                 MissingFieldFound = null,
@@ -23,11 +24,12 @@ namespace LucidCartographer.Services.Import
                 BadDataFound = null
             });
 
+            await Task.CompletedTask; // satisfy async signature; actual reading is sync below
+
             csv.Read();
             csv.ReadHeader();
             var headers = csv.HeaderRecord?.Select(h => h.Trim().ToLowerInvariant()).ToArray() ?? Array.Empty<string>();
 
-            // Auto-detect column indices
             var latCol = FindColumn(headers, "lat", "latitude", "y");
             var lonCol = FindColumn(headers, "lon", "lng", "longitude", "long", "x");
             var nameCol = FindColumn(headers, "name", "title", "place", "location");
@@ -43,6 +45,8 @@ namespace LucidCartographer.Services.Import
 
             while (csv.Read())
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 var latStr = csv.GetField(latCol);
                 var lonStr = csv.GetField(lonCol);
                 if (string.IsNullOrWhiteSpace(latStr) || string.IsNullOrWhiteSpace(lonStr)) continue;
@@ -68,6 +72,13 @@ namespace LucidCartographer.Services.Import
 
         private static int FindColumn(string[] headers, params string[] candidates)
         {
+            // Exact match first
+            for (int i = 0; i < headers.Length; i++)
+            {
+                if (candidates.Any(c => headers[i] == c))
+                    return i;
+            }
+            // Fallback to contains
             for (int i = 0; i < headers.Length; i++)
             {
                 if (candidates.Any(c => headers[i].Contains(c)))

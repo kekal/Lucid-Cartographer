@@ -10,6 +10,20 @@ namespace LucidCartographer.Services.Import
 
     public class GoogleMapsListScraper : IGoogleMapsListScraper
     {
+        private const string DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+        private static readonly string[] AllowedUrlPrefixes =
+        [
+            "https://www.google.com/maps/",
+            "https://maps.google.com/",
+            "https://maps.app.goo.gl/",
+            "https://goo.gl/maps/",
+            "http://www.google.com/maps/",
+            "http://maps.google.com/",
+            "http://maps.app.goo.gl/",
+            "http://goo.gl/maps/"
+        ];
+
         private readonly ILogger<GoogleMapsListScraper> _logger;
 
         public GoogleMapsListScraper(ILogger<GoogleMapsListScraper> logger)
@@ -17,46 +31,41 @@ namespace LucidCartographer.Services.Import
             _logger = logger;
         }
 
-        public async Task<ScrapeResult> ScrapeAsync(string listUrl, Action<int>? onProgress = null)
+        public async Task<ScrapeResult> ScrapeAsync(string listUrl, Action<int>? onProgress = null, CancellationToken cancellationToken = default)
         {
-            _logger.LogInformation("Starting scrape of {Url}", listUrl);
+            // URL validation: prevent SSRF
+            if (string.IsNullOrWhiteSpace(listUrl))
+                throw new ArgumentException("List URL must not be empty.", nameof(listUrl));
+
+            var trimmedUrl = listUrl.Trim();
+            if (!AllowedUrlPrefixes.Any(prefix => trimmedUrl.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+                throw new ArgumentException("URL must be a Google Maps URL (https://www.google.com/maps/... or https://maps.app.goo.gl/...).", nameof(listUrl));
+
+            _logger.LogInformation("Starting scrape of {Url}", trimmedUrl);
 
             using var playwright = await Playwright.CreateAsync();
             await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
             {
                 Headless = true
             });
-            var context = await browser.NewContextAsync(new BrowserNewContextOptions
+            await using var context = await browser.NewContextAsync(new BrowserNewContextOptions
             {
                 Locale = "en-US",
-                UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                UserAgent = DefaultUserAgent
             });
             var page = await context.NewPageAsync();
 
             // Navigate to the list URL
-            await page.GotoAsync(listUrl, new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 30000 });
+            await page.GotoAsync(trimmedUrl, new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 30000 });
 
             // Wait for list content to load
             await page.WaitForTimeoutAsync(5000);
 
-            // Debug: save screenshot and page URL after redirect
             _logger.LogInformation("Page URL after navigation: {Url}", page.Url);
-            try
-            {
-                await page.ScreenshotAsync(new PageScreenshotOptions { Path = "data/debug_scrape.png" });
-                var html = await page.ContentAsync();
-                File.WriteAllText("data/debug_scrape.html", html);
-                _logger.LogInformation("Debug screenshot and HTML saved to data/");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to save debug files");
-            }
 
             // Accept cookies/consent if dialog appears
             try
             {
-                // Try various consent button selectors
                 var consentSelectors = new[]
                 {
                     "button[aria-label*='Accept']",
@@ -78,18 +87,14 @@ namespace LucidCartographer.Services.Import
                     }
                 }
             }
-            catch { /* no cookie dialog */ }
-
-            // Debug: save another screenshot after consent
-            try
+            catch (Exception ex)
             {
-                await page.ScreenshotAsync(new PageScreenshotOptions { Path = "data/debug_scrape2.png" });
-                _logger.LogInformation("Post-consent URL: {Url}", page.Url);
+                _logger.LogDebug(ex, "No cookie consent dialog found or failed to click it");
             }
-            catch { }
+
+            _logger.LogDebug("Post-consent URL: {Url}", page.Url);
 
             // Scroll the list panel to load all places
-            // Google Maps lists lazy-load as you scroll — try multiple selectors
             var scrollSelectors = new[]
             {
                 "div[role='feed']",
@@ -102,7 +107,6 @@ namespace LucidCartographer.Services.Import
             string? listName = null;
             try
             {
-                // Google Maps list title appears in various header elements
                 var titleSelectors = new[] { "h1.fontHeadlineLarge", "h1", "div.fontHeadlineLarge", "div.F63Kk span" };
                 foreach (var sel in titleSelectors)
                 {
@@ -119,7 +123,10 @@ namespace LucidCartographer.Services.Import
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to extract list name");
+            }
 
             ILocator? scrollContainer = null;
             foreach (var sel in scrollSelectors)
@@ -136,7 +143,6 @@ namespace LucidCartographer.Services.Import
             if (scrollContainer == null)
             {
                 _logger.LogWarning("No scroll container found. Trying page-level scroll.");
-                // Fallback: scroll the whole page
                 scrollContainer = page.Locator("body").First;
             }
 
@@ -145,8 +151,10 @@ namespace LucidCartographer.Services.Import
                 var previousCount = 0;
                 var stableRounds = 0;
 
-                for (int i = 0; i < 100; i++) // max 100 scroll attempts
+                for (int i = 0; i < 100; i++)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
+
                     await scrollContainer.EvaluateAsync("el => el.scrollTop = el.scrollHeight");
                     await page.WaitForTimeoutAsync(1500);
 
@@ -157,7 +165,7 @@ namespace LucidCartographer.Services.Import
                     if (currentCount == previousCount)
                     {
                         stableRounds++;
-                        if (stableRounds >= 3) break; // no new items after 3 scrolls
+                        if (stableRounds >= 3) break;
                     }
                     else
                     {
@@ -167,29 +175,10 @@ namespace LucidCartographer.Services.Import
                 }
             }
 
-            // Debug: save final HTML and screenshot
-            try
-            {
-                await page.ScreenshotAsync(new PageScreenshotOptions { Path = "data/debug_scrape3.png" });
-                var finalHtml = await page.ContentAsync();
-                File.WriteAllText("data/debug_scrape_final.html", finalHtml);
-            }
-            catch { }
-
-            // Google Maps list items are NOT <a> links — they are div elements
-            // that get clicked via JS. We need to click each item to get its URL,
-            // or extract data directly from the list item DOM.
-
-            // Strategy: extract place data by clicking each list item and reading
-            // the URL that appears, then going back to the list.
-            // But simpler: use the data already visible in the DOM.
-
-            // Google Maps list items use obfuscated class names.
-            // Try multiple known selectors in order of specificity.
             var itemSelectors = new[]
             {
-                "div.Nv2PK",           // Standard search results
-                "div.BsJqK",           // List view items (observed in debug HTML)
+                "div.Nv2PK",
+                "div.BsJqK",
                 "div.m6QErb div[role='article']",
                 "div.lI9IFe",
             };
@@ -215,16 +204,15 @@ namespace LucidCartographer.Services.Import
 
             var results = new List<ImportedPoi>();
 
-            // Strategy: click each list item to navigate to its detail view,
-            // extract name + coordinates from the URL, then go back to the list.
             _logger.LogInformation("Using click-through strategy for {Count} items", listItems.Count);
 
             var totalItems = listItems.Count;
             for (int idx = 0; idx < totalItems; idx++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 try
                 {
-                    // Re-query items each time since DOM changes after navigation
                     var items = await page.Locator(usedSelector).AllAsync();
 
                     if (idx >= items.Count)
@@ -242,13 +230,14 @@ namespace LucidCartographer.Services.Import
                         var nameEl = item.Locator(".fontHeadlineSmall, .qBF1Pd, .NrDZNb").First;
                         name = await nameEl.InnerTextAsync();
                     }
-                    catch
+                    catch (Exception ex)
                     {
+                        _logger.LogDebug(ex, "Failed to extract name via specific selector for item {Idx}, falling back to full text", idx);
                         name = (await item.InnerTextAsync()).Split('\n').FirstOrDefault()?.Trim() ?? "Unknown";
                     }
                     name = name.Split('\n').FirstOrDefault()?.Trim() ?? "Unknown";
 
-                    // Rating (e.g., "4.9")
+                    // Rating
                     double? rating = null;
                     try
                     {
@@ -260,9 +249,12 @@ namespace LucidCartographer.Services.Import
                                 rating = r;
                         }
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Failed to extract rating for item {Idx}", idx);
+                    }
 
-                    // Review count (e.g., "(9 323)")
+                    // Review count
                     int? reviewCount = null;
                     try
                     {
@@ -275,26 +267,27 @@ namespace LucidCartographer.Services.Import
                                 reviewCount = rc;
                         }
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Failed to extract review count for item {Idx}", idx);
+                    }
 
-                    // Category from list item (e.g., "Muzeum", "Zoo")
+                    // Category from list item
                     string? category = null;
                     string? description = null;
                     try
                     {
-                        // Get all text lines from the item
                         var bodyEls = await item.Locator(".W4Efsd").AllAsync();
                         foreach (var bodyEl in bodyEls)
                         {
                             var text = (await bodyEl.InnerTextAsync()).Trim();
                             if (string.IsNullOrEmpty(text) || text == name) continue;
-                            // First non-rating text is usually the category
                             var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                             foreach (var line in lines)
                             {
-                                var clean = line.Trim(' ', '·', '\u00B7');
+                                var clean = line.Trim(' ', '\u00B7', '\u00B7');
                                 if (clean.Length < 2 || clean == name) continue;
-                                if (clean.All(c => char.IsDigit(c) || c == '.' || c == ',' || c == '(' || c == ')' || c == ' ' || c == '★')) continue;
+                                if (clean.All(c => char.IsDigit(c) || c == '.' || c == ',' || c == '(' || c == ')' || c == ' ' || c == '\u2605')) continue;
                                 if (category == null)
                                     category = clean;
                                 else if (description == null && clean != category)
@@ -302,7 +295,10 @@ namespace LucidCartographer.Services.Import
                             }
                         }
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to extract category/description for item {Idx} '{Name}'", idx, name);
+                    }
 
                     // Image URL
                     string? imageUrl = null;
@@ -312,12 +308,14 @@ namespace LucidCartographer.Services.Import
                         if (await imgEl.IsVisibleAsync())
                             imageUrl = await imgEl.GetAttributeAsync("src");
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Failed to extract image URL for item {Idx}", idx);
+                    }
 
                     // === Click the item to get coordinates + address ===
                     await item.ClickAsync();
 
-                    // Wait for URL to update with place data (!3d/!4d)
                     (double lat, double lon)? coords = null;
                     string currentUrl = "";
                     for (int wait = 0; wait < 5; wait++)
@@ -345,10 +343,13 @@ namespace LucidCartographer.Services.Import
                                 }
                             }
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Failed to extract coordinates from directions button for item {Idx}", idx);
+                        }
                     }
 
-                    // Extract address from the detail panel
+                    // Extract address
                     string? address = null;
                     try
                     {
@@ -356,7 +357,10 @@ namespace LucidCartographer.Services.Import
                         if (await addrEl.IsVisibleAsync())
                             address = (await addrEl.InnerTextAsync()).Trim();
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to extract address for item {Idx} '{Name}'", idx, name);
+                    }
 
                     // Extract website
                     string? website = null;
@@ -366,7 +370,10 @@ namespace LucidCartographer.Services.Import
                         if (await webEl.IsVisibleAsync())
                             website = await webEl.GetAttributeAsync("href") ?? (await webEl.InnerTextAsync()).Trim();
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to extract website for item {Idx} '{Name}'", idx, name);
+                    }
 
                     // Extract phone
                     string? phone = null;
@@ -376,7 +383,10 @@ namespace LucidCartographer.Services.Import
                         if (await phoneEl.IsVisibleAsync())
                             phone = (await phoneEl.InnerTextAsync()).Trim();
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to extract phone for item {Idx} '{Name}'", idx, name);
+                    }
 
                     if (coords != null)
                     {
@@ -394,12 +404,12 @@ namespace LucidCartographer.Services.Import
                             Phone: phone,
                             ImageUrl: imageUrl
                         ));
-                        _logger.LogInformation("[{Idx}/{Total}] {Name} ({Cat}) ★{Rating} @ {Lat},{Lon}",
-                            idx + 1, totalItems, name, category ?? "-", rating?.ToString("F1") ?? "-", coords.Value.lat, coords.Value.lon);
+                        _logger.LogInformation("[{Idx}/{Total}] {Name} ({Cat}) @ {Lat},{Lon}",
+                            idx + 1, totalItems, name, category ?? "-", coords.Value.lat, coords.Value.lon);
                     }
                     else
                     {
-                        _logger.LogWarning("[{Idx}/{Total}] Skipped {Name} — no coordinates found", idx + 1, totalItems, name);
+                        _logger.LogWarning("[{Idx}/{Total}] Skipped {Name} -- no coordinates found", idx + 1, totalItems, name);
                     }
 
                     onProgress?.Invoke(results.Count);
@@ -411,8 +421,15 @@ namespace LucidCartographer.Services.Import
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Failed to process item {Idx}", idx);
-                    // Try to recover by going back
-                    try { await page.GoBackAsync(); await page.WaitForTimeoutAsync(2000); } catch { }
+                    try
+                    {
+                        await page.GoBackAsync();
+                        await page.WaitForTimeoutAsync(2000);
+                    }
+                    catch (Exception backEx)
+                    {
+                        _logger.LogWarning(backEx, "Failed to go back after error on item {Idx}", idx);
+                    }
                 }
             }
 
@@ -422,14 +439,11 @@ namespace LucidCartographer.Services.Import
 
         private static (double lat, double lon)? ExtractCoordinates(string url)
         {
-            // Priority 1: !3d<lat>!4d<lon> — actual place coordinates
             var lat3d = ExtractBang(url, "!3d");
             var lon4d = ExtractBang(url, "!4d");
             if (lat3d.HasValue && lon4d.HasValue)
                 return (lat3d.Value, lon4d.Value);
 
-            // Priority 2: /place/Name/lat,lon pattern
-            // e.g., /place/Museum/@51.1,17.0,15z/data=...
             var placeIdx = url.IndexOf("/place/");
             if (placeIdx >= 0)
             {
@@ -447,7 +461,6 @@ namespace LucidCartographer.Services.Import
                 }
             }
 
-            // Priority 3: /@lat,lon — viewport coordinates (least accurate, last resort)
             var atIdx2 = url.IndexOf("/@");
             if (atIdx2 >= 0)
             {

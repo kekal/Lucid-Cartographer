@@ -5,23 +5,35 @@ namespace LucidCartographer.Services.Import
     public class GeoJsonImporter : IFileImporter
     {
         public string FormatName => "GeoJSON";
-        public string[] SupportedExtensions => new[] { ".geojson", ".json" };
 
-        public async Task<List<ImportedPoi>> ParseAsync(Stream fileStream, string fileName)
+        private static readonly string[] _extensions = [".geojson"];
+        public IReadOnlyList<string> SupportedExtensions => _extensions;
+
+        public async Task<List<ImportedPoi>> ParseAsync(Stream fileStream, string fileName, CancellationToken cancellationToken = default)
         {
-            var doc = await JsonDocument.ParseAsync(fileStream);
+            using var doc = await JsonDocument.ParseAsync(fileStream, cancellationToken: cancellationToken);
             var results = new List<ImportedPoi>();
             var root = doc.RootElement;
 
-            // Handle both FeatureCollection and direct Feature array
-            JsonElement features;
-            if (root.TryGetProperty("features", out features) && features.ValueKind == JsonValueKind.Array)
+            // Determine root type
+            var rootType = root.TryGetProperty("type", out var typeProp) ? typeProp.GetString() : null;
+
+            if (rootType == "FeatureCollection"
+                && root.TryGetProperty("features", out var features)
+                && features.ValueKind == JsonValueKind.Array)
             {
                 foreach (var feature in features.EnumerateArray())
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var poi = ParseFeature(feature);
                     if (poi != null) results.Add(poi);
                 }
+            }
+            else if (rootType == "Feature")
+            {
+                // Standalone Feature
+                var poi = ParseFeature(root);
+                if (poi != null) results.Add(poi);
             }
 
             return results;
@@ -29,15 +41,17 @@ namespace LucidCartographer.Services.Import
 
         private static ImportedPoi? ParseFeature(JsonElement feature)
         {
-            // Get geometry
             if (!feature.TryGetProperty("geometry", out var geometry)) return null;
             if (!geometry.TryGetProperty("coordinates", out var coords)) return null;
             if (coords.ValueKind != JsonValueKind.Array || coords.GetArrayLength() < 2) return null;
 
+            // Only handle Point geometry
+            if (geometry.TryGetProperty("type", out var geoType) && geoType.GetString() != "Point")
+                return null;
+
             var lon = coords[0].GetDouble();
             var lat = coords[1].GetDouble();
 
-            // Get properties
             var props = feature.TryGetProperty("properties", out var p) ? p : default;
 
             var name = GetStringProp(props, "name")
@@ -54,7 +68,6 @@ namespace LucidCartographer.Services.Import
                          ?? GetStringProp(props, "url")
                          ?? GetStringProp(props, "URL");
 
-            // Google Takeout specific: look for "Google Maps URL" field
             if (googleUrl == null)
             {
                 googleUrl = GetStringProp(props, "Google Maps URL");

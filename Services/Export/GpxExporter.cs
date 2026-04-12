@@ -3,11 +3,22 @@ using System.Xml.Linq;
 
 namespace LucidCartographer.Services.Export
 {
-    public class GpxExporter
+    public class GpxExporter : IFileExporter
     {
         private static readonly XNamespace Gpx = "http://www.topografix.com/GPX/1/1";
 
+        public string FormatName => "GPX";
+        public string FileExtension => ".gpx";
+        public string ContentType => "application/gpx+xml";
+
         public byte[] Export(List<Poi> pois, string name = "Lucid Cartographer Export")
+        {
+            using var ms = new MemoryStream();
+            ExportAsync(pois, ms, name).GetAwaiter().GetResult();
+            return ms.ToArray();
+        }
+
+        public Task ExportAsync(List<Poi> pois, Stream output, string name = "Lucid Cartographer Export")
         {
             var doc = new XDocument(
                 new XDeclaration("1.0", "UTF-8", null),
@@ -34,9 +45,8 @@ namespace LucidCartographer.Services.Export
                 )
             );
 
-            using var ms = new MemoryStream();
-            doc.Save(ms);
-            return ms.ToArray();
+            doc.Save(output);
+            return Task.CompletedTask;
         }
     }
 }

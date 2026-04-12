@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
@@ -6,22 +7,28 @@ namespace LucidCartographer.Services.Import
     public class KmlImporter : IFileImporter
     {
         public string FormatName => "KML";
-        public string[] SupportedExtensions => new[] { ".kml", ".kmz" };
 
-        public async Task<List<ImportedPoi>> ParseAsync(Stream fileStream, string fileName)
+        private static readonly string[] _extensions = [".kml", ".kmz"];
+        public IReadOnlyList<string> SupportedExtensions => _extensions;
+
+        public async Task<List<ImportedPoi>> ParseAsync(Stream fileStream, string fileName, CancellationToken cancellationToken = default)
         {
-            Stream xmlStream = fileStream;
+            XDocument doc;
 
-            // Handle KMZ (ZIP containing KML)
             if (Path.GetExtension(fileName).Equals(".kmz", StringComparison.OrdinalIgnoreCase))
             {
-                var zip = new System.IO.Compression.ZipArchive(fileStream, System.IO.Compression.ZipArchiveMode.Read);
+                using var zip = new ZipArchive(fileStream, ZipArchiveMode.Read);
                 var kmlEntry = zip.Entries.FirstOrDefault(e => e.FullName.EndsWith(".kml", StringComparison.OrdinalIgnoreCase));
                 if (kmlEntry == null) return new List<ImportedPoi>();
-                xmlStream = kmlEntry.Open();
+
+                using var kmlStream = kmlEntry.Open();
+                doc = await XDocument.LoadAsync(kmlStream, LoadOptions.None, cancellationToken);
+            }
+            else
+            {
+                doc = await XDocument.LoadAsync(fileStream, LoadOptions.None, cancellationToken);
             }
 
-            var doc = await XDocument.LoadAsync(xmlStream, LoadOptions.None, CancellationToken.None);
             var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
 
             var results = new List<ImportedPoi>();
@@ -31,12 +38,12 @@ namespace LucidCartographer.Services.Import
 
             foreach (var pm in placemarks)
             {
-                var name = pm.Element(ns + "name")?.Value ?? pm.Element("name")?.Value ?? "Unknown";
-                var desc = pm.Element(ns + "description")?.Value ?? pm.Element("description")?.Value;
+                cancellationToken.ThrowIfCancellationRequested();
 
-                // Parse coordinates (KML format: lon,lat,alt)
-                var coordsText = pm.Descendants(ns + "coordinates").FirstOrDefault()?.Value
-                              ?? pm.Descendants("coordinates").FirstOrDefault()?.Value;
+                var name = FindElement(pm, ns, "name")?.Value ?? "Unknown";
+                var desc = FindElement(pm, ns, "description")?.Value;
+
+                var coordsText = FindDescendant(pm, ns, "coordinates")?.Value;
                 if (coordsText == null) continue;
 
                 var parts = coordsText.Trim().Split(',');
@@ -45,7 +52,6 @@ namespace LucidCartographer.Services.Import
                 if (!double.TryParse(parts[0].Trim(), System.Globalization.CultureInfo.InvariantCulture, out var lon)) continue;
                 if (!double.TryParse(parts[1].Trim(), System.Globalization.CultureInfo.InvariantCulture, out var lat)) continue;
 
-                // Try to extract Google Maps URL from description HTML
                 string? googleUrl = ExtractGoogleMapsUrl(desc);
 
                 results.Add(new ImportedPoi(
@@ -59,19 +65,27 @@ namespace LucidCartographer.Services.Import
             return results;
         }
 
+        private static XElement? FindElement(XElement parent, XNamespace ns, string localName)
+        {
+            return parent.Element(ns + localName) ?? parent.Element(localName);
+        }
+
+        private static XElement? FindDescendant(XElement parent, XNamespace ns, string localName)
+        {
+            return parent.Descendants(ns + localName).FirstOrDefault()
+                ?? parent.Descendants(localName).FirstOrDefault();
+        }
+
         private static string? ExtractGoogleMapsUrl(string? html)
         {
             if (string.IsNullOrEmpty(html)) return null;
-            // Simple regex-free extraction: find google.com/maps or maps.google.com URLs
             var idx = html.IndexOf("google.com/maps", StringComparison.OrdinalIgnoreCase);
             if (idx < 0) idx = html.IndexOf("maps.google.com", StringComparison.OrdinalIgnoreCase);
             if (idx < 0) return null;
 
-            // Walk backward to find URL start (https:// or http://)
             var start = html.LastIndexOf("http", idx, StringComparison.OrdinalIgnoreCase);
             if (start < 0) return null;
 
-            // Walk forward to find URL end
             var end = idx;
             while (end < html.Length && html[end] != '"' && html[end] != '\'' && html[end] != '<' && html[end] != ' ' && html[end] != '\n')
                 end++;
@@ -82,8 +96,11 @@ namespace LucidCartographer.Services.Import
         private static string? StripHtml(string? html)
         {
             if (string.IsNullOrEmpty(html)) return null;
-            // Simple HTML tag removal
-            return Regex.Replace(html, "<[^>]+>", " ").Trim();
+            // Strip HTML tags -- iterative approach to handle nested/broken tags
+            var result = Regex.Replace(html, "<[^>]*>", " ");
+            // Second pass to catch any leftovers from broken tags like <scr<script>ipt>
+            result = Regex.Replace(result, "<[^>]*>", " ");
+            return System.Net.WebUtility.HtmlDecode(result).Trim();
         }
     }
 }
