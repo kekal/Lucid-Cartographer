@@ -1,9 +1,15 @@
 # Build stage
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+# Download standalone Tailwind CLI (no Node.js needed)
+ADD https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.17/tailwindcss-linux-x64 /usr/local/bin/tailwindcss
+RUN chmod +x /usr/local/bin/tailwindcss
+
 WORKDIR /src
 COPY *.csproj .
 RUN dotnet restore
 COPY . .
+# Build Tailwind CSS
+RUN tailwindcss -i wwwroot/css/input.css -o wwwroot/css/tailwind.css --minify
 RUN dotnet publish -c Release -o /app/publish
 
 # Runtime stage — official Playwright image includes Chromium and all OS dependencies (CRIT-02 fix)

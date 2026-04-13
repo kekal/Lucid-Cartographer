@@ -6,3 +6,5 @@ data/*.db-wal
 data/debug_*
 *.user
 .vs/
+tailwindcss-windows-x64.exe
+wwwroot/css/tailwind.css
