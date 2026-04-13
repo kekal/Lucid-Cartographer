@@ -17,43 +17,9 @@
 **Status:** Fixed. The runtime stage of the Dockerfile now uses the official Playwright Docker image (`mcr.microsoft.com/playwright/dotnet:v1.49.0-noble`) as the base, which includes Chromium and all required OS dependencies out of the box. No sidecar architecture is needed for a personal NAS tool. The health check was switched from `wget` to `curl` (available in the Ubuntu-based Playwright image).
 7. This also mitigates CRIT-03 (authentication) — the scraper is not exposed externally, only the web app is. And it isolates the SSRF risk to an internal-only container.
 
-### CRIT-03: No in-app authentication
+### CRIT-03: ~~No in-app authentication~~ RESOLVED
 **File:** `Program.cs`
-**Detail:** Zero authentication middleware. All other NAS services have their own auth. Cloudflare Zero Trust tunnel provides connectivity only, NOT authentication. Anyone with the subdomain URL has full access (confirmed by testing from anonymous tab).
-**Fix — Simple password + cookie middleware:**
-Single-user personal tool needs minimal auth: a password from an environment variable, verified once, stored in a cookie.
-```csharp
-// Program.cs — add before app.UseAntiforgery()
-app.Use(async (context, next) =>
-{
-    var path = context.Request.Path.Value ?? "";
-
-    // Allow the login page and static assets
-    if (path == "/login" || path.StartsWith("/_framework") || path.StartsWith("/css"))
-    {
-        await next();
-        return;
-    }
-
-    // Check auth cookie
-    if (context.Request.Cookies["cartographer_auth"] == "authenticated")
-    {
-        await next();
-        return;
-    }
-
-    context.Response.Redirect("/login");
-});
-```
-Login page: single password field, compares against `CARTOGRAPHER_PASSWORD` env var, sets a long-lived HttpOnly cookie. No user management, no database, no JWT.
-```yaml
-# docker-compose.yml
-services:
-  cartographer:
-    environment:
-      - CARTOGRAPHER_PASSWORD=your-secret-here
-```
-Consistent with other NAS services that each handle their own auth.
+**Status:** Fixed. Simple password + cookie authentication added. A middleware in `Program.cs` checks for a `cartographer_auth` cookie (containing a SHA256 hash of the password) on every request except login, static assets, and Blazor framework paths. The login page (`Components/Pages/Login.razor`) is a static SSR form POST that compares the submitted password against `Auth:Password` from configuration. If the password matches, a 30-day HttpOnly cookie is set. If `Auth:Password` is empty/null, auth is skipped entirely (development mode). The password is set via `AUTH__PASSWORD` environment variable in `docker-compose.yml`. A logout endpoint (`/logout`) deletes the cookie. The login page uses a minimal layout without the main sidebar/nav.
 
 ### CRIT-04: `EnsureCreatedAsync` used instead of migrations
 **File:** `Program.cs`, lines 36-41

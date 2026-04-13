@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using LucidCartographer.Components;
 using LucidCartographer.Data;
 using LucidCartographer.Services;
@@ -88,6 +90,40 @@ app.Use(async (context, next) =>
     await next();
 });
 
+// CRIT-03: Simple password + cookie authentication middleware
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path.Value ?? "";
+
+    // Allow: login page, static assets, health check, Blazor framework
+    if (path == "/login" ||
+        path.StartsWith("/_framework") ||
+        path.StartsWith("/css") ||
+        path.StartsWith("/js") ||
+        path.StartsWith("/lib") ||
+        path == "/health" ||
+        path.StartsWith("/_blazor"))
+    {
+        await next();
+        return;
+    }
+
+    // Check auth cookie (skip auth entirely if no password configured)
+    var expectedPassword = context.RequestServices.GetRequiredService<IConfiguration>()["Auth:Password"];
+    if (!string.IsNullOrEmpty(expectedPassword))
+    {
+        var cookieValue = context.Request.Cookies["cartographer_auth"];
+        var expectedHash = ComputeHash(expectedPassword);
+        if (cookieValue != expectedHash)
+        {
+            context.Response.Redirect("/login");
+            return;
+        }
+    }
+
+    await next();
+});
+
 app.UseAntiforgery();
 
 app.UseStaticFiles();
@@ -95,10 +131,48 @@ app.UseStaticFiles();
 // Health check endpoint (MED-01)
 app.MapHealthChecks("/health");
 
+// CRIT-03: Login endpoint (handles form POST from login page)
+app.MapPost("/login", async (HttpContext context) =>
+{
+    var form = await context.Request.ReadFormAsync();
+    var password = form["password"].ToString();
+    var expectedPassword = context.RequestServices.GetRequiredService<IConfiguration>()["Auth:Password"];
+
+    if (!string.IsNullOrEmpty(expectedPassword) && password == expectedPassword)
+    {
+        context.Response.Cookies.Append("cartographer_auth", ComputeHash(password), new CookieOptions
+        {
+            HttpOnly = true,
+            SameSite = SameSiteMode.Strict,
+            MaxAge = TimeSpan.FromDays(30),
+            IsEssential = true
+        });
+        context.Response.Redirect("/");
+    }
+    else
+    {
+        context.Response.Redirect("/login?error=1");
+    }
+});
+
+// CRIT-03: Logout endpoint
+app.MapGet("/logout", (HttpContext context) =>
+{
+    context.Response.Cookies.Delete("cartographer_auth");
+    context.Response.Redirect("/login");
+});
+
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
+
+// CRIT-03: Hash helper for password cookie
+static string ComputeHash(string input)
+{
+    var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(input));
+    return Convert.ToHexString(bytes).ToLowerInvariant();
+}
 
 // Make Program accessible for WebApplicationFactory in integration tests
 public partial class Program { }
