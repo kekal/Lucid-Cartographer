@@ -13,7 +13,7 @@ namespace LucidCartographer.Data.Entities
         [MaxLength(2000)]
         public string? Description { get; set; }
 
-        [MaxLength(9)]
+        [MaxLength(7)]
         public string Color { get; set; } = "#005bbf";
 
         [MaxLength(100)]

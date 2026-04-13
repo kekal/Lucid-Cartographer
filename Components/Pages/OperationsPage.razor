@@ -9,6 +9,7 @@
 @inject IEnumerable<IFileExporter> Exporters
 @inject IJSRuntime JS
 @inject ISetOperationService SetOperationService
+@implements IAsyncDisposable
 
 <PageTitle>Operations - Lucid Cartographer</PageTitle>
 
@@ -297,7 +298,7 @@ else
     private double _toleranceMeters = 100;
     private SetOperation? _activeOp;
     private OperationResult? _result;
-    private List<Poi> _resultPois = new();
+    private IReadOnlyList<Poi> _resultPois = Array.Empty<Poi>();
     private HashSet<int> _discardedIds = new();
     private bool _isProcessing;
     private bool _isLoading = true;
@@ -306,6 +307,7 @@ else
     private string _commitName = string.Empty;
     private string? _commitSuccess;
     private bool _isDedupMode = false;
+    private CancellationTokenSource _cts = new();
 
     // MED-05: Removed unused CanRunBinaryOp property
 
@@ -339,7 +341,7 @@ else
         _activeOp = operation;
         _isProcessing = true;
         _result = null;
-        _resultPois.Clear();
+        _resultPois = Array.Empty<Poi>();
         _discardedIds.Clear();
         _showCommitDialog = false;
         _commitSuccess = null;
@@ -351,7 +353,8 @@ else
                 operation,
                 _collectionAId,
                 operation == SetOperation.Dedup ? null : _collectionBId,
-                _toleranceMeters);
+                _toleranceMeters,
+                _cts.Token);
             _resultPois = _result.Pois;
         }
         catch (Exception ex)
@@ -397,7 +400,9 @@ else
 
         // ARCH-HIGH-01: Resolve KML exporter from the injected collection instead of concrete type
         var kmlExporter = Exporters.First(e => e.FormatName == "KML");
-        var bytes = kmlExporter.Export(poisToExport, _commitName ?? "Operation Result");
+        // HIGH-07: Use IsNullOrEmpty to catch both null and empty string
+        var exportTitle = string.IsNullOrEmpty(_commitName) ? GetOperationLabel() : _commitName;
+        var bytes = kmlExporter.Export(poisToExport, exportTitle);
         var fileName = $"export_{DateTime.Now:yyyyMMdd_HHmmss}.kml";
 
         // Trigger browser download via JS
@@ -414,4 +419,12 @@ else
     };
 
     // ARCH-HIGH-03: GetGoogleMapsUrl moved to PoiUrlHelper.cs
+
+    // CRIT-06: Cancel in-flight operations when navigating away
+    public ValueTask DisposeAsync()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+        return ValueTask.CompletedTask;
+    }
 }

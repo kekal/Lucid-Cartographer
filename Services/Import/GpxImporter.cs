@@ -45,9 +45,9 @@ namespace LucidCartographer.Services.Import
                 if (!double.TryParse(latStr, System.Globalization.CultureInfo.InvariantCulture, out var lat)) { skipped++; continue; }
                 if (!double.TryParse(lonStr, System.Globalization.CultureInfo.InvariantCulture, out var lon)) { skipped++; continue; }
 
-                var name = FindElement(wpt, ns, "name")?.Value ?? "Unknown";
-                var desc = FindElement(wpt, ns, "desc")?.Value;
-                var linkHref = FindElement(wpt, ns, "link")?.Attribute("href")?.Value;
+                var name = XmlParsingHelpers.FindElement(wpt, ns, "name")?.Value ?? "Unknown";
+                var desc = XmlParsingHelpers.FindElement(wpt, ns, "desc")?.Value;
+                var linkHref = XmlParsingHelpers.FindElement(wpt, ns, "link")?.Attribute("href")?.Value;
 
                 results.Add(new ImportedPoi(
                     Name: name.Trim(),
@@ -63,12 +63,6 @@ namespace LucidCartographer.Services.Import
             return results;
         }
 
-        /// <summary>
-        /// Tries a namespaced lookup first, then falls back to local name only.
-        /// </summary>
-        private static XElement? FindElement(XElement parent, XNamespace ns, string localName)
-        {
-            return parent.Element(ns + localName) ?? parent.Element(localName);
-        }
+        // IE-04: FindElement moved to XmlParsingHelpers
     }
 }

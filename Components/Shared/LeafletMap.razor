@@ -1,6 +1,7 @@
 @using LucidCartographer.Data.Entities
 @using LucidCartographer.Services
 @inject IMapService MapService
+@inject ILogger<LeafletMap> Logger
 @implements IAsyncDisposable
 
 <div id="@_mapElementId" style="width:100%;height:100%;"></div>
@@ -85,7 +86,8 @@
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Error handling marker click for POI {poiId}: {ex.Message}");
+            // HIGH-06: Use ILogger instead of Debug.WriteLine so errors are visible in production
+            Logger.LogError(ex, "Error handling marker click for POI {PoiId}", poiId);
         }
     }
 

@@ -36,7 +36,7 @@
                     {
                         <tr @key="poi.Id"
                             class="hover:bg-surface-container-low transition-colors cursor-pointer @(SelectedPoiId == poi.Id ? "bg-surface-container" : "")"
-                            @onclick="() => OnPoiSelected.InvokeAsync(poi.Id)">
+                            @onclick="() => HandlePoiClick(poi.Id)">
                             <td class="px-4 py-2.5">
                                 <div class="flex items-center gap-2">
                                     <span class="material-symbols-outlined text-base text-on-surface-variant" aria-hidden="true">location_on</span>
@@ -98,6 +98,19 @@
     [Parameter] public string? CollectionName { get; set; }
     [Parameter] public EventCallback<int> OnPoiSelected { get; set; }
     [Parameter] public EventCallback<int> OnFocusClicked { get; set; }
+
+    // HIGH-04: Wrap EventCallback invocations in try/catch, matching CollectionSidebar pattern
+    private async Task HandlePoiClick(int poiId)
+    {
+        try
+        {
+            await OnPoiSelected.InvokeAsync(poiId);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error selecting POI {poiId}: {ex.Message}");
+        }
+    }
 
     // ARCH-HIGH-03: GetGoogleMapsUrl moved to PoiUrlHelper.cs
 }

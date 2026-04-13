@@ -5,7 +5,7 @@ using System.Xml.Linq;
 
 namespace LucidCartographer.Services.Import
 {
-    public class KmlImporter : IFileImporter
+    public partial class KmlImporter : IFileImporter
     {
         private readonly ILogger<KmlImporter> _logger;
 
@@ -50,10 +50,10 @@ namespace LucidCartographer.Services.Import
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var name = FindElement(pm, ns, "name")?.Value ?? "Unknown";
-                var desc = FindElement(pm, ns, "description")?.Value;
+                var name = XmlParsingHelpers.FindElement(pm, ns, "name")?.Value ?? "Unknown";
+                var desc = XmlParsingHelpers.FindElement(pm, ns, "description")?.Value;
 
-                var coordsText = FindDescendant(pm, ns, "coordinates")?.Value;
+                var coordsText = XmlParsingHelpers.FindDescendant(pm, ns, "coordinates")?.Value;
                 if (coordsText == null) { skipped++; continue; }
 
                 var parts = coordsText.Trim().Split(',');
@@ -78,16 +78,7 @@ namespace LucidCartographer.Services.Import
             return results;
         }
 
-        private static XElement? FindElement(XElement parent, XNamespace ns, string localName)
-        {
-            return parent.Element(ns + localName) ?? parent.Element(localName);
-        }
-
-        private static XElement? FindDescendant(XElement parent, XNamespace ns, string localName)
-        {
-            return parent.Descendants(ns + localName).FirstOrDefault()
-                ?? parent.Descendants(localName).FirstOrDefault();
-        }
+        // IE-04: FindElement/FindDescendant moved to XmlParsingHelpers
 
         private static string? ExtractGoogleMapsUrl(string? html)
         {
@@ -106,14 +97,18 @@ namespace LucidCartographer.Services.Import
             return html[start..end];
         }
 
+        /// <summary>
+        /// Strips HTML tags from a string using a compiled regex (IE-11).
+        /// Single pass is sufficient -- a second identical regex pass cannot match anything new.
+        /// </summary>
         private static string? StripHtml(string? html)
         {
             if (string.IsNullOrEmpty(html)) return null;
-            // Strip HTML tags -- iterative approach to handle nested/broken tags
-            var result = Regex.Replace(html, "<[^>]*>", " ");
-            // Second pass to catch any leftovers from broken tags like <scr<script>ipt>
-            result = Regex.Replace(result, "<[^>]*>", " ");
+            var result = HtmlTagRegex().Replace(html, " ");
             return System.Net.WebUtility.HtmlDecode(result).Trim();
         }
+
+        [GeneratedRegex(@"<[^>]*>")]
+        private static partial Regex HtmlTagRegex();
     }
 }

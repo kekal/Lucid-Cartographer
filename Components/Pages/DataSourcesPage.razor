@@ -6,7 +6,7 @@
 @inject IImportOrchestrator ImportOrchestrator
 @inject IPoiService PoiService
 @inject IGoogleMapsListScraper Scraper
-@implements IDisposable
+@implements IAsyncDisposable
 
 <PageTitle>Data Sources - Lucid Cartographer</PageTitle>
 
@@ -443,9 +443,11 @@
         await LoadCollections();
     }
 
-    public void Dispose()
+    // CRIT-05: IAsyncDisposable to cancel in-flight scrapes/imports on navigation
+    public ValueTask DisposeAsync()
     {
         _cts.Cancel();
         _cts.Dispose();
+        return ValueTask.CompletedTask;
     }
 }

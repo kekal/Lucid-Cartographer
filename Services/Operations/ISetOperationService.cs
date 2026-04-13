@@ -20,7 +20,7 @@ namespace LucidCartographer.Services.Operations
             SetOperation operation,
             int collectionAId,
             int? collectionBId,
-            double toleranceMeters = PoiMatcher.DefaultToleranceMeters,
+            double toleranceMeters = IPoiMatcher.DefaultToleranceMeters,
             CancellationToken cancellationToken = default);
 
         /// <summary>

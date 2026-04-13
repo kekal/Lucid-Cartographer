@@ -50,7 +50,7 @@ namespace LucidCartographer.Data
             {
                 entity.Property(e => e.Name).HasMaxLength(500);
                 entity.Property(e => e.Description).HasMaxLength(2000);
-                entity.Property(e => e.Color).HasMaxLength(9);
+                entity.Property(e => e.Color).HasMaxLength(7);
                 entity.Property(e => e.IconName).HasMaxLength(100);
                 entity.Property(e => e.SourceType).HasMaxLength(50);
                 entity.Property(e => e.SourceFileName).HasMaxLength(500);

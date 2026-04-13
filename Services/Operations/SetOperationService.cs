@@ -22,13 +22,17 @@ namespace LucidCartographer.Services.Operations
     /// <summary>
     /// Result of a set operation, containing the resulting POIs and metadata.
     /// </summary>
+    /// <summary>
+    /// Result of a set operation, containing the resulting POIs and metadata.
+    /// OPS-R16: Pois exposed as IReadOnlyList to prevent callers from mutating the result.
+    /// </summary>
     public class OperationResult
     {
         /// <summary>The resulting POIs from the operation.</summary>
-        public List<Poi> Pois { get; init; } = new();
+        public IReadOnlyList<Poi> Pois { get; init; } = Array.Empty<Poi>();
 
         /// <summary>Duplicate groups found (only populated for Dedup operations).</summary>
-        public List<List<Poi>>? DuplicateGroups { get; init; }
+        public IReadOnlyList<List<Poi>>? DuplicateGroups { get; init; }
 
         /// <summary>Human-readable description of the operation result.</summary>
         public string Description { get; init; } = string.Empty;
@@ -61,7 +65,7 @@ namespace LucidCartographer.Services.Operations
             SetOperation operation,
             int collectionAId,
             int? collectionBId,
-            double toleranceMeters = PoiMatcher.DefaultToleranceMeters,
+            double toleranceMeters = IPoiMatcher.DefaultToleranceMeters,
             CancellationToken cancellationToken = default)
         {
             await using var db = await _factory.CreateDbContextAsync(cancellationToken);
@@ -119,12 +123,24 @@ namespace LucidCartographer.Services.Operations
             };
         }
 
+        /// <summary>
+        /// OPS-R05: Deduplicates within A first, then adds unique items from B.
+        /// A true set union contains each unique element exactly once.
+        /// </summary>
         private OperationResult ExecuteUnion(List<Poi> poisA, List<Poi> poisB, Dictionary<string, Poi> urlIndexA, double toleranceMeters)
         {
-            var result = new List<Poi>(poisA);
+            // Dedup within A first so the union result contains no internal duplicates
+            var dedupGroups = _matcher.FindDuplicateGroups(poisA, toleranceMeters);
+            var dupIdsInA = dedupGroups.SelectMany(g => g.Skip(1).Select(p => p.Id)).ToHashSet();
+            var dedupedA = poisA.Where(p => !dupIdsInA.Contains(p.Id)).ToList();
+
+            // Rebuild URL index for deduped A
+            var dedupedUrlIndexA = _matcher.BuildUrlIndex(dedupedA);
+
+            var result = new List<Poi>(dedupedA);
             foreach (var b in poisB)
             {
-                if (_matcher.FindMatch(b, urlIndexA, poisA, toleranceMeters) == null)
+                if (_matcher.FindMatch(b, dedupedUrlIndexA, dedupedA, toleranceMeters) == null)
                 {
                     result.Add(b);
                 }
@@ -132,7 +148,7 @@ namespace LucidCartographer.Services.Operations
             return new OperationResult
             {
                 Pois = result,
-                Description = $"A union B: {result.Count} unique POIs from {poisA.Count} + {poisB.Count}"
+                Description = $"A union B: {result.Count} unique POIs from {poisA.Count} + {poisB.Count} (removed {dupIdsInA.Count} duplicates within A)"
             };
         }
 
@@ -160,6 +176,11 @@ namespace LucidCartographer.Services.Operations
             string color = "#7c3aed",
             CancellationToken cancellationToken = default)
         {
+            // OPS-R14: Validate inputs
+            ArgumentNullException.ThrowIfNull(pois);
+            if (string.IsNullOrWhiteSpace(name))
+                throw new ArgumentException("Collection name cannot be empty.", nameof(name));
+
             await using var db = await _factory.CreateDbContextAsync(cancellationToken);
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
@@ -189,11 +210,15 @@ namespace LucidCartographer.Services.Operations
         /// <summary>
         /// Loads POIs for a collection using AsNoTracking for read-only performance (OPS-M04).
         /// </summary>
+        /// <summary>
+        /// Loads POIs for a collection using AsNoTracking for read-only performance (OPS-M04).
+        /// OPS-R04: Filters out null navigation properties from orphaned FKs.
+        /// </summary>
         private static async Task<List<Poi>> GetCollectionPois(AppDbContext db, int collectionId, CancellationToken cancellationToken = default)
         {
             return await db.PoiCollectionItems
                 .AsNoTracking()
-                .Where(ci => ci.PoiCollectionId == collectionId)
+                .Where(ci => ci.PoiCollectionId == collectionId && ci.Poi != null)
                 .Select(ci => ci.Poi)
                 .ToListAsync(cancellationToken);
         }
