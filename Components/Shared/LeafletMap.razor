@@ -9,6 +9,8 @@
 @code {
     [Parameter] public EventCallback<int> OnMarkerSelected { get; set; }
 
+    // LOW-08: GUID ensures uniqueness across multiple LeafletMap instances on the same page
+    // or across rapid mount/unmount cycles where a simple counter could collide.
     private string _mapElementId = $"leaflet-map-{Guid.NewGuid():N}";
     private bool _initialized = false;
     private readonly TaskCompletionSource _initTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -25,7 +27,8 @@
     {
         if (firstRender)
         {
-            MapService.OnMarkerClicked += HandleMarkerClicked;
+            // REVIEW-12: Set callback via Func instead of subscribing to event
+            MapService.OnMarkerClicked = HandleMarkerClickedAsync;
             try
             {
                 await MapService.InitMapAsync(_mapElementId);
@@ -76,9 +79,8 @@
         await MapService.HighlightMarkerAsync(poiId);
     }
 
-    // CRIT-03 fix: async void is required by the Action<int> delegate signature,
-    // but we wrap in try/catch so exceptions don't silently vanish.
-    private async void HandleMarkerClicked(int poiId)
+    // REVIEW-12: Async callback — no more async void
+    private async Task HandleMarkerClickedAsync(int poiId)
     {
         try
         {
@@ -86,14 +88,13 @@
         }
         catch (Exception ex)
         {
-            // HIGH-06: Use ILogger instead of Debug.WriteLine so errors are visible in production
             Logger.LogError(ex, "Error handling marker click for POI {PoiId}", poiId);
         }
     }
 
     public async ValueTask DisposeAsync()
     {
-        MapService.OnMarkerClicked -= HandleMarkerClicked;
+        MapService.OnMarkerClicked = null;
         _initTcs.TrySetCanceled();
 
         // Propagate disposal to the map service so the JS-side map instance is destroyed

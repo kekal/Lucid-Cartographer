@@ -4,21 +4,21 @@
 @using LucidCartographer.Services
 @using LucidCartographer.Services.Operations
 @using LucidCartographer.Services.Export
+@using Microsoft.AspNetCore.Components.Web.Virtualization
 @inject IPoiService PoiService
-@* ARCH-HIGH-01: Inject all exporters via interface instead of concrete KmlExporter *@
 @inject IEnumerable<IFileExporter> Exporters
 @inject IJSRuntime JS
 @inject ISetOperationService SetOperationService
 @implements IAsyncDisposable
 
-<PageTitle>Operations - Lucid Cartographer</PageTitle>
+<PageTitle>@UiStrings.OperationsPageTitle</PageTitle>
 
 @if (_isLoading)
 {
-    <div class="flex items-center justify-center h-full">
+    <div class="flex items-center justify-center h-full" aria-live="polite">
         <div class="text-center">
             <div class="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-            <p class="text-on-surface-variant">Loading collections...</p>
+            <p class="text-on-surface-variant">@UiStrings.LoadingCollections</p>
         </div>
     </div>
 }
@@ -29,17 +29,18 @@ else
     <div class="w-80 flex-shrink-0 bg-surface-container-low p-6 flex flex-col gap-6 overflow-y-auto">
         @* Source Selection *@
         <div>
+            <h1 class="sr-only">@UiStrings.OperationsPageTitle</h1>
             <h3 class="text-lg font-bold font-headline mb-4 flex items-center gap-2">
                 <span class="material-symbols-outlined text-primary">source</span>
-                Source Selection
+                @UiStrings.SourceSelection
             </h3>
 
             <div class="space-y-4">
                 <div>
-                    <label class="block text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-1.5">Source Dataset A</label>
+                    <label class="block text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-1.5">@UiStrings.SourceDatasetA</label>
                     <select @bind="_collectionAId"
                             class="w-full px-3 py-2 rounded-lg bg-surface-container-highest border-0 text-on-surface text-sm focus:ring-2 focus:ring-primary">
-                        <option value="0">Select collection...</option>
+                        <option value="0">@UiStrings.SelectCollection</option>
                         @foreach (var col in _collections)
                         {
                             <option value="@col.Id">@col.Name (@col.PoiCount pts)</option>
@@ -56,16 +57,16 @@ else
 
                 <div class="@(_isDedupMode ? "opacity-40 pointer-events-none" : "")">
                     <label class="block text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-1.5">
-                        Source Dataset B
+                        @UiStrings.SourceDatasetB
                         @if (_isDedupMode)
                         {
-                            <span class="text-outline normal-case tracking-normal"> — not used for Dedup</span>
+                            <span class="text-outline normal-case tracking-normal"> — @UiStrings.NotUsedForDedup</span>
                         }
                     </label>
                     <select @bind="_collectionBId"
                             disabled="@_isDedupMode"
                             class="w-full px-3 py-2 rounded-lg bg-surface-container-highest border-0 text-on-surface text-sm focus:ring-2 focus:ring-primary disabled:cursor-not-allowed">
-                        <option value="0">Select collection...</option>
+                        <option value="0">@UiStrings.SelectCollection</option>
                         @foreach (var col in _collections)
                         {
                             <option value="@col.Id">@col.Name (@col.PoiCount pts)</option>
@@ -90,7 +91,7 @@ else
         <div>
             <h3 class="text-sm font-bold font-headline mb-3 flex items-center gap-2">
                 <span class="material-symbols-outlined text-primary text-base">hub</span>
-                Logical Operations
+                @UiStrings.LogicalOperations
             </h3>
             <div class="grid grid-cols-2 gap-3">
                 <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(_activeOp == SetOperation.Subtract ? "ring-2 ring-primary" : "")"
@@ -98,8 +99,8 @@ else
                         @onclick="() => HandleBinaryOpClick(SetOperation.Subtract)"
                         disabled="@(_collectionAId == 0)">
                     <span class="material-symbols-outlined text-2xl @(_collectionAId > 0 ? "text-tertiary" : "text-outline")" aria-hidden="true">remove_circle</span>
-                    <span class="text-xs font-medium">A − B</span>
-                    <span class="text-[10px] text-on-surface-variant">Difference</span>
+                    <span class="text-xs font-medium">A - B</span>
+                    <span class="text-[10px] text-on-surface-variant">@UiStrings.Difference</span>
                 </button>
 
                 <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(_activeOp == SetOperation.Intersect ? "ring-2 ring-primary" : "")"
@@ -107,8 +108,8 @@ else
                         @onclick="() => HandleBinaryOpClick(SetOperation.Intersect)"
                         disabled="@(_collectionAId == 0)">
                     <span class="material-symbols-outlined text-2xl @(_collectionAId > 0 ? "text-secondary" : "text-outline")" aria-hidden="true">join_inner</span>
-                    <span class="text-xs font-medium">A ∩ B</span>
-                    <span class="text-[10px] text-on-surface-variant">Intersection</span>
+                    <span class="text-xs font-medium">A n B</span>
+                    <span class="text-[10px] text-on-surface-variant">@UiStrings.Intersection</span>
                 </button>
 
                 <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(_activeOp == SetOperation.Union ? "ring-2 ring-primary" : "")"
@@ -116,8 +117,8 @@ else
                         @onclick="() => HandleBinaryOpClick(SetOperation.Union)"
                         disabled="@(_collectionAId == 0)">
                     <span class="material-symbols-outlined text-2xl @(_collectionAId > 0 ? "text-primary" : "text-outline")" aria-hidden="true">join_full</span>
-                    <span class="text-xs font-medium">A ∪ B</span>
-                    <span class="text-[10px] text-on-surface-variant">Union</span>
+                    <span class="text-xs font-medium">A u B</span>
+                    <span class="text-[10px] text-on-surface-variant">@UiStrings.Union</span>
                 </button>
 
                 <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(_activeOp == SetOperation.Dedup ? "ring-2 ring-primary" : "")"
@@ -126,17 +127,18 @@ else
                         disabled="@(_collectionAId == 0)">
                     <span class="material-symbols-outlined text-2xl @(_collectionAId > 0 ? "text-primary-container" : "text-outline")" aria-hidden="true">filter_alt</span>
                     <span class="text-xs font-medium">Dedup</span>
-                    <span class="text-[10px] text-on-surface-variant">Deduplicate</span>
+                    <span class="text-[10px] text-on-surface-variant">@UiStrings.Deduplicate</span>
                 </button>
             </div>
         </div>
 
-        @* Spatial Tolerance *@
+        @* Spatial Tolerance — LOW-09: auto-re-runs operation when changed *@
         <div>
             <label class="block text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-2">
-                Spatial Tolerance: @_toleranceMeters.ToString("F0")m
+                @UiStrings.SpatialTolerance: @_toleranceMeters.ToString("F0")m
             </label>
-            <input type="range" min="10" max="500" step="10" @bind="_toleranceMeters" @bind:event="oninput"
+            <input type="range" min="10" max="500" step="10"
+                   @bind="_toleranceMeters" @bind:event="oninput" @bind:after="OnToleranceChanged"
                    id="tolerance-slider" aria-label="Spatial tolerance in meters"
                    class="w-full accent-primary" />
             <p class="text-[10px] text-on-surface-variant mt-1">
@@ -146,13 +148,13 @@ else
     </div>
 
     @* Right Panel — Results *@
-    <div class="flex-1 flex flex-col min-w-0 p-6">
+    <div class="flex-1 flex flex-col min-w-0 p-6" aria-live="polite">
         @if (_isProcessing)
         {
             <div class="flex items-center justify-center h-full">
                 <div class="text-center">
                     <div class="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-                    <p class="text-on-surface-variant">Processing operation...</p>
+                    <p class="text-on-surface-variant">@UiStrings.ProcessingOperation</p>
                 </div>
             </div>
         }
@@ -161,8 +163,8 @@ else
             <div class="flex items-center justify-center h-full text-on-surface-variant">
                 <div class="text-center">
                     <span class="material-symbols-outlined text-6xl mb-4 block">calculate</span>
-                    <p class="text-lg font-headline font-bold mb-1">Select datasets and run an operation</p>
-                    <p class="text-sm">Choose collections A and B, then click an operation button.</p>
+                    <p class="text-lg font-headline font-bold mb-1">@UiStrings.SelectAndRun</p>
+                    <p class="text-sm">@UiStrings.SelectAndRunHint</p>
                 </div>
             </div>
         }
@@ -172,7 +174,7 @@ else
             <div class="flex items-center justify-between mb-4 flex-shrink-0">
                 <div>
                     <h3 class="text-lg font-bold font-headline">
-                        Result Preview: @GetOperationLabel()
+                        @UiStrings.ResultPreview: @GetOperationLabel()
                     </h3>
                     <p class="text-sm text-on-surface-variant">@_result.Description &bull; @_resultPois.Count points</p>
                 </div>
@@ -180,12 +182,12 @@ else
                     <button class="px-4 py-2 rounded-lg bg-surface-container-high text-on-surface text-sm font-medium hover:bg-surface-container-highest transition-colors flex items-center gap-2"
                             @onclick="ExportResult" disabled="@(!_resultPois.Any())">
                         <span class="material-symbols-outlined text-base">download</span>
-                        Export Result
+                        @UiStrings.ExportResult
                     </button>
                     <button class="px-4 py-2 rounded-lg bg-gradient-to-r from-primary to-primary-container text-white text-sm font-medium hover:shadow-lg transition-all flex items-center gap-2"
                             @onclick="CommitToLayer" disabled="@(!_resultPois.Any())">
                         <span class="material-symbols-outlined text-base">layers</span>
-                        Commit to Layer
+                        @UiStrings.CommitToLayer
                     </button>
                 </div>
             </div>
@@ -194,7 +196,7 @@ else
             @if (_showCommitDialog)
             {
                 <div class="mb-4 p-4 bg-surface-container-low rounded-xl flex-shrink-0">
-                    <h4 class="font-bold font-headline text-sm mb-3">Save as new collection</h4>
+                    <h4 class="font-bold font-headline text-sm mb-3">@UiStrings.SaveAsNewCollection</h4>
                     <div class="flex gap-3 items-end">
                         <div class="flex-1">
                             <label class="block text-xs text-on-surface-variant mb-1">Name</label>
@@ -202,9 +204,9 @@ else
                                    class="w-full px-3 py-2 rounded-lg bg-surface-container-highest border-0 text-sm focus:ring-2 focus:ring-primary" />
                         </div>
                         <button class="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium"
-                                @onclick="DoCommit">Save</button>
+                                @onclick="DoCommit">@UiStrings.Save</button>
                         <button class="px-4 py-2 rounded-lg bg-surface-container-high text-sm"
-                                @onclick="() => _showCommitDialog = false">Cancel</button>
+                                @onclick="() => _showCommitDialog = false">@UiStrings.Cancel</button>
                     </div>
                     @if (_commitSuccess != null)
                     {
@@ -216,7 +218,7 @@ else
                 </div>
             }
 
-            @* Results Table *@
+            @* Results Table with Virtualize *@
             <div class="flex-1 overflow-y-auto bg-white rounded-xl">
                 <table class="w-full text-sm">
                     <thead class="sticky top-0 bg-white z-10">
@@ -229,8 +231,7 @@ else
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var poi in _resultPois.Take(MaxResultDisplayRows))
-                        {
+                        <Virtualize Items="@_resultPois.ToList()" Context="poi" ItemSize="44">
                             <tr @key="poi.Id" class="hover:bg-surface-container-low transition-colors @(_discardedIds.Contains(poi.Id) ? "opacity-30 line-through" : "")">
                                 <td class="px-4 py-2.5">
                                     <div class="w-2.5 h-2.5 rounded-full bg-secondary" aria-hidden="true"></div>
@@ -255,25 +256,19 @@ else
                                     {
                                         <button class="text-tertiary hover:underline text-xs font-medium"
                                                 aria-label="@($"Discard {poi.Name}")"
-                                                @onclick="() => DiscardPoi(poi.Id)">Discard</button>
+                                                @onclick="() => DiscardPoi(poi.Id)">@UiStrings.Discard</button>
                                     }
                                     else
                                     {
                                         <button class="text-secondary hover:underline text-xs font-medium"
                                                 aria-label="@($"Restore {poi.Name}")"
-                                                @onclick="() => RestorePoi(poi.Id)">Restore</button>
+                                                @onclick="() => RestorePoi(poi.Id)">@UiStrings.Restore</button>
                                     }
                                 </td>
                             </tr>
-                        }
+                        </Virtualize>
                     </tbody>
                 </table>
-                @if (_resultPois.Count > MaxResultDisplayRows)
-                {
-                    <div class="p-3 text-center text-xs text-on-surface-variant">
-                        Showing @MaxResultDisplayRows of @_resultPois.Count results
-                    </div>
-                }
             </div>
 
             <div class="flex-shrink-0 pt-3 text-xs text-on-surface-variant text-right">
@@ -289,9 +284,6 @@ else
 }
 
 @code {
-    // MED-01: Named constants for magic numbers
-    private const int MaxResultDisplayRows = 500;
-
     private IReadOnlyList<PoiCollection> _collections = Array.Empty<PoiCollection>();
     private int _collectionAId;
     private int _collectionBId;
@@ -309,7 +301,8 @@ else
     private bool _isDedupMode = false;
     private CancellationTokenSource _cts = new();
 
-    // MED-05: Removed unused CanRunBinaryOp property
+    // LOW-09: Debounce timer for tolerance slider auto-re-run
+    private System.Threading.Timer? _toleranceDebounce;
 
     protected override async Task OnInitializedAsync()
     {
@@ -329,7 +322,7 @@ else
         }
         else
         {
-            _selectBHint = "Select Source B first";
+            _selectBHint = UiStrings.SelectBFirst;
             StateHasChanged();
         }
     }
@@ -367,6 +360,22 @@ else
         }
     }
 
+    // LOW-09: When tolerance changes and an operation was already run, re-run it with debounce
+    private void OnToleranceChanged()
+    {
+        if (_activeOp == null || _result == null) return;
+
+        _toleranceDebounce?.Dispose();
+        _toleranceDebounce = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                if (_activeOp.HasValue)
+                    await RunOperation(_activeOp.Value);
+            });
+        }, null, 500, Timeout.Infinite);
+    }
+
     private void DiscardPoi(int poiId)
     {
         _discardedIds.Add(poiId);
@@ -398,31 +407,26 @@ else
         var poisToExport = _resultPois.Where(p => !_discardedIds.Contains(p.Id)).ToList();
         if (!poisToExport.Any()) return;
 
-        // ARCH-HIGH-01: Resolve KML exporter from the injected collection instead of concrete type
         var kmlExporter = Exporters.First(e => e.FormatName == "KML");
-        // HIGH-07: Use IsNullOrEmpty to catch both null and empty string
         var exportTitle = string.IsNullOrEmpty(_commitName) ? GetOperationLabel() : _commitName;
         var bytes = kmlExporter.Export(poisToExport, exportTitle);
         var fileName = $"export_{DateTime.Now:yyyyMMdd_HHmmss}.kml";
 
-        // Trigger browser download via JS
         await JS.InvokeVoidAsync("LucidCartographer.downloadFile", fileName, "application/vnd.google-earth.kml+xml", Convert.ToBase64String(bytes));
     }
 
     private string GetOperationLabel() => _activeOp switch
     {
-        SetOperation.Subtract => "A − B",
-        SetOperation.Intersect => "A ∩ B",
-        SetOperation.Union => "A ∪ B",
+        SetOperation.Subtract => "A - B",
+        SetOperation.Intersect => "A n B",
+        SetOperation.Union => "A u B",
         SetOperation.Dedup => "Dedup",
         _ => ""
     };
 
-    // ARCH-HIGH-03: GetGoogleMapsUrl moved to PoiUrlHelper.cs
-
-    // CRIT-06: Cancel in-flight operations when navigating away
     public ValueTask DisposeAsync()
     {
+        _toleranceDebounce?.Dispose();
         _cts.Cancel();
         _cts.Dispose();
         return ValueTask.CompletedTask;

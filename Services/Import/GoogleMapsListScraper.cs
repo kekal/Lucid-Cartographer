@@ -1,3 +1,4 @@
+using LucidCartographer.Services;
 using Microsoft.Playwright;
 
 namespace LucidCartographer.Services.Import
@@ -456,57 +457,11 @@ namespace LucidCartographer.Services.Import
             return new ScrapeResult { ListName = listName, Pois = results };
         }
 
+        /// <summary>
+        /// IE-14: Delegates to shared PoiUrlHelper.ExtractCoordinatesFromUrl to eliminate
+        /// duplicated @/ coordinate parsing logic.
+        /// </summary>
         private static (double lat, double lon)? ExtractCoordinates(string url)
-        {
-            var lat3d = ExtractBang(url, "!3d");
-            var lon4d = ExtractBang(url, "!4d");
-            if (lat3d.HasValue && lon4d.HasValue)
-                return (lat3d.Value, lon4d.Value);
-
-            var placeIdx = url.IndexOf("/place/");
-            if (placeIdx >= 0)
-            {
-                var atIdx = url.IndexOf("/@", placeIdx);
-                if (atIdx >= 0)
-                {
-                    var afterAt = url[(atIdx + 2)..];
-                    var parts = afterAt.Split(',');
-                    if (parts.Length >= 2
-                        && double.TryParse(parts[0], System.Globalization.CultureInfo.InvariantCulture, out var lat)
-                        && double.TryParse(parts[1], System.Globalization.CultureInfo.InvariantCulture, out var lon))
-                    {
-                        return (lat, lon);
-                    }
-                }
-            }
-
-            var atIdx2 = url.IndexOf("/@");
-            if (atIdx2 >= 0)
-            {
-                var afterAt = url[(atIdx2 + 2)..];
-                var parts = afterAt.Split(',');
-                if (parts.Length >= 2
-                    && double.TryParse(parts[0], System.Globalization.CultureInfo.InvariantCulture, out var lat)
-                    && double.TryParse(parts[1], System.Globalization.CultureInfo.InvariantCulture, out var lon))
-                {
-                    return (lat, lon);
-                }
-            }
-
-            return null;
-        }
-
-        private static double? ExtractBang(string url, string prefix)
-        {
-            var idx = url.IndexOf(prefix);
-            if (idx < 0) return null;
-            var start = idx + prefix.Length;
-            var end = start;
-            while (end < url.Length && (char.IsDigit(url[end]) || url[end] == '.' || url[end] == '-'))
-                end++;
-            if (end > start && double.TryParse(url[start..end], System.Globalization.CultureInfo.InvariantCulture, out var val))
-                return val;
-            return null;
-        }
+            => PoiUrlHelper.ExtractCoordinatesFromUrl(url);
     }
 }

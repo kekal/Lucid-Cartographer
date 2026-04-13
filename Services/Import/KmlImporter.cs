@@ -50,7 +50,8 @@ namespace LucidCartographer.Services.Import
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var name = XmlParsingHelpers.FindElement(pm, ns, "name")?.Value ?? "Unknown";
+                // IE-24: Use coordinate-based fallback name (consistent with CsvImporter)
+                var name = XmlParsingHelpers.FindElement(pm, ns, "name")?.Value;
                 var desc = XmlParsingHelpers.FindElement(pm, ns, "description")?.Value;
 
                 var coordsText = XmlParsingHelpers.FindDescendant(pm, ns, "coordinates")?.Value;
@@ -63,9 +64,10 @@ namespace LucidCartographer.Services.Import
                 if (!double.TryParse(parts[1].Trim(), System.Globalization.CultureInfo.InvariantCulture, out var lat)) { skipped++; continue; }
 
                 string? googleUrl = ExtractGoogleMapsUrl(desc);
+                var effectiveName = string.IsNullOrWhiteSpace(name) ? $"Point ({lat:F4}, {lon:F4})" : name.Trim();
 
                 results.Add(new ImportedPoi(
-                    Name: name.Trim(),
+                    Name: effectiveName,
                     Latitude: lat,
                     Longitude: lon,
                     GoogleMapsUrl: googleUrl,

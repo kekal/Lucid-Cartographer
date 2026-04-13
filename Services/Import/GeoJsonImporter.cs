@@ -55,20 +55,24 @@ namespace LucidCartographer.Services.Import
             if (!geometry.TryGetProperty("coordinates", out var coords)) return null;
             if (coords.ValueKind != JsonValueKind.Array || coords.GetArrayLength() < 2) return null;
 
-            // Only handle Point geometry
-            if (geometry.TryGetProperty("type", out var geoType) && geoType.GetString() != "Point")
-                return null;
+            // IE-16: Only handle Point geometry. Also reject features with missing geometry type
+            // (malformed geometry should not slip through).
+            if (!geometry.TryGetProperty("type", out var geoType))
+                return null; // Malformed: no geometry type
+            if (geoType.GetString() != "Point")
+                return null; // Not a Point geometry (LineString, Polygon, etc.)
 
             var lon = coords[0].GetDouble();
             var lat = coords[1].GetDouble();
 
             var props = feature.TryGetProperty("properties", out var p) ? p : default;
 
+            // IE-24: Use coordinate-based fallback name (consistent with CsvImporter) instead of "Unknown"
             var name = GetStringProp(props, "name")
                     ?? GetStringProp(props, "Name")
                     ?? GetStringProp(props, "title")
                     ?? GetStringProp(props, "Title")
-                    ?? "Unknown";
+                    ?? $"Point ({lat:F4}, {lon:F4})";
 
             var address = GetStringProp(props, "address")
                        ?? GetStringProp(props, "Address")

@@ -7,15 +7,14 @@
 @inject NavigationManager Navigation
 @implements IAsyncDisposable
 
-<PageTitle>Map - Lucid Cartographer</PageTitle>
+<PageTitle>@UiStrings.MapPageTitle</PageTitle>
 
 @if (_isLoading)
 {
-    @* HIGH-04: Show loading state during initial data fetch *@
-    <div class="flex items-center justify-center h-full">
+    <div class="flex items-center justify-center h-full" aria-live="polite">
         <div class="text-center">
             <div class="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-            <p class="text-on-surface-variant">Loading collections...</p>
+            <p class="text-on-surface-variant">@UiStrings.LoadingCollections</p>
         </div>
     </div>
 }
@@ -24,7 +23,7 @@ else
 <div class="flex h-full">
     @* Left Sidebar — Collections *@
     <div class="w-60 flex-shrink-0 bg-surface-container-low flex flex-col">
-        <CollectionSidebar Collections="_collections"
+        <CollectionSidebar Collections="_collectionVMs"
                           SelectedCollectionId="_selectedCollectionId"
                           OnCollectionSelected="HandleCollectionSelected"
                           OnVisibilityToggled="HandleVisibilityToggled" />
@@ -34,24 +33,24 @@ else
     <div class="flex-1 flex flex-col min-w-0">
         @* Active filter chips *@
         <div class="flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-sm z-10 flex-shrink-0">
-            @foreach (var col in _collections.Where(c => c.IsVisible))
+            @foreach (var vm in _collectionVMs.Where(c => c.IsVisible))
             {
-                <span @key="col.Id" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium text-white"
-                      style="background-color: @col.Color">
-                    @col.Name
-                    <button @onclick="() => HandleVisibilityToggled(col.Id)" class="hover:opacity-80"
-                            aria-label="@($"Hide {col.Name}")">
+                <span @key="vm.Id" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium text-white"
+                      style="background-color: @vm.Color">
+                    @vm.Name
+                    <button @onclick="() => HandleVisibilityToggled(vm.Id)" class="hover:opacity-80"
+                            aria-label="@($"Hide {vm.Name}")">
                         <span class="material-symbols-outlined text-xs" aria-hidden="true">close</span>
                     </button>
                 </span>
             }
-            @if (_collections.Any(c => c.IsVisible))
+            @if (_collectionVMs.Any(c => c.IsVisible))
             {
                 <button class="text-xs text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1"
                         @onclick="FitMapBounds"
-                        aria-label="Fit map to all visible collections">
+                        aria-label="@UiStrings.FitMapToVisible">
                     <span class="material-symbols-outlined text-sm" aria-hidden="true">fit_screen</span>
-                    Fit All
+                    @UiStrings.FitAll
                 </button>
             }
         </div>
@@ -71,7 +70,7 @@ else
         </div>
     </div>
 
-    @* Right Detail Pane *@
+    @* Right Detail Pane — parent owns the null check *@
     @if (_selectedPoi != null)
     {
         <div class="w-80 flex-shrink-0 shadow-lg overflow-hidden border-l border-surface-container-high">
@@ -84,20 +83,23 @@ else
 @code {
     private LeafletMap? _leafletMap;
     private IReadOnlyList<PoiCollection> _collections = Array.Empty<PoiCollection>();
+    private List<CollectionViewModel> _collectionVMs = new();
     private IReadOnlyList<Poi> _visiblePois = Array.Empty<Poi>();
     private int? _selectedCollectionId;
     private int? _selectedPoiId;
     private string? _selectedCollectionName;
     private Poi? _selectedPoi;
     private bool _isLoading = true;
-    private bool _isSearchActive = false;
+    private string? _previousSearchQuery;
 
     protected override async Task OnInitializedAsync()
     {
         _collections = await PoiService.GetCollectionsAsync();
+        _collectionVMs = _collections.Select(c => new CollectionViewModel(c)).ToList();
         _isLoading = false;
     }
 
+    // HIGH-01: Cache previous search term; skip if unchanged
     protected override async Task OnParametersSetAsync()
     {
         var uri = Navigation.ToAbsoluteUri(Navigation.Uri);
@@ -106,22 +108,22 @@ else
             var search = searchValues.FirstOrDefault();
             if (!string.IsNullOrWhiteSpace(search))
             {
+                if (search == _previousSearchQuery) return; // skip duplicate search
+                _previousSearchQuery = search;
                 _visiblePois = await PoiService.SearchAsync(search);
                 _selectedCollectionName = $"Search: {search}";
-                _isSearchActive = true;
                 return;
             }
         }
-        _isSearchActive = false;
+        _previousSearchQuery = null;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender && _leafletMap != null)
         {
-            // CRIT-05: Wait for the map JS initialization signal instead of Task.Delay(200)
             await _leafletMap.WaitForInitAsync();
-            if (!_isSearchActive)
+            if (_previousSearchQuery == null)
             {
                 await LoadVisibleCollections();
             }
@@ -133,39 +135,39 @@ else
         if (_leafletMap == null || !_leafletMap.IsInitialized) return;
 
         var grouped = await PoiService.GetVisiblePoisGroupedAsync();
-        // HIGH-01: Create a new list each time so Blazor detects the parameter change
         var newPois = new List<Poi>();
 
-        foreach (var col in _collections)
+        foreach (var vm in _collectionVMs)
         {
-            if (col.IsVisible && grouped.ContainsKey(col.Id))
+            if (vm.IsVisible && grouped.ContainsKey(vm.Id))
             {
-                await _leafletMap.ShowCollectionAsync(col.Id, grouped[col.Id], col.Color);
-                newPois.AddRange(grouped[col.Id]);
+                await _leafletMap.ShowCollectionAsync(vm.Id, grouped[vm.Id], vm.Color);
+                newPois.AddRange(grouped[vm.Id]);
             }
             else
             {
-                await _leafletMap.HideCollectionAsync(col.Id);
+                await _leafletMap.HideCollectionAsync(vm.Id);
             }
         }
         _visiblePois = newPois;
         StateHasChanged();
     }
 
+    // HIGH-05: Toggle visibility on the ViewModel, then persist to DB
     private async Task HandleVisibilityToggled(int collectionId)
     {
+        var vm = _collectionVMs.FirstOrDefault(c => c.Id == collectionId);
+        if (vm != null) vm.IsVisible = !vm.IsVisible;
+
         await PoiService.ToggleVisibilityAsync(collectionId);
-        _collections = await PoiService.GetCollectionsAsync();
         await LoadVisibleCollections();
     }
 
     private async Task HandleCollectionSelected(int collectionId)
     {
         _selectedCollectionId = collectionId;
-        var col = _collections.FirstOrDefault(c => c.Id == collectionId);
-        _selectedCollectionName = col?.Name;
-
-        // HIGH-01: Assign a new list for proper Blazor change detection
+        var vm = _collectionVMs.FirstOrDefault(c => c.Id == collectionId);
+        _selectedCollectionName = vm?.Name;
         _visiblePois = await PoiService.GetPoisByCollectionAsync(collectionId);
     }
 
@@ -212,7 +214,6 @@ else
         }
     }
 
-    // CRIT-06: Implement IAsyncDisposable to clean up map resources
     public async ValueTask DisposeAsync()
     {
         if (_leafletMap != null)

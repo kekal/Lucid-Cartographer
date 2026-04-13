@@ -10,17 +10,19 @@ namespace LucidCartographer.Data
         public DbSet<Poi> Pois => Set<Poi>();
         public DbSet<PoiCollection> PoiCollections => Set<PoiCollection>();
         public DbSet<PoiCollectionItem> PoiCollectionItems => Set<PoiCollectionItem>();
+        public DbSet<Tag> Tags => Set<Tag>();
+        public DbSet<PoiTag> PoiTags => Set<PoiTag>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<Poi>(entity =>
             {
+                // All MaxLength via Fluent API only (removed [MaxLength] attributes from entity — DRY)
                 entity.Property(e => e.Name).HasMaxLength(500);
                 entity.Property(e => e.GoogleMapsUrl).HasMaxLength(2048);
                 entity.Property(e => e.Address).HasMaxLength(1000);
                 entity.Property(e => e.Category).HasMaxLength(100);
                 entity.Property(e => e.Status).HasMaxLength(50);
-                entity.Property(e => e.Tags).HasMaxLength(2000);
                 entity.Property(e => e.Notes).HasMaxLength(10000);
                 entity.Property(e => e.Website).HasMaxLength(2048);
                 entity.Property(e => e.Phone).HasMaxLength(50);
@@ -62,7 +64,8 @@ namespace LucidCartographer.Data
 
             modelBuilder.Entity<PoiCollectionItem>(entity =>
             {
-                entity.HasIndex(e => new { e.PoiId, e.PoiCollectionId }).IsUnique();
+                // Composite PK replaces surrogate Id (REVIEW-24)
+                entity.HasKey(e => new { e.PoiId, e.PoiCollectionId });
 
                 entity.HasOne(e => e.Poi)
                     .WithMany(p => p.CollectionItems)
@@ -72,6 +75,27 @@ namespace LucidCartographer.Data
                 entity.HasOne(e => e.PoiCollection)
                     .WithMany(c => c.CollectionItems)
                     .HasForeignKey(e => e.PoiCollectionId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<Tag>(entity =>
+            {
+                entity.Property(e => e.Name).HasMaxLength(200);
+                entity.HasIndex(e => e.Name).IsUnique();
+            });
+
+            modelBuilder.Entity<PoiTag>(entity =>
+            {
+                entity.HasKey(e => new { e.PoiId, e.TagId });
+
+                entity.HasOne(e => e.Poi)
+                    .WithMany(p => p.PoiTags)
+                    .HasForeignKey(e => e.PoiId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasOne(e => e.Tag)
+                    .WithMany(t => t.PoiTags)
+                    .HasForeignKey(e => e.TagId)
                     .OnDelete(DeleteBehavior.Cascade);
             });
         }

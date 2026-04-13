@@ -29,7 +29,8 @@ EXPOSE 8080
 
 # MED-01: Health check so Docker/orchestrators can detect a hung process.
 # Uses the /health endpoint mapped in Program.cs via MapHealthChecks.
+# ARCH-LOW-08: wget fallback if curl is not available (e.g., slimmer base images)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl --fail --silent http://localhost:8080/health || exit 1
+    CMD curl --fail --silent http://localhost:8080/health || wget -q -O /dev/null http://localhost:8080/health || exit 1
 
 ENTRYPOINT ["dotnet", "LucidCartographer.dll"]

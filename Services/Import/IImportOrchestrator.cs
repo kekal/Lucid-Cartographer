@@ -5,8 +5,11 @@ namespace LucidCartographer.Services.Import
     /// </summary>
     public interface IImportOrchestrator
     {
-        /// <summary>Returns a matching importer for the given file name, or null if unsupported.</summary>
-        IFileImporter? GetImporter(string fileName);
+        /// <summary>
+        /// Returns true if the given file name has a supported importer.
+        /// IE-08: Replaces GetImporter which leaked implementation details.
+        /// </summary>
+        bool CanImport(string fileName);
 
         /// <summary>Imports POIs from a file stream into a new collection.</summary>
         Task<ImportResult> ImportAsync(Stream fileStream, string fileName, string collectionName, string color = "#005bbf", CancellationToken cancellationToken = default);

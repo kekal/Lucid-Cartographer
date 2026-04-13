@@ -1,0 +1,16 @@
+{
+  "name": "Lucid Cartographer",
+  "short_name": "Cartographer",
+  "description": "Personal geospatial POI management tool for organizing, importing, and visualizing location data.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f9ff",
+  "theme_color": "#005bbf",
+  "icons": [
+    {
+      "src": "favicon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}

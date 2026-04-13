@@ -54,9 +54,7 @@ namespace LucidCartographer.Services
         /// <summary>
         /// Returns POIs grouped by visible collection ID using a single joined query.
         /// [REVIEW-10] Uses projection to load only the fields needed for map markers,
-        /// reducing memory pressure on large datasets. Full entities are still returned
-        /// because downstream consumers (ShowCollectionAsync) need them, but the Include
-        /// is limited to the Poi navigation only.
+        /// reducing memory pressure on large datasets.
         /// </summary>
         public async Task<Dictionary<int, List<Poi>>> GetVisiblePoisGroupedAsync(CancellationToken cancellationToken = default)
         {
@@ -88,7 +86,10 @@ namespace LucidCartographer.Services
         public async Task<Poi?> GetPoiAsync(int poiId, CancellationToken cancellationToken = default)
         {
             await using var db = await _factory.CreateDbContextAsync(cancellationToken);
-            return await db.Pois.FindAsync(new object[] { poiId }, cancellationToken);
+            return await db.Pois
+                .Include(p => p.PoiTags)
+                    .ThenInclude(pt => pt.Tag)
+                .FirstOrDefaultAsync(p => p.Id == poiId, cancellationToken);
         }
 
         /// <summary>
@@ -121,7 +122,6 @@ namespace LucidCartographer.Services
             existing.Address = poi.Address;
             existing.Category = poi.Category;
             existing.Status = poi.Status;
-            existing.Tags = poi.Tags;
             existing.Notes = poi.Notes;
             existing.Rating = poi.Rating;
             existing.GoogleRating = poi.GoogleRating;
@@ -276,22 +276,40 @@ namespace LucidCartographer.Services
             await using var db = await _factory.CreateDbContextAsync(cancellationToken);
 
             // [REVIEW-1] Escape LIKE metacharacters to prevent wildcard abuse.
-            // Uses backslash as the LIKE escape character (supported by SQLite via the escape clause).
-            // [REVIEW-15] Removed ToLowerInvariant() -- SQLite LIKE is case-insensitive for ASCII
-            // by default, making the lowering unnecessary and potentially harmful for other DB engines.
+            // [REVIEW-15] Removed ToLowerInvariant() -- SQLite LIKE is case-insensitive for ASCII.
             var escaped = query.Trim()
                 .Replace("\\", "\\\\")
                 .Replace("%", "\\%")
                 .Replace("_", "\\_")
                 .Replace("[", "\\[");
 
-            return await db.Pois
+            // Search across Name, Address, Notes, and Tags (via join table)
+            var byFields = await db.Pois
                 .Where(p => EF.Functions.Like(p.Name, $"%{escaped}%", "\\")
                     || (p.Address != null && EF.Functions.Like(p.Address, $"%{escaped}%", "\\"))
-                    || (p.Tags != null && EF.Functions.Like(p.Tags, $"%{escaped}%", "\\"))
                     || (p.Notes != null && EF.Functions.Like(p.Notes, $"%{escaped}%", "\\")))
                 .Take(100)
                 .ToListAsync(cancellationToken);
+
+            // Search tags via many-to-many join
+            var byTags = await db.PoiTags
+                .Where(pt => EF.Functions.Like(pt.Tag.Name, $"%{escaped}%", "\\"))
+                .Select(pt => pt.Poi)
+                .Distinct()
+                .Take(100)
+                .ToListAsync(cancellationToken);
+
+            // Merge results, deduplicate by Id
+            var seen = new HashSet<int>();
+            var result = new List<Poi>();
+            foreach (var poi in byFields.Concat(byTags))
+            {
+                if (seen.Add(poi.Id))
+                    result.Add(poi);
+                if (result.Count >= 100)
+                    break;
+            }
+            return result;
         }
 
         public async Task UpdateCollectionColorAsync(int collectionId, string color, CancellationToken cancellationToken = default)
@@ -348,8 +366,6 @@ namespace LucidCartographer.Services
             // MaxLength checks for string fields that could exceed DB constraints
             if (poi.Address?.Length > 1000)
                 throw new ArgumentException("Address cannot exceed 1000 characters.", nameof(poi));
-            if (poi.Tags?.Length > 2000)
-                throw new ArgumentException("Tags cannot exceed 2000 characters.", nameof(poi));
             if (poi.Notes?.Length > 10000)
                 throw new ArgumentException("Notes cannot exceed 10000 characters.", nameof(poi));
             if (poi.GoogleMapsUrl?.Length > 2048)

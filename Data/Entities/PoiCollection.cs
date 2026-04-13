@@ -1,4 +1,3 @@
-using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace LucidCartographer.Data.Entities
@@ -7,26 +6,20 @@ namespace LucidCartographer.Data.Entities
     {
         public int Id { get; set; }
 
-        [MaxLength(500)]
-        public string Name { get; set; } = string.Empty;
+        public required string Name { get; set; }
 
-        [MaxLength(2000)]
         public string? Description { get; set; }
 
-        [MaxLength(7)]
-        public string Color { get; set; } = "#005bbf";
+        public required string Color { get; set; } = "#005bbf";
 
-        [MaxLength(100)]
         public string? IconName { get; set; }
 
         public bool IsVisible { get; set; } = true;
 
         public DateTime CreatedDate { get; set; }
 
-        [MaxLength(50)]
         public string? SourceType { get; set; } // Use CollectionSourceType constants
 
-        [MaxLength(500)]
         public string? SourceFileName { get; set; }
 
         /// <summary>
@@ -35,7 +28,7 @@ namespace LucidCartographer.Data.Entities
         [NotMapped]
         public int PoiCount { get; set; }
 
-        [ConcurrencyCheck]
+        [System.ComponentModel.DataAnnotations.ConcurrencyCheck]
         public int Version { get; set; }
 
         public List<PoiCollectionItem> CollectionItems { get; set; } = new();

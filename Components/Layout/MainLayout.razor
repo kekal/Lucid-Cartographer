@@ -6,54 +6,57 @@
     @* Top Header *@
     <header class="bg-white/80 backdrop-blur-md shadow-sm flex justify-between items-center px-6 h-16 flex-shrink-0 z-50">
         <div class="flex items-center gap-8">
-            <h1 class="text-xl font-extrabold tracking-tight font-headline text-on-surface">Lucid Cartographer</h1>
+            <h1 class="text-xl font-extrabold tracking-tight font-headline text-on-surface">@UiStrings.AppTitle</h1>
             <nav class="flex items-center gap-1" aria-label="Main navigation">
                 <NavLink class="px-3 py-2 text-lg font-bold font-headline rounded-lg transition-colors hover:bg-surface-container-low"
                          href="" Match="NavLinkMatch.All"
                          ActiveClass="text-primary border-b-2 border-primary">
-                    Map
+                    @UiStrings.NavMap
                 </NavLink>
                 <NavLink class="px-3 py-2 text-lg font-bold font-headline rounded-lg transition-colors hover:bg-surface-container-low"
                          href="datasources"
                          ActiveClass="text-primary border-b-2 border-primary">
-                    Data Sources
+                    @UiStrings.NavDataSources
                 </NavLink>
                 <NavLink class="px-3 py-2 text-lg font-bold font-headline rounded-lg transition-colors hover:bg-surface-container-low"
                          href="operations"
                          ActiveClass="text-primary border-b-2 border-primary">
-                    Operations
+                    @UiStrings.NavOperations
                 </NavLink>
             </nav>
         </div>
         <div class="flex items-center gap-3">
-            <form action="/" method="get" data-enhance="false" class="relative" role="search">
+            @* Search form with client-side debounce *@
+            <form id="search-form" action="/" method="get" class="relative" role="search">
                 <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-base" aria-hidden="true">search</span>
-                <input type="text" name="search" placeholder="Search POIs..." aria-label="Search POIs"
+                <input type="text" name="search" id="search-input" placeholder="@UiStrings.SearchPois" aria-label="@UiStrings.SearchPois"
                        class="pl-9 pr-4 py-1.5 rounded-full bg-surface-container-low text-sm text-on-surface placeholder:text-outline focus:ring-2 focus:ring-primary focus:bg-white transition-colors w-48 focus:w-64" />
             </form>
-            @* LOW-06: Removed non-functional settings button *@
-            <a href="/logout" class="p-2 rounded-full hover:bg-surface-container-low transition-colors" aria-label="Logout">
+            @* LOW-03: Logout link with JS confirmation *@
+            <a href="/logout" class="p-2 rounded-full hover:bg-surface-container-low transition-colors"
+               aria-label="@UiStrings.Logout"
+               onclick="return confirm('Are you sure you want to log out?');">
                 <span class="material-symbols-outlined text-on-surface-variant">logout</span>
             </a>
         </div>
     </header>
 
     @* Content Area — CRIT-04: Wrap @Body in ErrorBoundary *@
-    <main class="flex-1 overflow-auto">
+    <main class="flex-1 overflow-auto" aria-live="polite">
         <ErrorBoundary @ref="_errorBoundary">
             <ChildContent>
                 @Body
             </ChildContent>
             <ErrorContent Context="ex">
                 @{ LogError(ex); }
-                <div class="flex items-center justify-center h-full p-8">
+                <div class="flex items-center justify-center h-full p-8" role="alert">
                     <div class="text-center max-w-md">
                         <span class="material-symbols-outlined text-6xl text-tertiary mb-4 block">error</span>
-                        <h2 class="text-xl font-bold font-headline mb-2 text-on-surface">Something went wrong</h2>
-                        <p class="text-sm text-on-surface-variant mb-4">An unexpected error occurred. Please try again.</p>
+                        <h2 class="text-xl font-bold font-headline mb-2 text-on-surface">@UiStrings.SomethingWentWrong</h2>
+                        <p class="text-sm text-on-surface-variant mb-4">@UiStrings.UnexpectedError</p>
                         <button class="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:shadow-lg transition-all"
                                 @onclick="RecoverFromError">
-                            Try Again
+                            @UiStrings.TryAgain
                         </button>
                     </div>
                 </div>
@@ -61,6 +64,30 @@
         </ErrorBoundary>
     </main>
 </div>
+
+@* Search debounce: intercepts form submission and delays by 300ms to avoid
+   rapid full-page reloads on fast typing. Because this is a static SSR GET form,
+   the debounce must be client-side JS. *@
+<script>
+    (function () {
+        var timer = null;
+        var form = document.getElementById('search-form');
+        var input = document.getElementById('search-input');
+        if (!form || !input) return;
+
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(function () { form.submit(); }, 300);
+        });
+
+        input.addEventListener('keyup', function (e) {
+            if (e.key === 'Enter') return; // let form submit handle Enter
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(function () { form.submit(); }, 300);
+        });
+    })();
+</script>
 
 @code {
     private ErrorBoundary? _errorBoundary;

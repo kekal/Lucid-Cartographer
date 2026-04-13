@@ -1,0 +1,113 @@
+@using LucidCartographer.Services
+@using LucidCartographer.Services.Import
+@using Microsoft.AspNetCore.Components.Forms
+
+<div class="bg-surface-container-low rounded-xl p-6 mb-8">
+    <div class="flex items-center justify-between mb-4">
+        <h3 class="font-bold font-headline text-lg">@Title</h3>
+        <button class="text-on-surface-variant hover:text-on-surface" @onclick="OnClose" aria-label="@UiStrings.CloseImportPanel">
+            <span class="material-symbols-outlined" aria-hidden="true">close</span>
+        </button>
+    </div>
+
+    @ChildContent
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div>
+            <label class="block text-sm font-medium text-on-surface-variant mb-1">@UiStrings.CollectionName</label>
+            <input type="text" @bind="CollectionName" @bind:event="oninput" @bind:after="OnCollectionNameChanged"
+                   placeholder="e.g., Poland Top Places"
+                   class="w-full px-3 py-2 rounded-lg bg-surface-container-highest border-0 text-on-surface placeholder:text-outline focus:ring-2 focus:ring-primary focus:bg-white transition-colors" />
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-on-surface-variant mb-1">@UiStrings.Color</label>
+            <div class="flex gap-2">
+                @foreach (var color in AvailableColors)
+                {
+                    <button class="w-8 h-8 rounded-full transition-transform @(color == SelectedColor ? "ring-2 ring-offset-2 ring-primary scale-110" : "hover:scale-110")"
+                            style="background-color: @color"
+                            aria-label="@($"Select color {ColorNames.GetName(color)}")"
+                            aria-pressed="@(color == SelectedColor ? "true" : "false")"
+                            @onclick="() => SelectColor(color)">
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="border-2 border-dashed border-outline-variant rounded-xl p-8 text-center hover:border-primary hover:bg-primary/5 transition-colors">
+        <span class="material-symbols-outlined text-4xl text-on-surface-variant mb-2 block">cloud_upload</span>
+        <p class="text-on-surface-variant mb-2">Drag and drop a file here, or click to browse</p>
+        <p class="text-sm text-outline">@AcceptDescription</p>
+        <InputFile OnChange="HandleFileSelected" accept="@AcceptExtensions"
+                   class="mt-3" />
+    </div>
+
+    @if (IsImporting)
+    {
+        <div class="mt-4 flex items-center gap-3 text-primary" aria-live="polite">
+            <div class="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+            <span>Importing @ImportingFileName...</span>
+        </div>
+    }
+
+    @if (ImportResult != null)
+    {
+        <div class="mt-4 p-4 rounded-lg @(ImportResult.AddedCount > 0 ? "bg-secondary/10 text-secondary" : "bg-surface-container")" aria-live="polite">
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined">check_circle</span>
+                <span class="font-medium">@UiStrings.ImportComplete</span>
+            </div>
+            <p class="text-sm mt-1">
+                @ImportResult.TotalParsed parsed &bull;
+                @ImportResult.AddedCount new POIs added &bull;
+                @ImportResult.SkippedCount duplicates linked
+            </p>
+        </div>
+    }
+
+    @if (ImportError != null)
+    {
+        <div class="mt-4 p-4 rounded-lg bg-tertiary/10 text-tertiary" aria-live="assertive">
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined">error</span>
+                <span class="font-medium">@UiStrings.ImportFailed</span>
+            </div>
+            <p class="text-sm mt-1">@ImportError</p>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string AcceptExtensions { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string AcceptDescription { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string[] AvailableColors { get; set; } = Array.Empty<string>();
+    [Parameter] public string CollectionName { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> CollectionNameChanged { get; set; }
+    [Parameter] public string SelectedColor { get; set; } = "#005bbf";
+    [Parameter] public EventCallback<string> SelectedColorChanged { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<InputFileChangeEventArgs> OnFileSelected { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public bool IsImporting { get; set; }
+    [Parameter] public string? ImportingFileName { get; set; }
+    [Parameter] public ImportResult? ImportResult { get; set; }
+    [Parameter] public string? ImportError { get; set; }
+
+    private async Task OnCollectionNameChanged()
+    {
+        await CollectionNameChanged.InvokeAsync(CollectionName);
+    }
+
+    private async Task SelectColor(string color)
+    {
+        SelectedColor = color;
+        await SelectedColorChanged.InvokeAsync(color);
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        await OnFileSelected.InvokeAsync(e);
+    }
+}

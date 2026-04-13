@@ -6,8 +6,7 @@ namespace LucidCartographer.Data.Entities
     {
         public int Id { get; set; }
 
-        [MaxLength(500)]
-        public string Name { get; set; } = string.Empty;
+        public required string Name { get; set; }
 
         [Range(-90.0, 90.0)]
         public double Latitude { get; set; }
@@ -15,22 +14,14 @@ namespace LucidCartographer.Data.Entities
         [Range(-180.0, 180.0)]
         public double Longitude { get; set; }
 
-        [MaxLength(2048)]
         public string? GoogleMapsUrl { get; set; }
 
-        [MaxLength(1000)]
         public string? Address { get; set; }
 
-        [MaxLength(100)]
         public string? Category { get; set; }
 
-        [MaxLength(50)]
         public string? Status { get; set; } // Use PoiStatus constants
 
-        [MaxLength(2000)]
-        public string? Tags { get; set; } // comma-separated
-
-        [MaxLength(10000)]
         public string? Notes { get; set; }
 
         [Range(1, 5)]
@@ -41,19 +32,14 @@ namespace LucidCartographer.Data.Entities
 
         public int? ReviewCount { get; set; }
 
-        [MaxLength(2048)]
         public string? Website { get; set; }
 
-        [MaxLength(50)]
         public string? Phone { get; set; }
 
-        [MaxLength(2048)]
         public string? ImageUrl { get; set; }
 
-        [MaxLength(200)]
         public string? Country { get; set; }
 
-        [MaxLength(200)]
         public string? Region { get; set; }
 
         public DateTime AddedDate { get; set; }
@@ -63,5 +49,6 @@ namespace LucidCartographer.Data.Entities
         public int Version { get; set; }
 
         public List<PoiCollectionItem> CollectionItems { get; set; } = new();
+        public List<PoiTag> PoiTags { get; set; } = new();
     }
 }

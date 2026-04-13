@@ -15,6 +15,11 @@ namespace LucidCartographer.Services
         /// CRIT-04: Destroy the JS-side map object to prevent memory leaks on navigation.
         /// </summary>
         Task DestroyMapAsync();
-        event Action<int>? OnMarkerClicked;
+
+        /// <summary>
+        /// Callback invoked when a map marker is clicked. The int parameter is the POI ID.
+        /// Replaces the previous event Action&lt;int&gt; to avoid interface event coupling (REVIEW-12).
+        /// </summary>
+        Func<int, Task>? OnMarkerClicked { get; set; }
     }
 }

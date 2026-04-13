@@ -45,15 +45,27 @@ namespace LucidCartographer.Services.Import
                 if (!double.TryParse(latStr, System.Globalization.CultureInfo.InvariantCulture, out var lat)) { skipped++; continue; }
                 if (!double.TryParse(lonStr, System.Globalization.CultureInfo.InvariantCulture, out var lon)) { skipped++; continue; }
 
-                var name = XmlParsingHelpers.FindElement(wpt, ns, "name")?.Value ?? "Unknown";
+                // IE-24: Use coordinate-based fallback name (consistent with CsvImporter)
+                var name = XmlParsingHelpers.FindElement(wpt, ns, "name")?.Value ?? $"Point ({lat:F4}, {lon:F4})";
                 var desc = XmlParsingHelpers.FindElement(wpt, ns, "desc")?.Value;
                 var linkHref = XmlParsingHelpers.FindElement(wpt, ns, "link")?.Attribute("href")?.Value;
+
+                // IE-20: Only assign to GoogleMapsUrl if the link is actually a Google Maps URL.
+                // GPX <link> can point to any website; stuffing arbitrary URLs into GoogleMapsUrl
+                // pollutes dedup logic and misleads the user.
+                string? googleUrl = null;
+                if (linkHref != null && (linkHref.Contains("google.com/maps", StringComparison.OrdinalIgnoreCase)
+                    || linkHref.Contains("maps.google.com", StringComparison.OrdinalIgnoreCase)
+                    || linkHref.Contains("maps.app.goo.gl", StringComparison.OrdinalIgnoreCase)))
+                {
+                    googleUrl = linkHref;
+                }
 
                 results.Add(new ImportedPoi(
                     Name: name.Trim(),
                     Latitude: lat,
                     Longitude: lon,
-                    GoogleMapsUrl: linkHref,
+                    GoogleMapsUrl: googleUrl,
                     Description: desc
                 ));
             }

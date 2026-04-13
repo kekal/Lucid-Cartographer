@@ -5,40 +5,6 @@ using Microsoft.EntityFrameworkCore;
 namespace LucidCartographer.Services.Operations
 {
     /// <summary>
-    /// Set operation types for POI collections.
-    /// </summary>
-    public enum SetOperation
-    {
-        /// <summary>A - B: POIs in A that are not in B.</summary>
-        Subtract,
-        /// <summary>A intersect B: POIs present in both A and B.</summary>
-        Intersect,
-        /// <summary>A union B: All unique POIs from both collections.</summary>
-        Union,
-        /// <summary>Remove duplicates within A.</summary>
-        Dedup
-    }
-
-    /// <summary>
-    /// Result of a set operation, containing the resulting POIs and metadata.
-    /// </summary>
-    /// <summary>
-    /// Result of a set operation, containing the resulting POIs and metadata.
-    /// OPS-R16: Pois exposed as IReadOnlyList to prevent callers from mutating the result.
-    /// </summary>
-    public class OperationResult
-    {
-        /// <summary>The resulting POIs from the operation.</summary>
-        public IReadOnlyList<Poi> Pois { get; init; } = Array.Empty<Poi>();
-
-        /// <summary>Duplicate groups found (only populated for Dedup operations).</summary>
-        public IReadOnlyList<List<Poi>>? DuplicateGroups { get; init; }
-
-        /// <summary>Human-readable description of the operation result.</summary>
-        public string Description { get; init; } = string.Empty;
-    }
-
-    /// <summary>
     /// Executes set operations (subtract, intersect, union, dedup) on POI collections.
     /// Uses <see cref="IPoiMatcher"/> for POI comparison with URL pre-indexing for O(N+M) binary operations.
     /// </summary>
@@ -47,20 +13,12 @@ namespace LucidCartographer.Services.Operations
         private readonly IDbContextFactory<AppDbContext> _factory;
         private readonly IPoiMatcher _matcher;
 
-        /// <summary>
-        /// Creates a new SetOperationService.
-        /// </summary>
-        /// <param name="factory">Database context factory.</param>
-        /// <param name="matcher">POI matching service.</param>
         public SetOperationService(IDbContextFactory<AppDbContext> factory, IPoiMatcher matcher)
         {
             _factory = factory;
             _matcher = matcher;
         }
 
-        /// <summary>
-        /// Executes a set operation on one or two POI collections.
-        /// </summary>
         public async Task<OperationResult> ExecuteAsync(
             SetOperation operation,
             int collectionAId,
@@ -113,14 +71,52 @@ namespace LucidCartographer.Services.Operations
             };
         }
 
+        /// <summary>
+        /// OPS-R06: Intersect now merges B-side metadata into A-side POIs.
+        /// When A has a match in B, any fields that A is missing but B has are filled in.
+        /// </summary>
         private OperationResult ExecuteIntersect(List<Poi> poisA, List<Poi> poisB, Dictionary<string, Poi> urlIndexB, double toleranceMeters)
         {
-            var result = poisA.Where(a => _matcher.FindMatch(a, urlIndexB, poisB, toleranceMeters) != null).ToList();
+            var result = new List<Poi>();
+            foreach (var a in poisA)
+            {
+                var matchB = _matcher.FindMatch(a, urlIndexB, poisB, toleranceMeters);
+                if (matchB != null)
+                {
+                    MergeBSideData(a, matchB);
+                    result.Add(a);
+                }
+            }
             return new OperationResult
             {
                 Pois = result,
                 Description = $"A intersect B: {result.Count} common POIs between {poisA.Count} and {poisB.Count}"
             };
+        }
+
+        /// <summary>
+        /// Merges useful fields from B into A where A is missing data.
+        /// </summary>
+        private static void MergeBSideData(Poi a, Poi b)
+        {
+            if (string.IsNullOrEmpty(a.Address) && !string.IsNullOrEmpty(b.Address))
+                a.Address = b.Address;
+            if (string.IsNullOrEmpty(a.GoogleMapsUrl) && !string.IsNullOrEmpty(b.GoogleMapsUrl))
+                a.GoogleMapsUrl = b.GoogleMapsUrl;
+            if (string.IsNullOrEmpty(a.Category) && !string.IsNullOrEmpty(b.Category))
+                a.Category = b.Category;
+            if (string.IsNullOrEmpty(a.Notes) && !string.IsNullOrEmpty(b.Notes))
+                a.Notes = b.Notes;
+            if (string.IsNullOrEmpty(a.Website) && !string.IsNullOrEmpty(b.Website))
+                a.Website = b.Website;
+            if (string.IsNullOrEmpty(a.Phone) && !string.IsNullOrEmpty(b.Phone))
+                a.Phone = b.Phone;
+            if (string.IsNullOrEmpty(a.ImageUrl) && !string.IsNullOrEmpty(b.ImageUrl))
+                a.ImageUrl = b.ImageUrl;
+            if (!a.GoogleRating.HasValue && b.GoogleRating.HasValue)
+                a.GoogleRating = b.GoogleRating;
+            if (!a.ReviewCount.HasValue && b.ReviewCount.HasValue)
+                a.ReviewCount = b.ReviewCount;
         }
 
         /// <summary>
@@ -167,8 +163,6 @@ namespace LucidCartographer.Services.Operations
 
         /// <summary>
         /// Saves operation result as a new collection.
-        /// Uses a transaction to ensure atomicity (OPS-M05).
-        /// Batch-adds all items with AddRange instead of per-POI AnyAsync (OPS-C01).
         /// </summary>
         public async Task<PoiCollection> CommitResultAsync(
             List<Poi> pois,
@@ -189,13 +183,11 @@ namespace LucidCartographer.Services.Operations
                 Name = name,
                 Color = color,
                 SourceType = "operation_result",
-                CreatedDate = DateTime.UtcNow,
-                PoiCount = pois.Count
+                CreatedDate = DateTime.UtcNow
             };
             db.PoiCollections.Add(collection);
             await db.SaveChangesAsync(cancellationToken);
 
-            // Batch-add all items (OPS-C01: no per-POI AnyAsync, collection is new so no duplicates possible)
             db.PoiCollectionItems.AddRange(pois.Select(p => new PoiCollectionItem
             {
                 PoiId = p.Id,
@@ -208,10 +200,6 @@ namespace LucidCartographer.Services.Operations
         }
 
         /// <summary>
-        /// Loads POIs for a collection using AsNoTracking for read-only performance (OPS-M04).
-        /// </summary>
-        /// <summary>
-        /// Loads POIs for a collection using AsNoTracking for read-only performance (OPS-M04).
         /// OPS-R04: Filters out null navigation properties from orphaned FKs.
         /// </summary>
         private static async Task<List<Poi>> GetCollectionPois(AppDbContext db, int collectionId, CancellationToken cancellationToken = default)

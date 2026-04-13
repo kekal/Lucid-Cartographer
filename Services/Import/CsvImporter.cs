@@ -86,6 +86,11 @@ namespace LucidCartographer.Services.Import
             return results;
         }
 
+        /// <summary>
+        /// Finds a column index by matching header names against candidates.
+        /// IE-23: Tightened fallback from Contains to StartsWith/EndsWith with word boundary
+        /// to prevent greedy matches like "foxylongitude" matching "lon".
+        /// </summary>
         private static int FindColumn(string[] headers, params string[] candidates)
         {
             // Exact match first
@@ -94,10 +99,10 @@ namespace LucidCartographer.Services.Import
                 if (candidates.Any(c => headers[i] == c))
                     return i;
             }
-            // Fallback to contains
+            // Fallback: StartsWith or EndsWith (word-boundary-ish match)
             for (int i = 0; i < headers.Length; i++)
             {
-                if (candidates.Any(c => headers[i].Contains(c)))
+                if (candidates.Any(c => headers[i].StartsWith(c) || headers[i].EndsWith(c)))
                     return i;
             }
             return -1;

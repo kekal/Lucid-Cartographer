@@ -3,13 +3,20 @@ using Microsoft.JSInterop;
 
 namespace LucidCartographer.Services
 {
+    /// <summary>
+    /// DTO for POI data passed to the JavaScript map interop layer (REVIEW-21).
+    /// Documents the JS interop contract explicitly.
+    /// </summary>
+    public record MarkerDto(int Id, string Name, double Latitude, double Longitude, string? Address, string? GoogleMapsUrl);
+
     public class LeafletMapService : IMapService, IAsyncDisposable
     {
         private readonly IJSRuntime _js;
         private DotNetObjectReference<LeafletMapService>? _dotnetRef;
-        private bool _disposed;
+        // REVIEW-11: Thread-safe disposed flag using Interlocked
+        private int _disposed;
 
-        public event Action<int>? OnMarkerClicked;
+        public Func<int, Task>? OnMarkerClicked { get; set; }
 
         public LeafletMapService(IJSRuntime js)
         {
@@ -26,15 +33,8 @@ namespace LucidCartographer.Services
 
         public async Task ShowCollectionAsync(int collectionId, List<Poi> pois, string color)
         {
-            var dtos = pois.Select(p => new
-            {
-                id = p.Id,
-                name = p.Name,
-                latitude = p.Latitude,
-                longitude = p.Longitude,
-                address = p.Address,
-                googleMapsUrl = p.GoogleMapsUrl
-            }).ToArray();
+            // REVIEW-21: Named DTO instead of anonymous type
+            var dtos = pois.Select(p => new MarkerDto(p.Id, p.Name, p.Latitude, p.Longitude, p.Address, p.GoogleMapsUrl)).ToArray();
             await InvokeJsVoidAsync("leafletInterop.addCollectionMarkers", collectionId, dtos, color);
         }
 
@@ -70,16 +70,19 @@ namespace LucidCartographer.Services
 
         /// <summary>Internal: called from JavaScript only.</summary>
         [JSInvokable]
-        public Task OnMarkerClickedJs(int poiId)
+        public async Task OnMarkerClickedJs(int poiId)
         {
-            OnMarkerClicked?.Invoke(poiId);
-            return Task.CompletedTask;
+            if (OnMarkerClicked != null)
+                await OnMarkerClicked(poiId);
         }
 
         public async ValueTask DisposeAsync()
         {
-            if (_disposed) return;
-            _disposed = true;
+            // REVIEW-22: GC.SuppressFinalize per IAsyncDisposable pattern
+            GC.SuppressFinalize(this);
+
+            // REVIEW-11: Thread-safe dispose using Interlocked
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
             // Clean up the JS-side map instance
             try
@@ -104,7 +107,7 @@ namespace LucidCartographer.Services
         /// </summary>
         private async Task InvokeJsVoidAsync(string identifier, params object?[] args)
         {
-            if (_disposed) return;
+            if (Volatile.Read(ref _disposed) != 0) return;
 
             try
             {

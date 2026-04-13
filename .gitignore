@@ -8,3 +8,11 @@ data/debug_*
 .vs/
 tailwindcss-windows-x64.exe
 wwwroot/css/tailwind.css
+
+# ARCH-MED-08: Prevent .env secrets from being baked into Docker image layers
+.env
+.env.*
+
+# ARCH-LOW-02: launchSettings.json is developer configuration — kept in VCS intentionally.
+# If your project prefers to exclude it, uncomment the line below:
+# Properties/launchSettings.json

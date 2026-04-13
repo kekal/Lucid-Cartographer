@@ -1,5 +1,7 @@
 using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
+using LucidCartographer.Extensions;
+using LucidCartographer.Services.Operations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -7,7 +9,11 @@ namespace LucidCartographer.Services.Import
 {
     public class ImportOrchestrator : IImportOrchestrator
     {
-        private const string DefaultColor = "#005bbf";
+        /// <summary>
+        /// IE-25: Default color constant shared with the interface default parameter.
+        /// When changing this value, update the interface default parameter as well.
+        /// </summary>
+        internal const string DefaultColor = "#005bbf";
         private const string ImportedStatus = "imported";
         private const double ProximityThresholdMeters = 100;
 
@@ -22,10 +28,18 @@ namespace LucidCartographer.Services.Import
             _logger = logger;
         }
 
-        public IFileImporter? GetImporter(string fileName)
+        /// <summary>
+        /// IE-08: Replaced GetImporter on interface with CanImport. This method is now internal-only.
+        /// </summary>
+        private IFileImporter? GetImporter(string fileName)
         {
             var ext = Path.GetExtension(fileName).ToLowerInvariant();
             return _importers.FirstOrDefault(i => i.SupportedExtensions.Contains(ext));
+        }
+
+        public bool CanImport(string fileName)
+        {
+            return GetImporter(fileName) != null;
         }
 
         public async Task<ImportResult> ImportAsync(Stream fileStream, string fileName, string collectionName, string color = DefaultColor, CancellationToken cancellationToken = default)
@@ -41,7 +55,7 @@ namespace LucidCartographer.Services.Import
                 parsed,
                 collectionName,
                 color,
-                $"{importer.FormatName.ToLower()}_import",
+                $"{importer.FormatName.ToLowerInvariant()}_import",
                 fileName,
                 cancellationToken);
         }
@@ -60,6 +74,9 @@ namespace LucidCartographer.Services.Import
         /// <summary>
         /// Shared persistence logic: creates a collection, deduplicates POIs against existing data,
         /// and batch-inserts new POIs. Called by both ImportAsync and ImportFromScrapedAsync.
+        /// IE-12: Returns error if no valid POIs after parsing (does not create empty collection).
+        /// IE-13: Uses PoiMatcher.NormalizeUrl for URL normalization (replaces naive method).
+        /// IE-18: Uses ToLowerInvariant instead of ToLower.
         /// </summary>
         private async Task<ImportResult> PersistImportedPoisAsync(
             IReadOnlyList<ImportedPoi> parsed,
@@ -73,6 +90,21 @@ namespace LucidCartographer.Services.Import
             var validParsed = parsed.Where(p =>
                 p.Latitude >= -90 && p.Latitude <= 90 &&
                 p.Longitude >= -180 && p.Longitude <= 180).ToList();
+
+            // IE-12: Don't create an empty collection if parsing yields 0 valid POIs
+            if (validParsed.Count == 0)
+            {
+                _logger.LogWarning("Import for '{CollectionName}': 0 valid POIs after parsing {Total} items. No collection created.",
+                    collectionName, parsed.Count);
+                return new ImportResult
+                {
+                    AddedCount = 0,
+                    SkippedCount = 0,
+                    TotalParsed = parsed.Count,
+                    CollectionId = 0,
+                    CollectionName = collectionName
+                };
+            }
 
             await using var db = await _factory.CreateDbContextAsync(cancellationToken);
 
@@ -88,9 +120,10 @@ namespace LucidCartographer.Services.Import
             await db.SaveChangesAsync(cancellationToken);
 
             // Pre-load existing POIs for dedup to avoid N+1 queries
+            // IE-13: Use PoiMatcher.NormalizeUrl for proper URL normalization
             var importedUrls = validParsed
                 .Where(p => !string.IsNullOrEmpty(p.GoogleMapsUrl))
-                .Select(p => NormalizeGoogleMapsUrl(p.GoogleMapsUrl!))
+                .Select(p => PoiMatcher.NormalizeUrl(p.GoogleMapsUrl!))
                 .Distinct()
                 .ToHashSet();
 
@@ -100,8 +133,9 @@ namespace LucidCartographer.Services.Import
                     .ToDictionaryAsync(p => p.GoogleMapsUrl!, cancellationToken)
                 : new Dictionary<string, Poi>();
 
+            // IE-18: Use ToLowerInvariant to avoid locale-dependent case conversion
             var importedNames = validParsed
-                .Select(p => p.Name.ToLower().Trim())
+                .Select(p => p.Name.ToLowerInvariant().Trim())
                 .Distinct()
                 .ToList();
 
@@ -128,19 +162,19 @@ namespace LucidCartographer.Services.Import
 
                 Poi? existing = null;
 
-                // Tier 1: Match by Google Maps URL
+                // Tier 1: Match by Google Maps URL (using proper normalization)
                 if (!string.IsNullOrEmpty(imported.GoogleMapsUrl))
                 {
-                    var normalizedUrl = NormalizeGoogleMapsUrl(imported.GoogleMapsUrl);
+                    var normalizedUrl = PoiMatcher.NormalizeUrl(imported.GoogleMapsUrl);
                     existingByUrl.TryGetValue(normalizedUrl, out existing);
                 }
 
                 // Tier 2: Match by name + proximity
                 if (existing == null)
                 {
-                    var nameLower = imported.Name.ToLower().Trim();
+                    var nameLower = imported.Name.ToLowerInvariant().Trim();
                     existing = existingByName.FirstOrDefault(c =>
-                        c.Name.ToLower() == nameLower &&
+                        c.Name.ToLowerInvariant() == nameLower &&
                         GeoUtils.HaversineDistance(c.Latitude, c.Longitude, imported.Latitude, imported.Longitude) < ProximityThresholdMeters);
                 }
 
@@ -165,7 +199,7 @@ namespace LucidCartographer.Services.Import
                         Latitude = imported.Latitude,
                         Longitude = imported.Longitude,
                         GoogleMapsUrl = !string.IsNullOrEmpty(imported.GoogleMapsUrl)
-                            ? NormalizeGoogleMapsUrl(imported.GoogleMapsUrl)
+                            ? PoiMatcher.NormalizeUrl(imported.GoogleMapsUrl)
                             : null,
                         Address = imported.Address,
                         Category = imported.Category,
@@ -211,7 +245,6 @@ namespace LucidCartographer.Services.Import
                 db.PoiCollectionItems.AddRange(linksToAdd);
             }
 
-            // PoiCount is [NotMapped] — no need to persist it; it is computed on read
             await db.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation("Import complete for collection '{CollectionName}' (ID={CollectionId}): {Added} added, {Skipped} duplicates linked, {Total} total parsed",
@@ -225,30 +258,6 @@ namespace LucidCartographer.Services.Import
                 CollectionId = collection.Id,
                 CollectionName = collectionName
             };
-        }
-
-        private static string NormalizeGoogleMapsUrl(string url)
-        {
-            url = url.Trim();
-            if (url.StartsWith("http://"))
-                url = "https://" + url[7..];
-
-            url = url.TrimEnd('/');
-
-            return url;
-        }
-    }
-
-    internal static class AsyncEnumerableExtensions
-    {
-        public static async Task<HashSet<T>> ToHashSetAsync<T>(this IQueryable<T> source, CancellationToken cancellationToken = default)
-        {
-            var set = new HashSet<T>();
-            await foreach (var item in source.AsAsyncEnumerable().WithCancellation(cancellationToken))
-            {
-                set.Add(item);
-            }
-            return set;
         }
     }
 }
