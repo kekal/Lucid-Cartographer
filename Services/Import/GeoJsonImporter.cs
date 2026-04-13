@@ -1,16 +1,25 @@
+using Microsoft.Extensions.Logging;
 using System.Text.Json;
 
 namespace LucidCartographer.Services.Import
 {
     public class GeoJsonImporter : IFileImporter
     {
+        private readonly ILogger<GeoJsonImporter> _logger;
+
+        public GeoJsonImporter(ILogger<GeoJsonImporter> logger)
+        {
+            _logger = logger;
+        }
+
         public string FormatName => "GeoJSON";
 
-        private static readonly string[] _extensions = [".geojson"];
+        private static readonly string[] _extensions = [".geojson", ".json"];
         public IReadOnlyList<string> SupportedExtensions => _extensions;
 
         public async Task<List<ImportedPoi>> ParseAsync(Stream fileStream, string fileName, CancellationToken cancellationToken = default)
         {
+            _logger.LogInformation("Parsing GeoJSON file: {FileName}", fileName);
             using var doc = await JsonDocument.ParseAsync(fileStream, cancellationToken: cancellationToken);
             var results = new List<ImportedPoi>();
             var root = doc.RootElement;
@@ -36,6 +45,7 @@ namespace LucidCartographer.Services.Import
                 if (poi != null) results.Add(poi);
             }
 
+            _logger.LogInformation("GeoJSON parse complete: {FileName} — {Count} POIs parsed", fileName, results.Count);
             return results;
         }
 

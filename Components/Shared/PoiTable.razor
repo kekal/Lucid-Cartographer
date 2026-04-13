@@ -1,4 +1,5 @@
 @using LucidCartographer.Data.Entities
+@using LucidCartographer.Services
 
 <div class="flex flex-col h-full">
     @* Table Header *@
@@ -59,7 +60,7 @@
                             </td>
                             <td class="px-4 py-2.5 text-xs text-on-surface-variant">@poi.AddedDate.ToString("MMM dd, yyyy")</td>
                             <td class="px-4 py-2.5 text-right">
-                                <a href="@GetGoogleMapsUrl(poi)"
+                                <a href="@PoiUrlHelper.GetGoogleMapsUrl(poi)"
                                    target="_blank" rel="noopener"
                                    class="text-primary hover:text-primary-container transition-colors p-1 inline-block"
                                    aria-label="@($"Open {poi.Name} in Google Maps")"
@@ -98,16 +99,5 @@
     [Parameter] public EventCallback<int> OnPoiSelected { get; set; }
     [Parameter] public EventCallback<int> OnFocusClicked { get; set; }
 
-    // HIGH-05/LOW-10: Shared Google Maps URL helper (DRY)
-    private static string GetGoogleMapsUrl(Poi poi)
-    {
-        if (!string.IsNullOrEmpty(poi.GoogleMapsUrl))
-            return poi.GoogleMapsUrl;
-
-        if (double.IsNaN(poi.Latitude) || double.IsNaN(poi.Longitude)
-            || double.IsInfinity(poi.Latitude) || double.IsInfinity(poi.Longitude))
-            return "#";
-
-        return $"https://www.google.com/maps/search/?api=1&query={poi.Latitude},{poi.Longitude}";
-    }
+    // ARCH-HIGH-03: GetGoogleMapsUrl moved to PoiUrlHelper.cs
 }

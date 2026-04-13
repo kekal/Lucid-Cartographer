@@ -9,7 +9,7 @@ namespace LucidCartographer.Services
         Task HideCollectionAsync(int collectionId);
         Task FocusOnPoiAsync(double lat, double lon, int zoom = 16);
         Task FitBoundsAsync();
-        Task InvalidateSizeAsync();
+        Task RefreshLayoutAsync();
         Task HighlightMarkerAsync(int poiId);
         event Action<int>? OnMarkerClicked;
     }

@@ -1,11 +1,19 @@
 using CsvHelper;
 using CsvHelper.Configuration;
+using Microsoft.Extensions.Logging;
 using System.Globalization;
 
 namespace LucidCartographer.Services.Import
 {
     public class CsvImporter : IFileImporter
     {
+        private readonly ILogger<CsvImporter> _logger;
+
+        public CsvImporter(ILogger<CsvImporter> logger)
+        {
+            _logger = logger;
+        }
+
         public string FormatName => "CSV";
 
         private static readonly string[] _extensions = [".csv"];
@@ -13,8 +21,12 @@ namespace LucidCartographer.Services.Import
 
         public async Task<List<ImportedPoi>> ParseAsync(Stream fileStream, string fileName, CancellationToken cancellationToken = default)
         {
-            // CsvHelper reads synchronously, so we wrap in Task.Run to stay async-friendly
-            // and pass the StreamReader directly (no intermediate string copy).
+            _logger.LogInformation("Parsing CSV file: {FileName}", fileName);
+
+            // CsvHelper reads synchronously — we yield once to avoid blocking the caller's
+            // synchronization context, then proceed with sync I/O on the thread-pool.
+            await Task.Yield();
+
             using var reader = new StreamReader(fileStream);
             using var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture)
             {
@@ -23,8 +35,6 @@ namespace LucidCartographer.Services.Import
                 HeaderValidated = null,
                 BadDataFound = null
             });
-
-            await Task.CompletedTask; // satisfy async signature; actual reading is sync below
 
             csv.Read();
             csv.ReadHeader();
@@ -39,8 +49,12 @@ namespace LucidCartographer.Services.Import
             var descCol = FindColumn(headers, "description", "desc", "notes", "comment");
 
             if (latCol < 0 || lonCol < 0)
+            {
+                _logger.LogError("CSV file {FileName} missing required lat/lon columns", fileName);
                 throw new ArgumentException("CSV must contain latitude and longitude columns (lat/latitude/y and lon/lng/longitude/x)");
+            }
 
+            var skipped = 0;
             var results = new List<ImportedPoi>();
 
             while (csv.Read())
@@ -49,9 +63,9 @@ namespace LucidCartographer.Services.Import
 
                 var latStr = csv.GetField(latCol);
                 var lonStr = csv.GetField(lonCol);
-                if (string.IsNullOrWhiteSpace(latStr) || string.IsNullOrWhiteSpace(lonStr)) continue;
-                if (!double.TryParse(latStr, CultureInfo.InvariantCulture, out var lat)) continue;
-                if (!double.TryParse(lonStr, CultureInfo.InvariantCulture, out var lon)) continue;
+                if (string.IsNullOrWhiteSpace(latStr) || string.IsNullOrWhiteSpace(lonStr)) { skipped++; continue; }
+                if (!double.TryParse(latStr, CultureInfo.InvariantCulture, out var lat)) { skipped++; continue; }
+                if (!double.TryParse(lonStr, CultureInfo.InvariantCulture, out var lon)) { skipped++; continue; }
 
                 var name = nameCol >= 0 ? csv.GetField(nameCol) : null;
                 if (string.IsNullOrWhiteSpace(name)) name = $"Point ({lat:F4}, {lon:F4})";
@@ -67,6 +81,8 @@ namespace LucidCartographer.Services.Import
                 ));
             }
 
+            _logger.LogInformation("CSV parse complete: {FileName} — {Count} POIs parsed, {Skipped} skipped",
+                fileName, results.Count, skipped);
             return results;
         }
 

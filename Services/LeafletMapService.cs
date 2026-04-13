@@ -53,7 +53,7 @@ namespace LucidCartographer.Services
             await InvokeJsVoidAsync("leafletInterop.fitBounds");
         }
 
-        public async Task InvalidateSizeAsync()
+        public async Task RefreshLayoutAsync()
         {
             await InvokeJsVoidAsync("leafletInterop.invalidateSize");
         }

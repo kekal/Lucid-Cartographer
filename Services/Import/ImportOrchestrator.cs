@@ -1,6 +1,7 @@
 using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace LucidCartographer.Services.Import
 {
@@ -12,11 +13,13 @@ namespace LucidCartographer.Services.Import
 
         private readonly IDbContextFactory<AppDbContext> _factory;
         private readonly IEnumerable<IFileImporter> _importers;
+        private readonly ILogger<ImportOrchestrator> _logger;
 
-        public ImportOrchestrator(IDbContextFactory<AppDbContext> factory, IEnumerable<IFileImporter> importers)
+        public ImportOrchestrator(IDbContextFactory<AppDbContext> factory, IEnumerable<IFileImporter> importers, ILogger<ImportOrchestrator> logger)
         {
             _factory = factory;
             _importers = importers;
+            _logger = logger;
         }
 
         public IFileImporter? GetImporter(string fileName)
@@ -31,6 +34,8 @@ namespace LucidCartographer.Services.Import
                 ?? throw new ArgumentException($"No importer found for file: {fileName}");
 
             var parsed = await importer.ParseAsync(fileStream, fileName, cancellationToken);
+            _logger.LogInformation("Import {FileName}: parsed {Count} POIs using {Format} importer",
+                fileName, parsed.Count, importer.FormatName);
 
             return await PersistImportedPoisAsync(
                 parsed,
@@ -206,8 +211,11 @@ namespace LucidCartographer.Services.Import
                 db.PoiCollectionItems.AddRange(linksToAdd);
             }
 
-            collection.PoiCount = added + skipped;
+            // PoiCount is [NotMapped] — no need to persist it; it is computed on read
             await db.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Import complete for collection '{CollectionName}' (ID={CollectionId}): {Added} added, {Skipped} duplicates linked, {Total} total parsed",
+                collectionName, collection.Id, added, skipped, parsed.Count);
 
             return new ImportResult
             {

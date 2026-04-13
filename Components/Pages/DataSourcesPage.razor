@@ -6,6 +6,7 @@
 @inject IImportOrchestrator ImportOrchestrator
 @inject IPoiService PoiService
 @inject IGoogleMapsListScraper Scraper
+@implements IDisposable
 
 <PageTitle>Data Sources - Lucid Cartographer</PageTitle>
 
@@ -280,6 +281,7 @@
     private string _sharedListUrl = string.Empty;
     private bool _isScraping = false;
     private int _scrapeProgress = 0;
+    private CancellationTokenSource _cts = new();
 
     private string _uploadTitle => _activeCard switch
     {
@@ -348,10 +350,9 @@
 
         try
         {
-            // HIGH-08 TODO: 50MB buffered entirely in memory per upload per circuit.
-            // Multiple concurrent users uploading large files can OOM the server.
-            // Replace with streaming/chunked upload for production use.
-            const long MaxUploadSizeBytes = 50 * 1024 * 1024; // 50MB max
+            // ARCH-HIGH-08: Reduced from 50MB to 10MB — POI files (GPX, KML, GeoJSON, CSV)
+            // are typically under 1MB. Entire file is buffered in memory per circuit.
+            const long MaxUploadSizeBytes = 10 * 1024 * 1024; // 10MB max
             using var stream = file.OpenReadStream(maxAllowedSize: MaxUploadSizeBytes);
             using var ms = new MemoryStream();
             await stream.CopyToAsync(ms);
@@ -393,7 +394,7 @@
                     if (t.IsFaulted)
                         System.Diagnostics.Debug.WriteLine($"Scrape progress render failed: {t.Exception?.Message}");
                 }, TaskScheduler.Default);
-            });
+            }, _cts.Token);
 
             if (!result.Pois.Any())
             {
@@ -439,5 +440,11 @@
         _pendingDeleteId = null;
         await PoiService.DeleteCollectionAsync(id);
         await LoadCollections();
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
     }
 }

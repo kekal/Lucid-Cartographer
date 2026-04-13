@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using System.IO.Compression;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -6,6 +7,13 @@ namespace LucidCartographer.Services.Import
 {
     public class KmlImporter : IFileImporter
     {
+        private readonly ILogger<KmlImporter> _logger;
+
+        public KmlImporter(ILogger<KmlImporter> logger)
+        {
+            _logger = logger;
+        }
+
         public string FormatName => "KML";
 
         private static readonly string[] _extensions = [".kml", ".kmz"];
@@ -13,6 +21,7 @@ namespace LucidCartographer.Services.Import
 
         public async Task<List<ImportedPoi>> ParseAsync(Stream fileStream, string fileName, CancellationToken cancellationToken = default)
         {
+            _logger.LogInformation("Parsing KML/KMZ file: {FileName}", fileName);
             XDocument doc;
 
             if (Path.GetExtension(fileName).Equals(".kmz", StringComparison.OrdinalIgnoreCase))
@@ -31,6 +40,7 @@ namespace LucidCartographer.Services.Import
 
             var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
 
+            var skipped = 0;
             var results = new List<ImportedPoi>();
             var placemarks = doc.Descendants(ns + "Placemark").ToList();
             if (!placemarks.Any())
@@ -44,13 +54,13 @@ namespace LucidCartographer.Services.Import
                 var desc = FindElement(pm, ns, "description")?.Value;
 
                 var coordsText = FindDescendant(pm, ns, "coordinates")?.Value;
-                if (coordsText == null) continue;
+                if (coordsText == null) { skipped++; continue; }
 
                 var parts = coordsText.Trim().Split(',');
-                if (parts.Length < 2) continue;
+                if (parts.Length < 2) { skipped++; continue; }
 
-                if (!double.TryParse(parts[0].Trim(), System.Globalization.CultureInfo.InvariantCulture, out var lon)) continue;
-                if (!double.TryParse(parts[1].Trim(), System.Globalization.CultureInfo.InvariantCulture, out var lat)) continue;
+                if (!double.TryParse(parts[0].Trim(), System.Globalization.CultureInfo.InvariantCulture, out var lon)) { skipped++; continue; }
+                if (!double.TryParse(parts[1].Trim(), System.Globalization.CultureInfo.InvariantCulture, out var lat)) { skipped++; continue; }
 
                 string? googleUrl = ExtractGoogleMapsUrl(desc);
 
@@ -62,6 +72,9 @@ namespace LucidCartographer.Services.Import
                     Description: StripHtml(desc)
                 ));
             }
+
+            _logger.LogInformation("KML parse complete: {FileName} — {Count} POIs parsed, {Skipped} skipped",
+                fileName, results.Count, skipped);
             return results;
         }
 

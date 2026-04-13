@@ -11,6 +11,11 @@ namespace LucidCartographer.Services.Export
         public string FileExtension => ".gpx";
         public string ContentType => "application/gpx+xml";
 
+        /// <summary>
+        /// Sync wrapper — safe because <see cref="ExportAsync"/> is synchronous
+        /// (XDocument.Save is sync and returns Task.CompletedTask).
+        /// If ExportAsync ever becomes truly async, this must be revisited.
+        /// </summary>
         public byte[] Export(List<Poi> pois, string name = "Lucid Cartographer Export")
         {
             using var ms = new MemoryStream();

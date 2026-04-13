@@ -46,10 +46,17 @@ namespace LucidCartographer.Services.Import
                 throw new ArgumentException("URL must be a Google Maps URL (https://www.google.com/maps/... or https://maps.app.goo.gl/...).", nameof(listUrl));
 
             // HIGH-07: Acquire semaphore to ensure only one scrape runs at a time
-            await _scrapeSemaphore.WaitAsync(cancellationToken);
+            // ARCH-HIGH-04: Add timeout to semaphore wait to prevent unbounded queuing
+            if (!await _scrapeSemaphore.WaitAsync(TimeSpan.FromMinutes(10), cancellationToken))
+            {
+                throw new TimeoutException("Timed out waiting for scraper availability. Another scrape may be in progress.");
+            }
             try
             {
-                return await ScrapeInternalAsync(trimmedUrl, onProgress, cancellationToken);
+                // ARCH-HIGH-08: Overall operation timeout of 10 minutes
+                using var operationCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                operationCts.CancelAfter(TimeSpan.FromMinutes(10));
+                return await ScrapeInternalAsync(trimmedUrl, onProgress, operationCts.Token);
             }
             finally
             {

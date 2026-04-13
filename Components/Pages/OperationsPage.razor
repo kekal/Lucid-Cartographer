@@ -5,7 +5,8 @@
 @using LucidCartographer.Services.Operations
 @using LucidCartographer.Services.Export
 @inject IPoiService PoiService
-@inject KmlExporter KmlExporter
+@* ARCH-HIGH-01: Inject all exporters via interface instead of concrete KmlExporter *@
+@inject IEnumerable<IFileExporter> Exporters
 @inject IJSRuntime JS
 @inject ISetOperationService SetOperationService
 
@@ -245,7 +246,7 @@ else
                                 </td>
                                 <td class="px-4 py-2.5 text-xs text-on-surface-variant">@poi.Id</td>
                                 <td class="px-4 py-2.5 text-right">
-                                    <a href="@GetGoogleMapsUrl(poi)"
+                                    <a href="@PoiUrlHelper.GetGoogleMapsUrl(poi)"
                                        target="_blank" rel="noopener"
                                        aria-label="@($"Open {poi.Name} in Google Maps")"
                                        class="text-primary hover:underline text-xs font-medium mr-3">Focus</a>
@@ -394,7 +395,9 @@ else
         var poisToExport = _resultPois.Where(p => !_discardedIds.Contains(p.Id)).ToList();
         if (!poisToExport.Any()) return;
 
-        var bytes = KmlExporter.Export(poisToExport, _commitName ?? "Operation Result");
+        // ARCH-HIGH-01: Resolve KML exporter from the injected collection instead of concrete type
+        var kmlExporter = Exporters.First(e => e.FormatName == "KML");
+        var bytes = kmlExporter.Export(poisToExport, _commitName ?? "Operation Result");
         var fileName = $"export_{DateTime.Now:yyyyMMdd_HHmmss}.kml";
 
         // Trigger browser download via JS
@@ -410,16 +413,5 @@ else
         _ => ""
     };
 
-    // HIGH-05/LOW-10: Shared Google Maps URL helper with validation
-    private static string GetGoogleMapsUrl(Poi poi)
-    {
-        if (!string.IsNullOrEmpty(poi.GoogleMapsUrl))
-            return poi.GoogleMapsUrl;
-
-        if (double.IsNaN(poi.Latitude) || double.IsNaN(poi.Longitude)
-            || double.IsInfinity(poi.Latitude) || double.IsInfinity(poi.Longitude))
-            return "#";
-
-        return $"https://www.google.com/maps/search/?api=1&query={poi.Latitude},{poi.Longitude}";
-    }
+    // ARCH-HIGH-03: GetGoogleMapsUrl moved to PoiUrlHelper.cs
 }

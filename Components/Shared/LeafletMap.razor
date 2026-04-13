@@ -63,10 +63,10 @@
         await MapService.FitBoundsAsync();
     }
 
-    public async Task InvalidateSizeAsync()
+    public async Task RefreshLayoutAsync()
     {
         if (!_initialized) return;
-        await MapService.InvalidateSizeAsync();
+        await MapService.RefreshLayoutAsync();
     }
 
     public async Task HighlightMarkerAsync(int poiId)
@@ -93,5 +93,11 @@
     {
         MapService.OnMarkerClicked -= HandleMarkerClicked;
         _initTcs.TrySetCanceled();
+
+        // Propagate disposal to the map service so the JS-side map instance is destroyed
+        if (MapService is IAsyncDisposable disposable)
+        {
+            await disposable.DisposeAsync();
+        }
     }
 }

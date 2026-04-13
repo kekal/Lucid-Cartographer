@@ -26,5 +26,16 @@ namespace LucidCartographer.Services.Export
         /// Prefer <see cref="ExportAsync"/> for large exports.
         /// </summary>
         byte[] Export(List<Poi> pois, string documentName = "Lucid Cartographer Export");
+
+        /// <summary>
+        /// Whether this exporter supports grouped-by-category export.
+        /// </summary>
+        bool SupportsGrouping => false;
+
+        /// <summary>
+        /// Exports POIs grouped by category. Default implementation falls back to flat export.
+        /// </summary>
+        byte[] ExportGroupedByCategory(List<Poi> pois, string documentName = "Lucid Cartographer Export")
+            => Export(pois, documentName);
     }
 }

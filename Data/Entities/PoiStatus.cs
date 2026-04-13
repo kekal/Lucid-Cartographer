@@ -43,12 +43,16 @@ namespace LucidCartographer.Data.Entities
     {
         public const string GpxImport = "gpx_import";
         public const string KmlImport = "kml_import";
+        // ARCH-HIGH-09: Added missing source type constants
+        public const string GeoJsonImport = "geojson_import";
+        public const string CsvImport = "csv_import";
+        public const string GoogleMapsScrape = "google_maps_scrape";
         public const string Manual = "manual";
         public const string OperationResult = "operation_result";
 
         public static readonly IReadOnlyList<string> All = new[]
         {
-            GpxImport, KmlImport, Manual, OperationResult
+            GpxImport, KmlImport, GeoJsonImport, CsvImport, GoogleMapsScrape, Manual, OperationResult
         };
     }
 }

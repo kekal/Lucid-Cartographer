@@ -180,12 +180,17 @@ namespace LucidCartographer.Services
                 return new List<Poi>();
 
             await using var db = await _factory.CreateDbContextAsync(cancellationToken);
-            var lower = query.ToLowerInvariant();
+            // Escape LIKE metacharacters to prevent LIKE injection
+            var escaped = query.ToLowerInvariant()
+                .Replace("\\", "\\\\")
+                .Replace("%", "\\%")
+                .Replace("_", "\\_")
+                .Replace("[", "\\[");
             return await db.Pois
-                .Where(p => EF.Functions.Like(p.Name, $"%{lower}%")
-                    || (p.Address != null && EF.Functions.Like(p.Address, $"%{lower}%"))
-                    || (p.Tags != null && EF.Functions.Like(p.Tags, $"%{lower}%"))
-                    || (p.Notes != null && EF.Functions.Like(p.Notes, $"%{lower}%")))
+                .Where(p => EF.Functions.Like(p.Name, $"%{escaped}%", "\\")
+                    || (p.Address != null && EF.Functions.Like(p.Address, $"%{escaped}%", "\\"))
+                    || (p.Tags != null && EF.Functions.Like(p.Tags, $"%{escaped}%", "\\"))
+                    || (p.Notes != null && EF.Functions.Like(p.Notes, $"%{escaped}%", "\\")))
                 .Take(100)
                 .ToListAsync(cancellationToken);
         }

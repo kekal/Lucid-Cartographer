@@ -7,10 +7,10 @@
     <link rel="stylesheet" href="css/tailwind.css" />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
-    <!-- TODO [CRIT-02]: Self-host Leaflet assets in wwwroot/lib/ and add SRI integrity attributes.
-         Unpinned CDN without integrity= allows supply-chain attacks (see REVIEW_ARCHITECTURE.md HIGH-05). -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- ARCH-HIGH-07: Self-hosted Leaflet 1.9.4 (previously loaded from unpkg CDN) -->
+    <link rel="stylesheet" href="lib/leaflet/leaflet.css" />
+    <script src="lib/leaflet/leaflet.js"></script>
+    <!-- TODO: Self-host Google Fonts (Manrope, Inter, Material Symbols) with SRI hashes for full CDN independence -->
     <link rel="stylesheet" href="app.css" />
     <link rel="stylesheet" href="LucidCartographer.styles.css" />
     <HeadOutlet />

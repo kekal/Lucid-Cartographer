@@ -11,7 +11,13 @@ namespace LucidCartographer.Services.Export
         public string FormatName => "KML";
         public string FileExtension => ".kml";
         public string ContentType => "application/vnd.google-earth.kml+xml";
+        public bool SupportsGrouping => true;
 
+        /// <summary>
+        /// Sync wrapper — safe because <see cref="ExportAsync"/> is synchronous
+        /// (XDocument.Save is sync and returns Task.CompletedTask).
+        /// If ExportAsync ever becomes truly async, this must be revisited.
+        /// </summary>
         public byte[] Export(List<Poi> pois, string documentName = "Lucid Cartographer Export")
         {
             using var ms = new MemoryStream();

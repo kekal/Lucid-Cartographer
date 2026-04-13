@@ -1,4 +1,5 @@
 @using LucidCartographer.Data.Entities
+@using LucidCartographer.Services
 
 @if (Poi != null)
 {
@@ -156,7 +157,7 @@
 
         @* Footer: Google Maps button *@
         <div class="p-4 flex-shrink-0">
-            <a href="@GetGoogleMapsUrl(Poi)"
+            <a href="@PoiUrlHelper.GetGoogleMapsUrl(Poi)"
                target="_blank" rel="noopener"
                class="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg bg-gradient-to-r from-primary to-primary-container text-white font-medium text-sm hover:shadow-lg transition-all">
                 <span class="material-symbols-outlined text-base" aria-hidden="true">open_in_new</span>
@@ -189,16 +190,5 @@
         }
     }
 
-    // HIGH-05/LOW-10: Shared Google Maps URL helper with validation
-    private static string GetGoogleMapsUrl(Poi poi)
-    {
-        if (!string.IsNullOrEmpty(poi.GoogleMapsUrl))
-            return poi.GoogleMapsUrl;
-
-        if (double.IsNaN(poi.Latitude) || double.IsNaN(poi.Longitude)
-            || double.IsInfinity(poi.Latitude) || double.IsInfinity(poi.Longitude))
-            return "#";
-
-        return $"https://www.google.com/maps/search/?api=1&query={poi.Latitude},{poi.Longitude}";
-    }
+    // ARCH-HIGH-03: GetGoogleMapsUrl moved to PoiUrlHelper.cs
 }

@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace LucidCartographer.Data.Entities
 {
@@ -29,9 +30,9 @@ namespace LucidCartographer.Data.Entities
         public string? SourceFileName { get; set; }
 
         /// <summary>
-        /// Denormalized count — computed from DB in GetCollectionsAsync for accuracy.
-        /// May also be set during import for convenience.
+        /// Not persisted — computed from DB at read time in GetCollectionsAsync.
         /// </summary>
+        [NotMapped]
         public int PoiCount { get; set; }
 
         [ConcurrencyCheck]
