@@ -2,12 +2,6 @@ using Microsoft.Playwright;
 
 namespace LucidCartographer.Services.Import
 {
-    public class ScrapeResult
-    {
-        public string? ListName { get; set; }
-        public List<ImportedPoi> Pois { get; set; } = new();
-    }
-
     public class GoogleMapsListScraper : IGoogleMapsListScraper
     {
         private const string DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";

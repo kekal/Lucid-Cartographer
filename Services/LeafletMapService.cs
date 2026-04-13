@@ -63,6 +63,11 @@ namespace LucidCartographer.Services
             await InvokeJsVoidAsync("leafletInterop.highlightMarker", poiId);
         }
 
+        public async Task DestroyMapAsync()
+        {
+            await InvokeJsVoidAsync("leafletInterop.destroyMap");
+        }
+
         /// <summary>Internal: called from JavaScript only.</summary>
         [JSInvokable]
         public Task OnMarkerClickedJs(int poiId)

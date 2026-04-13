@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using System.Text.RegularExpressions;
 using LucidCartographer.Data.Entities;
@@ -14,10 +15,16 @@ namespace LucidCartographer.Services.Operations
     public partial class PoiMatcher : IPoiMatcher
     {
         /// <summary>Default spatial tolerance in meters for proximity matching.</summary>
-        public const double DefaultToleranceMeters = 100;
+        public const double DefaultToleranceMeters = IPoiMatcher.DefaultToleranceMeters;
 
         /// <summary>Default threshold for name similarity (0.0 - 1.0). Names with similarity below this are not considered matches.</summary>
-        public const double DefaultNameSimilarityThreshold = 0.6;
+        public const double DefaultNameSimilarityThreshold = IPoiMatcher.DefaultNameSimilarityThreshold;
+
+        /// <summary>
+        /// Approximate degrees of latitude per meter, used for fast latitude pre-filter.
+        /// 1 degree latitude ~ 111,320 meters.
+        /// </summary>
+        private const double DegreesPerMeter = 1.0 / 111_320.0;
 
         /// <summary>
         /// Determines if two POIs represent the same place.
@@ -28,9 +35,13 @@ namespace LucidCartographer.Services.Operations
         /// <param name="a">First POI.</param>
         /// <param name="b">Second POI.</param>
         /// <param name="toleranceMeters">Maximum distance in meters for proximity matching.</param>
+        /// <param name="nameSimilarityThreshold">Minimum name similarity score (0.0 - 1.0) for proximity matching.</param>
         /// <returns>True if the two POIs are considered a match.</returns>
-        public bool IsMatch(Poi a, Poi b, double toleranceMeters = DefaultToleranceMeters)
+        public bool IsMatch(Poi a, Poi b, double toleranceMeters = DefaultToleranceMeters, double nameSimilarityThreshold = DefaultNameSimilarityThreshold)
         {
+            ArgumentNullException.ThrowIfNull(a);
+            ArgumentNullException.ThrowIfNull(b);
+
             bool aHasUrl = !string.IsNullOrEmpty(a.GoogleMapsUrl);
             bool bHasUrl = !string.IsNullOrEmpty(b.GoogleMapsUrl);
 
@@ -42,31 +53,61 @@ namespace LucidCartographer.Services.Operations
             }
 
             // Tier 2: Proximity + name similarity (only when at least one POI lacks a URL)
-            var distance = GeoUtils.HaversineDistance(a.Latitude, a.Longitude, b.Latitude, b.Longitude);
+            return IsProximityMatch(a, b, toleranceMeters, nameSimilarityThreshold, out _);
+        }
+
+        /// <summary>
+        /// Internal method that checks proximity + name similarity and returns the computed distance.
+        /// Avoids double Haversine computation (OPS-R01).
+        /// </summary>
+        private static bool IsProximityMatch(Poi a, Poi b, double toleranceMeters, double nameSimilarityThreshold, out double distance)
+        {
+            distance = GeoUtils.HaversineDistance(a.Latitude, a.Longitude, b.Latitude, b.Longitude);
             if (distance > toleranceMeters)
                 return false;
 
-            return NameSimilarity(a.Name, b.Name) >= DefaultNameSimilarityThreshold;
+            return NameSimilarity(a.Name, b.Name) >= nameSimilarityThreshold;
         }
 
         /// <summary>
         /// Finds the best match for a POI in a collection of candidates.
-        /// Scans all candidates and returns the closest match (by distance) that passes IsMatch.
+        /// Scans all candidates and returns the closest match (by distance) that passes matching criteria.
+        /// Computes Haversine distance only once per candidate (OPS-R01).
         /// </summary>
-        public Poi? FindMatch(Poi poi, IEnumerable<Poi> candidates, double toleranceMeters = DefaultToleranceMeters)
+        public Poi? FindMatch(Poi poi, IEnumerable<Poi> candidates, double toleranceMeters = DefaultToleranceMeters, double nameSimilarityThreshold = DefaultNameSimilarityThreshold)
         {
+            ArgumentNullException.ThrowIfNull(poi);
+            ArgumentNullException.ThrowIfNull(candidates);
+
             Poi? bestMatch = null;
             double bestDistance = double.MaxValue;
+            bool poiHasUrl = !string.IsNullOrEmpty(poi.GoogleMapsUrl);
 
             foreach (var c in candidates)
             {
-                if (!IsMatch(poi, c, toleranceMeters))
-                    continue;
+                bool cHasUrl = !string.IsNullOrEmpty(c.GoogleMapsUrl);
 
-                var dist = GeoUtils.HaversineDistance(poi.Latitude, poi.Longitude, c.Latitude, c.Longitude);
-                if (dist < bestDistance)
+                if (poiHasUrl && cHasUrl)
                 {
-                    bestDistance = dist;
+                    // Tier 1: URL comparison
+                    if (NormalizeUrl(poi.GoogleMapsUrl!) == NormalizeUrl(c.GoogleMapsUrl!))
+                    {
+                        // URL match; compute distance for ranking
+                        var dist = GeoUtils.HaversineDistance(poi.Latitude, poi.Longitude, c.Latitude, c.Longitude);
+                        if (dist < bestDistance)
+                        {
+                            bestDistance = dist;
+                            bestMatch = c;
+                        }
+                    }
+                    // Both have URLs that differ -> skip (OPS-H05)
+                    continue;
+                }
+
+                // Tier 2: Proximity + name similarity
+                if (IsProximityMatch(poi, c, toleranceMeters, nameSimilarityThreshold, out var distance) && distance < bestDistance)
+                {
+                    bestDistance = distance;
                     bestMatch = c;
                 }
             }
@@ -78,8 +119,12 @@ namespace LucidCartographer.Services.Operations
         /// Finds the best match using a pre-built URL index for O(1) URL lookup,
         /// falling back to proximity matching for POIs without URLs (OPS-C02).
         /// </summary>
-        public Poi? FindMatch(Poi poi, Dictionary<string, Poi> urlIndex, IEnumerable<Poi> candidates, double toleranceMeters = DefaultToleranceMeters)
+        public Poi? FindMatch(Poi poi, Dictionary<string, Poi> urlIndex, IEnumerable<Poi> candidates, double toleranceMeters = DefaultToleranceMeters, double nameSimilarityThreshold = DefaultNameSimilarityThreshold)
         {
+            ArgumentNullException.ThrowIfNull(poi);
+            ArgumentNullException.ThrowIfNull(urlIndex);
+            ArgumentNullException.ThrowIfNull(candidates);
+
             // Tier 1: O(1) URL lookup
             if (!string.IsNullOrEmpty(poi.GoogleMapsUrl))
             {
@@ -88,7 +133,6 @@ namespace LucidCartographer.Services.Operations
                     return urlMatch;
 
                 // POI has a URL but no match found in index.
-                // If all candidates also have URLs, no need for proximity check (OPS-H05).
                 // We still fall through to proximity for candidates without URLs.
             }
 
@@ -109,7 +153,7 @@ namespace LucidCartographer.Services.Operations
                 if (dist > toleranceMeters)
                     continue;
 
-                if (NameSimilarity(poi.Name, c.Name) < DefaultNameSimilarityThreshold)
+                if (NameSimilarity(poi.Name, c.Name) < nameSimilarityThreshold)
                     continue;
 
                 if (dist < bestDistance)
@@ -125,9 +169,13 @@ namespace LucidCartographer.Services.Operations
         /// <summary>
         /// Finds all duplicate groups using union-find for transitive grouping (OPS-C03).
         /// If A~B and B~C but not A~C, all three end up in the same group.
+        /// Uses latitude pre-filter for O(1) rejection of distant pairs (OPS-R07).
+        /// Accepts CancellationToken for cancellation of long-running operations (OPS-R20).
         /// </summary>
-        public List<List<Poi>> FindDuplicateGroups(List<Poi> pois, double toleranceMeters = DefaultToleranceMeters)
+        public List<List<Poi>> FindDuplicateGroups(List<Poi> pois, double toleranceMeters = DefaultToleranceMeters, double nameSimilarityThreshold = DefaultNameSimilarityThreshold, CancellationToken cancellationToken = default)
         {
+            ArgumentNullException.ThrowIfNull(pois);
+
             int n = pois.Count;
             var parent = new int[n];
             var rank = new int[n];
@@ -153,11 +201,20 @@ namespace LucidCartographer.Services.Operations
                 if (rank[rx] == rank[ry]) rank[rx]++;
             }
 
+            // Pre-compute latitude threshold in degrees for fast rejection (OPS-R07)
+            double latThresholdDegrees = toleranceMeters * DegreesPerMeter;
+
             for (int i = 0; i < n; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 for (int j = i + 1; j < n; j++)
                 {
-                    if (IsMatch(pois[i], pois[j], toleranceMeters))
+                    // Fast latitude pre-filter: reject pairs that are obviously too far apart (OPS-R07)
+                    if (Math.Abs(pois[i].Latitude - pois[j].Latitude) > latThresholdDegrees)
+                        continue;
+
+                    if (IsMatch(pois[i], pois[j], toleranceMeters, nameSimilarityThreshold))
                     {
                         Union(i, j);
                     }
@@ -182,10 +239,13 @@ namespace LucidCartographer.Services.Operations
 
         /// <summary>
         /// Builds a dictionary mapping normalized URLs to POIs for O(1) URL-based lookup (OPS-C02).
-        /// If multiple POIs share the same normalized URL, the first one wins.
+        /// If multiple POIs share the same normalized URL, the first one wins and subsequent
+        /// collisions are logged via trace diagnostics (OPS-R11).
         /// </summary>
         public Dictionary<string, Poi> BuildUrlIndex(IEnumerable<Poi> pois)
         {
+            ArgumentNullException.ThrowIfNull(pois);
+
             var index = new Dictionary<string, Poi>(StringComparer.Ordinal);
             foreach (var poi in pois)
             {
@@ -193,7 +253,12 @@ namespace LucidCartographer.Services.Operations
                     continue;
 
                 var normalized = NormalizeUrl(poi.GoogleMapsUrl);
-                index.TryAdd(normalized, poi);
+                if (!index.TryAdd(normalized, poi))
+                {
+                    System.Diagnostics.Trace.TraceWarning(
+                        $"BuildUrlIndex: duplicate normalized URL '{normalized}' for POI Id={poi.Id} Name='{poi.Name}'. " +
+                        $"Existing entry: Id={index[normalized].Id} Name='{index[normalized].Name}'.");
+                }
             }
             return index;
         }
@@ -201,6 +266,8 @@ namespace LucidCartographer.Services.Operations
         /// <summary>
         /// Computes name similarity between two strings using Levenshtein distance.
         /// Applies Unicode NFC normalization before comparison (OPS-H06).
+        /// Substring match returns 0.9 only when the shorter string is at least half the length
+        /// of the longer string (OPS-R10).
         /// </summary>
         /// <param name="a">First name.</param>
         /// <param name="b">Second name.</param>
@@ -215,7 +282,15 @@ namespace LucidCartographer.Services.Operations
             b = b.Trim().ToLowerInvariant().Normalize(NormalizationForm.FormC);
 
             if (a == b) return 1.0;
-            if (a.Contains(b, StringComparison.Ordinal) || b.Contains(a, StringComparison.Ordinal)) return 0.9;
+
+            // Substring match with length-ratio guard (OPS-R10)
+            int shorterLen = Math.Min(a.Length, b.Length);
+            int longerLen = Math.Max(a.Length, b.Length);
+            if ((a.Contains(b, StringComparison.Ordinal) || b.Contains(a, StringComparison.Ordinal))
+                && (double)shorterLen / longerLen > 0.5)
+            {
+                return 0.9;
+            }
 
             // Levenshtein-based similarity
             var distance = LevenshteinDistance(a, b);
@@ -225,7 +300,7 @@ namespace LucidCartographer.Services.Operations
 
         /// <summary>
         /// Computes Levenshtein edit distance using two-row optimization (OPS-C04).
-        /// Space: O(min(n,m)) instead of O(n*m). No 2D array allocation.
+        /// Space: O(min(n,m)) instead of O(n*m). Uses ArrayPool to avoid GC pressure (OPS-R15).
         /// </summary>
         internal static int LevenshteinDistance(string s, string t)
         {
@@ -238,36 +313,56 @@ namespace LucidCartographer.Services.Operations
 
             if (sLen == 0) return tLen;
 
-            var prev = new int[sLen + 1];
-            var curr = new int[sLen + 1];
+            var pool = ArrayPool<int>.Shared;
+            var prev = pool.Rent(sLen + 1);
+            var curr = pool.Rent(sLen + 1);
 
-            for (int i = 0; i <= sLen; i++)
-                prev[i] = i;
-
-            for (int j = 1; j <= tLen; j++)
+            try
             {
-                curr[0] = j;
-                for (int i = 1; i <= sLen; i++)
-                {
-                    int cost = s[i - 1] == t[j - 1] ? 0 : 1;
-                    curr[i] = Math.Min(
-                        Math.Min(curr[i - 1] + 1, prev[i] + 1),
-                        prev[i - 1] + cost);
-                }
-                (prev, curr) = (curr, prev);
-            }
+                for (int i = 0; i <= sLen; i++)
+                    prev[i] = i;
 
-            return prev[sLen];
+                for (int j = 1; j <= tLen; j++)
+                {
+                    curr[0] = j;
+                    for (int i = 1; i <= sLen; i++)
+                    {
+                        int cost = s[i - 1] == t[j - 1] ? 0 : 1;
+                        curr[i] = Math.Min(
+                            Math.Min(curr[i - 1] + 1, prev[i] + 1),
+                            prev[i - 1] + cost);
+                    }
+                    (prev, curr) = (curr, prev);
+                }
+
+                return prev[sLen];
+            }
+            finally
+            {
+                pool.Return(prev);
+                pool.Return(curr);
+            }
         }
 
         /// <summary>
         /// Normalizes a Google Maps URL for comparison (OPS-H03).
         /// Handles: http vs https, www vs non-www, trailing slashes, fragment removal,
-        /// tracking parameter removal, and CID extraction.
+        /// tracking parameter removal, percent-encoding normalization, CID/ftid extraction.
+        /// This is a static pure function (OPS-R03).
         /// </summary>
-        public string NormalizeUrl(string url)
+        public static string NormalizeUrl(string url)
         {
             url = url.Trim();
+
+            // Decode percent-encoded characters before normalization (OPS-R09)
+            try
+            {
+                url = Uri.UnescapeDataString(url);
+            }
+            catch (FormatException)
+            {
+                // Malformed percent-encoding; proceed with the raw URL
+            }
 
             // Remove fragment
             int fragIdx = url.IndexOf('#');
@@ -281,8 +376,9 @@ namespace LucidCartographer.Services.Operations
             if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
                 url = "https://" + url[7..];
 
-            // Remove www. prefix from host (OPS-H03)
-            url = WwwPrefixRegex().Replace(url, "https://");
+            // Remove www. prefix from host (OPS-R19: regex now only matches "www." after scheme)
+            if (url.StartsWith("https://www.", StringComparison.OrdinalIgnoreCase))
+                url = "https://" + url[12..];
 
             // Try to extract CID parameter for Google Maps URLs (OPS-H03)
             var cidMatch = CidParamRegex().Match(url);
@@ -290,6 +386,13 @@ namespace LucidCartographer.Services.Operations
             {
                 // CID is the authoritative identifier; use it as the canonical form
                 return "cid:" + cidMatch.Groups[1].Value;
+            }
+
+            // Try to extract ftid parameter for Google Maps URLs (OPS-R08)
+            var ftidMatch = FtidParamRegex().Match(url);
+            if (ftidMatch.Success)
+            {
+                return "ftid:" + ftidMatch.Groups[1].Value;
             }
 
             // Remove common tracking parameters
@@ -339,10 +442,10 @@ namespace LucidCartographer.Services.Operations
             return basePart + "?" + string.Join("&", keepParams);
         }
 
-        [GeneratedRegex(@"^https://www\.", RegexOptions.IgnoreCase)]
-        private static partial Regex WwwPrefixRegex();
-
         [GeneratedRegex(@"[?&]cid=(\d+)", RegexOptions.IgnoreCase)]
         private static partial Regex CidParamRegex();
+
+        [GeneratedRegex(@"[?&]ftid=(0x[0-9a-fA-F]+:0x[0-9a-fA-F]+)", RegexOptions.IgnoreCase)]
+        private static partial Regex FtidParamRegex();
     }
 }

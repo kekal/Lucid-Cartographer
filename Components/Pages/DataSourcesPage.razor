@@ -269,7 +269,7 @@
 </div>
 
 @code {
-    private List<PoiCollection> _collections = new();
+    private IReadOnlyList<PoiCollection> _collections = Array.Empty<PoiCollection>();
     private bool _showUpload = false;
     private string _activeCard = "file";
     private string _collectionName = string.Empty;

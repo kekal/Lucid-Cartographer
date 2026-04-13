@@ -1,5 +1,6 @@
 using LucidCartographer.Data.Entities;
 using System.Text;
+using System.Xml;
 using System.Xml.Linq;
 
 namespace LucidCartographer.Services.Export
@@ -14,34 +15,33 @@ namespace LucidCartographer.Services.Export
         public bool SupportsGrouping => true;
 
         /// <summary>
-        /// Sync wrapper — safe because <see cref="ExportAsync"/> is synchronous
-        /// (XDocument.Save is sync and returns Task.CompletedTask).
-        /// If ExportAsync ever becomes truly async, this must be revisited.
+        /// Synchronous export — builds the XDocument and writes directly to a MemoryStream.
+        /// No async wrapper; no deadlock risk.
         /// </summary>
-        public byte[] Export(List<Poi> pois, string documentName = "Lucid Cartographer Export")
+        public byte[] Export(IReadOnlyList<Poi> pois, string documentName = "Lucid Cartographer Export")
         {
+            var doc = BuildDocument(pois, documentName);
             using var ms = new MemoryStream();
-            ExportAsync(pois, ms, documentName).GetAwaiter().GetResult();
+            doc.Save(ms);
             return ms.ToArray();
         }
 
-        public Task ExportAsync(List<Poi> pois, Stream output, string documentName = "Lucid Cartographer Export")
+        public async Task ExportAsync(IReadOnlyList<Poi> pois, Stream output, string documentName = "Lucid Cartographer Export", CancellationToken cancellationToken = default)
         {
-            var doc = new XDocument(
-                new XDeclaration("1.0", "UTF-8", null),
-                new XElement(Kml + "kml",
-                    new XElement(Kml + "Document",
-                        new XElement(Kml + "name", documentName),
-                        GeneratePlacemarks(pois)
-                    )
-                )
-            );
+            cancellationToken.ThrowIfCancellationRequested();
+            var doc = BuildDocument(pois, documentName);
 
-            doc.Save(output);
-            return Task.CompletedTask;
+            using var writer = XmlWriter.Create(output, new XmlWriterSettings
+            {
+                Async = true,
+                Encoding = Encoding.UTF8,
+                Indent = true
+            });
+            await doc.WriteToAsync(writer, cancellationToken);
+            await writer.FlushAsync();
         }
 
-        public byte[] ExportGroupedByCategory(List<Poi> pois, string documentName = "Lucid Cartographer Export")
+        public byte[] ExportGroupedByCategory(IReadOnlyList<Poi> pois, string documentName = "Lucid Cartographer Export")
         {
             var grouped = pois.GroupBy(p => p.Category ?? "Uncategorized");
 
@@ -65,7 +65,20 @@ namespace LucidCartographer.Services.Export
             return ms.ToArray();
         }
 
-        private static IEnumerable<XElement> GeneratePlacemarks(List<Poi> pois)
+        private static XDocument BuildDocument(IReadOnlyList<Poi> pois, string documentName)
+        {
+            return new XDocument(
+                new XDeclaration("1.0", "UTF-8", null),
+                new XElement(Kml + "kml",
+                    new XElement(Kml + "Document",
+                        new XElement(Kml + "name", documentName),
+                        GeneratePlacemarks(pois)
+                    )
+                )
+            );
+        }
+
+        private static IEnumerable<XElement> GeneratePlacemarks(IReadOnlyList<Poi> pois)
         {
             return pois.Select(poi =>
                 new XElement(Kml + "Placemark",

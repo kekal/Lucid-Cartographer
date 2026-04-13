@@ -1,4 +1,6 @@
 @inherits LayoutComponentBase
+@inject NavigationManager Navigation
+@inject ILogger<MainLayout> Logger
 
 <div class="h-screen flex flex-col overflow-hidden">
     @* Top Header *@
@@ -6,20 +8,17 @@
         <div class="flex items-center gap-8">
             <h1 class="text-xl font-extrabold tracking-tight font-headline text-on-surface">Lucid Cartographer</h1>
             <nav class="flex items-center gap-1" aria-label="Main navigation">
-                <NavLink class="px-3 py-2 text-lg font-bold font-headline rounded-lg transition-colors hover:bg-surface-container-low "
-                         style="text-decoration:none;"
+                <NavLink class="px-3 py-2 text-lg font-bold font-headline rounded-lg transition-colors hover:bg-surface-container-low"
                          href="" Match="NavLinkMatch.All"
                          ActiveClass="text-primary border-b-2 border-primary">
                     Map
                 </NavLink>
-                <NavLink class="px-3 py-2 text-lg font-bold font-headline rounded-lg transition-colors hover:bg-surface-container-low "
-                         style="text-decoration:none;"
+                <NavLink class="px-3 py-2 text-lg font-bold font-headline rounded-lg transition-colors hover:bg-surface-container-low"
                          href="datasources"
                          ActiveClass="text-primary border-b-2 border-primary">
                     Data Sources
                 </NavLink>
-                <NavLink class="px-3 py-2 text-lg font-bold font-headline rounded-lg transition-colors hover:bg-surface-container-low "
-                         style="text-decoration:none;"
+                <NavLink class="px-3 py-2 text-lg font-bold font-headline rounded-lg transition-colors hover:bg-surface-container-low"
                          href="operations"
                          ActiveClass="text-primary border-b-2 border-primary">
                     Operations
@@ -27,14 +26,13 @@
             </nav>
         </div>
         <div class="flex items-center gap-3">
-            <form action="/" method="get" class="relative" data-enhance="false" role="search">
+            @* HIGH-02: Use Blazor interactive search instead of GET form to preserve SignalR circuit *@
+            <form @onsubmit="HandleSearch" class="relative" role="search">
                 <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-base" aria-hidden="true">search</span>
-                <input type="text" name="search" placeholder="Search POIs..." aria-label="Search POIs"
+                <input type="text" @bind="_searchQuery" @bind:event="oninput" placeholder="Search POIs..." aria-label="Search POIs"
                        class="pl-9 pr-4 py-1.5 rounded-full bg-surface-container-low text-sm text-on-surface placeholder:text-outline focus:ring-2 focus:ring-primary focus:bg-white transition-colors w-48 focus:w-64" />
             </form>
-            <button class="p-2 rounded-full hover:bg-surface-container-low transition-colors" aria-label="Settings">
-                <span class="material-symbols-outlined text-on-surface-variant" aria-hidden="true">settings</span>
-            </button>
+            @* LOW-06: Removed non-functional settings button *@
             <a href="/logout" class="p-2 rounded-full hover:bg-surface-container-low transition-colors" aria-label="Logout">
                 <span class="material-symbols-outlined text-on-surface-variant">logout</span>
             </a>
@@ -48,6 +46,7 @@
                 @Body
             </ChildContent>
             <ErrorContent Context="ex">
+                @{ LogError(ex); }
                 <div class="flex items-center justify-center h-full p-8">
                     <div class="text-center max-w-md">
                         <span class="material-symbols-outlined text-6xl text-tertiary mb-4 block">error</span>
@@ -66,9 +65,36 @@
 
 @code {
     private ErrorBoundary? _errorBoundary;
+    private string _searchQuery = string.Empty;
+    private bool _errorLogged;
+
+    // HIGH-02: Navigate with Blazor enhanced navigation instead of full-page GET reload
+    private void HandleSearch()
+    {
+        var query = _searchQuery?.Trim();
+        if (!string.IsNullOrEmpty(query))
+        {
+            Navigation.NavigateTo($"/?search={Uri.EscapeDataString(query)}");
+        }
+        else
+        {
+            Navigation.NavigateTo("/");
+        }
+    }
+
+    // LOW-10: Log the exception from ErrorBoundary so it is not silently swallowed
+    private void LogError(Exception ex)
+    {
+        if (!_errorLogged)
+        {
+            Logger.LogError(ex, "Unhandled exception caught by ErrorBoundary");
+            _errorLogged = true;
+        }
+    }
 
     private void RecoverFromError()
     {
+        _errorLogged = false;
         _errorBoundary?.Recover();
     }
 }

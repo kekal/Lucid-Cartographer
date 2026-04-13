@@ -2,7 +2,7 @@ namespace LucidCartographer.Services
 {
     public static class GeoUtils
     {
-        private static readonly double EarthRadiusMeters = 6371000;
+        private const double EarthRadiusMeters = 6371000;
 
         /// <summary>
         /// Calculates the great-circle distance between two points on Earth using the Haversine formula.

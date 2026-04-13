@@ -46,7 +46,7 @@ namespace LucidCartographer.Services.Import
                 cancellationToken);
         }
 
-        public async Task<ImportResult> ImportFromScrapedAsync(List<ImportedPoi> parsed, string collectionName, string color = DefaultColor, CancellationToken cancellationToken = default)
+        public async Task<ImportResult> ImportFromScrapedAsync(IReadOnlyList<ImportedPoi> parsed, string collectionName, string color = DefaultColor, CancellationToken cancellationToken = default)
         {
             return await PersistImportedPoisAsync(
                 parsed,
@@ -62,7 +62,7 @@ namespace LucidCartographer.Services.Import
         /// and batch-inserts new POIs. Called by both ImportAsync and ImportFromScrapedAsync.
         /// </summary>
         private async Task<ImportResult> PersistImportedPoisAsync(
-            List<ImportedPoi> parsed,
+            IReadOnlyList<ImportedPoi> parsed,
             string collectionName,
             string color,
             string sourceType,

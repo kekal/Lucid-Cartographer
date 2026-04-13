@@ -11,6 +11,10 @@ namespace LucidCartographer.Services
         Task FitBoundsAsync();
         Task RefreshLayoutAsync();
         Task HighlightMarkerAsync(int poiId);
+        /// <summary>
+        /// CRIT-04: Destroy the JS-side map object to prevent memory leaks on navigation.
+        /// </summary>
+        Task DestroyMapAsync();
         event Action<int>? OnMarkerClicked;
     }
 }

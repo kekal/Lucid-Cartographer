@@ -291,7 +291,7 @@ else
     // MED-01: Named constants for magic numbers
     private const int MaxResultDisplayRows = 500;
 
-    private List<PoiCollection> _collections = new();
+    private IReadOnlyList<PoiCollection> _collections = Array.Empty<PoiCollection>();
     private int _collectionAId;
     private int _collectionBId;
     private double _toleranceMeters = 100;

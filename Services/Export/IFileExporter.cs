@@ -19,13 +19,12 @@ namespace LucidCartographer.Services.Export
         /// <summary>
         /// Writes the exported content to the given output stream.
         /// </summary>
-        Task ExportAsync(List<Poi> pois, Stream output, string documentName = "Lucid Cartographer Export");
+        Task ExportAsync(IReadOnlyList<Poi> pois, Stream output, string documentName = "Lucid Cartographer Export", CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// Convenience method: exports to a byte array (for backward compatibility).
-        /// Prefer <see cref="ExportAsync"/> for large exports.
+        /// Convenience method: exports to a byte array.
         /// </summary>
-        byte[] Export(List<Poi> pois, string documentName = "Lucid Cartographer Export");
+        byte[] Export(IReadOnlyList<Poi> pois, string documentName = "Lucid Cartographer Export");
 
         /// <summary>
         /// Whether this exporter supports grouped-by-category export.
@@ -35,7 +34,7 @@ namespace LucidCartographer.Services.Export
         /// <summary>
         /// Exports POIs grouped by category. Default implementation falls back to flat export.
         /// </summary>
-        byte[] ExportGroupedByCategory(List<Poi> pois, string documentName = "Lucid Cartographer Export")
+        byte[] ExportGroupedByCategory(IReadOnlyList<Poi> pois, string documentName = "Lucid Cartographer Export")
             => Export(pois, documentName);
     }
 }

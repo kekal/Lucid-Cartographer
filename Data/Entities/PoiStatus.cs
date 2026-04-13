@@ -12,47 +12,12 @@ namespace LucidCartographer.Data.Entities
 
         public static readonly IReadOnlyList<string> All = new[] { Visited, WantToGo, Imported };
 
+        /// <summary>
+        /// Returns true if the status is valid.
+        /// [REVIEW-17] null is treated as valid because Status is an optional field on Poi.
+        /// If a non-null value is provided, it must be one of the known constants.
+        /// </summary>
         public static bool IsValid(string? status) =>
             status is null || All.Contains(status);
-    }
-
-    /// <summary>
-    /// String constants for POI category values.
-    /// </summary>
-    public static class PoiCategory
-    {
-        public const string Restaurant = "restaurant";
-        public const string Cafe = "cafe";
-        public const string Bar = "bar";
-        public const string Hotel = "hotel";
-        public const string Attraction = "attraction";
-        public const string Shopping = "shopping";
-        public const string Nature = "nature";
-        public const string Other = "other";
-
-        public static readonly IReadOnlyList<string> All = new[]
-        {
-            Restaurant, Cafe, Bar, Hotel, Attraction, Shopping, Nature, Other
-        };
-    }
-
-    /// <summary>
-    /// String constants for collection source type values.
-    /// </summary>
-    public static class CollectionSourceType
-    {
-        public const string GpxImport = "gpx_import";
-        public const string KmlImport = "kml_import";
-        // ARCH-HIGH-09: Added missing source type constants
-        public const string GeoJsonImport = "geojson_import";
-        public const string CsvImport = "csv_import";
-        public const string GoogleMapsScrape = "google_maps_scrape";
-        public const string Manual = "manual";
-        public const string OperationResult = "operation_result";
-
-        public static readonly IReadOnlyList<string> All = new[]
-        {
-            GpxImport, KmlImport, GeoJsonImport, CsvImport, GoogleMapsScrape, Manual, OperationResult
-        };
     }
 }

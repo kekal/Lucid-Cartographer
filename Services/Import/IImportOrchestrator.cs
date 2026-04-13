@@ -12,6 +12,6 @@ namespace LucidCartographer.Services.Import
         Task<ImportResult> ImportAsync(Stream fileStream, string fileName, string collectionName, string color = "#005bbf", CancellationToken cancellationToken = default);
 
         /// <summary>Imports pre-parsed POIs (e.g. from a scraper) into a new collection.</summary>
-        Task<ImportResult> ImportFromScrapedAsync(List<ImportedPoi> parsed, string collectionName, string color = "#005bbf", CancellationToken cancellationToken = default);
+        Task<ImportResult> ImportFromScrapedAsync(IReadOnlyList<ImportedPoi> parsed, string collectionName, string color = "#005bbf", CancellationToken cancellationToken = default);
     }
 }
