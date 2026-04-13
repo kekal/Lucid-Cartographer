@@ -4,14 +4,17 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
+    <link rel="icon" href="favicon.png" />
     <link rel="stylesheet" href="css/tailwind.css" />
+    <!-- ARCH-HIGH-07: Google Fonts loaded from CDN — lower risk than JS CDNs since CSS cannot
+         execute code. SRI hashes are impractical here because Google Fonts serves different
+         CSS per user-agent. TODO: Self-host fonts for full CDN independence if needed. -->
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
     <!-- ARCH-HIGH-07: Self-hosted Leaflet 1.9.4 (previously loaded from unpkg CDN) -->
     <link rel="stylesheet" href="lib/leaflet/leaflet.css" />
     <script src="lib/leaflet/leaflet.js"></script>
-    <!-- TODO: Self-host Google Fonts (Manrope, Inter, Material Symbols) with SRI hashes for full CDN independence -->
-    <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="css/base.css" />
     <link rel="stylesheet" href="LucidCartographer.styles.css" />
     <HeadOutlet />
 </head>

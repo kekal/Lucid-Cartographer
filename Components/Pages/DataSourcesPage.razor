@@ -358,7 +358,8 @@
             await stream.CopyToAsync(ms);
             ms.Position = 0;
 
-            _importResult = await ImportOrchestrator.ImportAsync(ms, file.Name, _collectionName, _selectedColor);
+            // NEW-03: Pass cancellation token so file imports are cancelled when user navigates away
+            _importResult = await ImportOrchestrator.ImportAsync(ms, file.Name, _collectionName, _selectedColor, _cts.Token);
             await LoadCollections();
             _collectionName = string.Empty;
         }

@@ -1,3 +1,4 @@
+using System.Globalization;
 using LucidCartographer.Data.Entities;
 
 namespace LucidCartographer.Services
@@ -17,7 +18,8 @@ namespace LucidCartographer.Services
                 || double.IsInfinity(poi.Latitude) || double.IsInfinity(poi.Longitude))
                 return "#";
 
-            return $"https://www.google.com/maps/search/?api=1&query={poi.Latitude},{poi.Longitude}";
+            // NEW-04: Use InvariantCulture to avoid comma-decimal formatting (e.g. French locale)
+            return $"https://www.google.com/maps/search/?api=1&query={poi.Latitude.ToString(CultureInfo.InvariantCulture)},{poi.Longitude.ToString(CultureInfo.InvariantCulture)}";
         }
     }
 }

@@ -57,6 +57,21 @@ if (string.Equals(configuredPassword, "changeme", StringComparison.Ordinal))
 
 var app = builder.Build();
 
+// ARCH-LOW-07: Log unobserved task exceptions instead of letting them crash the process
+TaskScheduler.UnobservedTaskException += (_, e) =>
+{
+    var logger = app.Services.GetService<ILogger<Program>>();
+    logger?.LogError(e.Exception, "Unobserved task exception");
+    e.SetObserved();
+};
+
+// NEW-02: Warn when Auth:Password is empty — authentication is silently disabled
+{
+    var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger<Program>();
+    if (string.IsNullOrEmpty(app.Configuration["Auth:Password"]))
+        logger.LogWarning("Auth:Password not set — authentication is DISABLED");
+}
+
 // ARCH-CRIT-01: Use MigrateAsync instead of EnsureCreatedAsync to support schema evolution.
 // TODO: Generate initial migration with: dotnet ef migrations add InitialCreate
 // If no migrations exist yet, MigrateAsync will create the DB using the model snapshot.
@@ -71,10 +86,15 @@ using (var scope = app.Services.CreateScope())
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
+    // ARCH-HIGH-05: Defense-in-depth — app runs behind Cloudflare which terminates TLS,
+    // but UseHttpsRedirection ensures direct-access requests are also redirected.
+    app.UseHttpsRedirection();
 }
 
 // ARCH-CRIT-04: Tightened CSP — removed 'unsafe-eval', specified CDN domains explicitly.
-// TODO: Replace 'unsafe-inline' with nonce-based CSP once Blazor SignalR supports it.
+// 'unsafe-inline' for script-src is required by Blazor Server — its SignalR bootstrapper
+// injects inline scripts that cannot use nonces/hashes with the current Blazor runtime.
+// TODO: Replace 'unsafe-inline' with nonce-based CSP once Blazor Server supports it.
 app.Use(async (context, next) =>
 {
     context.Response.Headers.Append("Content-Security-Policy",
@@ -94,7 +114,11 @@ app.Use(async (context, next) =>
 // ARCH-HIGH-06: Response compression placed AFTER security headers to avoid BREACH issues
 app.UseResponseCompression();
 
-// ARCH-CRIT-03: Simple password + cookie authentication middleware (hardened)
+// ARCH-CRIT-03: Simple password + cookie authentication middleware (hardened).
+// LIMITATION: This is homebrew SHA256 cookie auth — no session tokens, no revocation,
+// no salting, and no ASP.NET Core Identity. Acceptable for a single-user personal NAS
+// tool behind Cloudflare. If this ever becomes multi-user, replace with
+// Microsoft.AspNetCore.Authentication.Cookies or ASP.NET Core Identity.
 app.Use(async (context, next) =>
 {
     var path = context.Request.Path.Value ?? "";
@@ -155,6 +179,17 @@ app.MapPost("/login", async (HttpContext context) =>
     {
         context.Response.Redirect("/login?error=1");
         return;
+    }
+
+    // NEW-01: Periodically clean up expired rate-limiter entries to prevent memory leak
+    if (_loginAttempts.Count > 1000)
+    {
+        var cutoff = DateTime.UtcNow.AddMinutes(-1);
+        foreach (var key in _loginAttempts.Keys.ToList())
+        {
+            if (_loginAttempts.TryGetValue(key, out var entry) && entry.windowStart < cutoff)
+                _loginAttempts.TryRemove(key, out _);
+        }
     }
 
     // ARCH-CRIT-03: Rate limiting — block after 5 failed attempts per minute per IP
