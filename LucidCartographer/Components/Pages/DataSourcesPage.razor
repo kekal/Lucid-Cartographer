@@ -73,7 +73,8 @@
                          IsImporting="_isImporting"
                          ImportingFileName="@_importingFileName"
                          ImportResult="_importResult"
-                         ImportError="@_importError">
+                         ImportError="@_importError"
+                         ShowFileInput="@(_activeCard != "shared")">
             @* Card-specific instructions *@
             @if (_activeCard == "takeout")
             {

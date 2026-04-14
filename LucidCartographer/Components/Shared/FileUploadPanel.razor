@@ -35,12 +35,15 @@
         </div>
     </div>
 
-    <div class="border-2 border-dashed border-outline-variant rounded-xl p-8 text-center hover:border-primary hover:bg-primary/5 transition-colors">
-        <span class="material-symbols-outlined text-4xl text-on-surface-variant mb-2 block">cloud_upload</span>
-        <p class="text-on-surface-variant mb-2">Drag and drop a file here, or click to browse</p>
-        <p class="text-sm text-outline">@AcceptDescription</p>
-        <InputFile OnChange="HandleFileSelected" accept="@AcceptExtensions" class="mt-3" />
-    </div>
+    @if (ShowFileInput)
+    {
+        <div class="border-2 border-dashed border-outline-variant rounded-xl p-8 text-center hover:border-primary hover:bg-primary/5 transition-colors">
+            <span class="material-symbols-outlined text-4xl text-on-surface-variant mb-2 block">cloud_upload</span>
+            <p class="text-on-surface-variant mb-2">Drag and drop a file here, or click to browse</p>
+            <p class="text-sm text-outline">@AcceptDescription</p>
+            <InputFile OnChange="HandleFileSelected" accept="@AcceptExtensions" class="mt-3" />
+        </div>
+    }
 
     @if (IsImporting)
     {
@@ -93,6 +96,12 @@
     [Parameter] public string? ImportingFileName { get; set; }
     [Parameter] public ImportResult? ImportResult { get; set; }
     [Parameter] public string? ImportError { get; set; }
+    /// <summary>
+    /// When false, the generic file drag-and-drop zone is hidden. Used by the
+    /// Shared-Google-List flow, which imports via the ScraperPanel child content
+    /// rather than a file upload.
+    /// </summary>
+    [Parameter] public bool ShowFileInput { get; set; } = true;
 
     private async Task OnCollectionNameChanged()
     {
