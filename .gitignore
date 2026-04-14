@@ -16,3 +16,8 @@ wwwroot/css/tailwind.css
 # ARCH-LOW-02: launchSettings.json is developer configuration — kept in VCS intentionally.
 # If your project prefers to exclude it, uncomment the line below:
 # Properties/launchSettings.json
+*.db
+LucidCartographer/wwwroot/css/tailwind.css
+
+# Test project is its own git repository; tracked separately.
+LucidCartographer.Tests/
