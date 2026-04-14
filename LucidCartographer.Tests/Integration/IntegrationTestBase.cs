@@ -79,6 +79,11 @@ public abstract class IntegrationTestBase : IAsyncLifetime
         Log($"INIT: app at {BaseUrl}");
 
         Environment.SetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH", "0");
+        // Shared one-shot bootstrap: downloads Chromium on a fresh clone so
+        // tests don't fail with "Please run `playwright install`". The helper
+        // is idempotent and fast when browsers are already present, and the
+        // same call path is used by the runtime scraper — one source of truth.
+        await Services.Import.PlaywrightBootstrap.EnsureBrowsersInstalledAsync();
         _playwright = await Playwright.CreateAsync();
         _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
         {

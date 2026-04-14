@@ -11,13 +11,6 @@ namespace LucidCartographer.Services.Import
         // exhausting server memory. Additional requests will wait in the queue.
         private static readonly SemaphoreSlim _scrapeSemaphore = new(1, 1);
 
-        // Lazy, process-wide bootstrap of the Playwright browser binaries so the app
-        // works out-of-the-box on a clean machine (no manual `playwright install` step).
-        // Playwright's install command is idempotent and fast when browsers are already
-        // present, so calling it once per process is cheap.
-        private static readonly SemaphoreSlim _installLock = new(1, 1);
-        private static bool _browsersInstalled;
-
         private static readonly string[] AllowedUrlPrefixes =
         [
             "https://www.google.com/maps/",
@@ -70,7 +63,7 @@ namespace LucidCartographer.Services.Import
         {
             _logger.LogInformation("Starting scrape of {Url}", trimmedUrl);
 
-            await EnsureBrowsersInstalledAsync(cancellationToken);
+            await PlaywrightBootstrap.EnsureBrowsersInstalledAsync(_logger, cancellationToken);
 
             using var playwright = await Playwright.CreateAsync();
             await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
@@ -573,43 +566,6 @@ namespace LucidCartographer.Services.Import
 
             _logger.LogInformation("Successfully scraped {Count} places from list '{ListName}'", results.Count, listName ?? "unknown");
             return new ScrapeResult { ListName = listName, Pois = results };
-        }
-
-        /// <summary>
-        /// Ensures Playwright's Chromium browser is installed on the host. Runs the
-        /// install command once per process (idempotent, fast when already present) so
-        /// a fresh clone / clean machine works without the user having to invoke
-        /// `playwright install` manually. Marshalled onto a background thread because
-        /// Microsoft.Playwright.Program.Main is synchronous.
-        /// </summary>
-        private async Task EnsureBrowsersInstalledAsync(CancellationToken cancellationToken)
-        {
-            if (_browsersInstalled) return;
-
-            await _installLock.WaitAsync(cancellationToken);
-            try
-            {
-                if (_browsersInstalled) return;
-
-                _logger.LogInformation("Ensuring Playwright Chromium browser is installed (one-time bootstrap)…");
-                var exitCode = await Task.Run(
-                    () => Microsoft.Playwright.Program.Main(new[] { "install", "chromium" }),
-                    cancellationToken);
-
-                if (exitCode != 0)
-                {
-                    throw new InvalidOperationException(
-                        $"Playwright browser install failed with exit code {exitCode}. " +
-                        "Run `playwright install chromium` manually to diagnose.");
-                }
-
-                _browsersInstalled = true;
-                _logger.LogInformation("Playwright Chromium browser is ready.");
-            }
-            finally
-            {
-                _installLock.Release();
-            }
         }
 
         /// <summary>

@@ -30,18 +30,11 @@ namespace LucidCartographer.Tests.Integration
             // (IntegrationTestBase sets it to "0" so other tests in the same run
             // may have leaked the env var into this process — explicitly clear it.)
             Environment.SetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH", null);
+            // Shared one-shot bootstrap — same code path as the runtime
+            // scraper and IntegrationTestBase. No logger available here.
+            await PlaywrightBootstrap.EnsureBrowsersInstalledAsync();
             _playwright = await Playwright.CreateAsync();
-            try
-            {
-                _browser = await _playwright.Chromium.LaunchAsync(new() { Headless = true });
-            }
-            catch (Microsoft.Playwright.PlaywrightException)
-            {
-                // Clean machine: run the programmatic install once (same code path
-                // as GoogleMapsListScraper.EnsureBrowsersInstalledAsync), then retry.
-                Microsoft.Playwright.Program.Main(new[] { "install", "chromium" });
-                _browser = await _playwright.Chromium.LaunchAsync(new() { Headless = true });
-            }
+            _browser = await _playwright.Chromium.LaunchAsync(new() { Headless = true });
             _context = await _browser.NewContextAsync(new() { ViewportSize = new() { Width = 1280, Height = 800 } });
             _page = await _context.NewPageAsync();
         }

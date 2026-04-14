@@ -114,7 +114,10 @@ namespace LucidCartographer.Tests.Components
                 .Add(p => p.Poi, poi));
 
             var img = cut.Find("img");
-            img.GetAttribute("src").Should().Be("https://example.com/image.jpg");
+            // Image is served from our own endpoint (not hotlinked) — Google
+            // blocks cross-origin loads of googleusercontent URLs, so scraped
+            // bytes are persisted and streamed via /api/poi-image/{id}.
+            img.GetAttribute("src").Should().Be("/api/poi-image/1");
             img.GetAttribute("alt").Should().Be("Test Cafe");
         }
 
