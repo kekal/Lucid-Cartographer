@@ -64,9 +64,7 @@ namespace LucidCartographer.Tests.Integration
         public async Task PageTitle_ChangesOnDataSourcesNavigation()
         {
             await NavigateAndWaitAsync("/");
-            await Page.Locator("nav a:has-text('Data Sources')").ClickAsync();
-            await Page.WaitForURLAsync("**/datasources");
-            await Page.WaitForSelectorAsync("h2:has-text('Data & Imports')", new() { Timeout = 10000 });
+            await ClickDataSourcesTabAsync();
 
             var title = await Page.TitleAsync();
             Assert.True(title.Contains("Data Sources") && title.Contains("Lucid Cartographer"),
@@ -77,9 +75,7 @@ namespace LucidCartographer.Tests.Integration
         public async Task PageTitle_ChangesOnOperationsNavigation()
         {
             await NavigateAndWaitAsync("/");
-            await Page.Locator("nav a:has-text('Operations')").ClickAsync();
-            await Page.WaitForURLAsync("**/operations");
-            await Page.WaitForSelectorAsync("h3:has-text('Source Selection')", new() { Timeout = 10000 });
+            await ClickOperationsTabAsync();
 
             var title = await Page.TitleAsync();
             Assert.True(title.Contains("Operations") && title.Contains("Lucid Cartographer"),
@@ -108,9 +104,7 @@ namespace LucidCartographer.Tests.Integration
         public async Task Navigation_DataSourcesTabActive_OnDataSourcesPage()
         {
             await NavigateAndWaitAsync("/");
-            await Page.Locator("nav a:has-text('Data Sources')").ClickAsync();
-            await Page.WaitForURLAsync("**/datasources");
-            await Page.WaitForSelectorAsync("h2:has-text('Data & Imports')", new() { Timeout = 10000 });
+            await ClickDataSourcesTabAsync();
 
             var dataSourcesTab = Page.Locator("nav a:has-text('Data Sources')");
             var classes = await dataSourcesTab.GetAttributeAsync("class");
@@ -126,9 +120,7 @@ namespace LucidCartographer.Tests.Integration
         public async Task Navigation_OperationsTabActive_OnOperationsPage()
         {
             await NavigateAndWaitAsync("/");
-            await Page.Locator("nav a:has-text('Operations')").ClickAsync();
-            await Page.WaitForURLAsync("**/operations");
-            await Page.WaitForSelectorAsync("h3:has-text('Source Selection')", new() { Timeout = 10000 });
+            await ClickOperationsTabAsync();
 
             var operationsTab = Page.Locator("nav a:has-text('Operations')");
             var classes = await operationsTab.GetAttributeAsync("class");

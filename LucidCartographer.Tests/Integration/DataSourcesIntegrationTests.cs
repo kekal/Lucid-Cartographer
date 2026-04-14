@@ -8,7 +8,8 @@ namespace LucidCartographer.Tests.Integration
         [Fact]
         public async Task DataSourcesPage_ShowsThreeImportCards()
         {
-            await NavigateToDataSourcesAsync();
+            await NavigateAndWaitAsync("/");
+            await ClickDataSourcesTabAsync();
 
             Assert.True(await Page.Locator("h3:has-text('KML/GPX Upload')").IsVisibleAsync(),
                 "KML/GPX Upload card should be visible");
@@ -21,7 +22,8 @@ namespace LucidCartographer.Tests.Integration
         [Fact]
         public async Task ClickingKmlGpxCard_OpensUploadPanel()
         {
-            await NavigateToDataSourcesAsync();
+            await NavigateAndWaitAsync("/");
+            await ClickDataSourcesTabAsync();
 
             await Page.Locator("h3:has-text('KML/GPX Upload')").ClickAsync();
             await Page.WaitForSelectorAsync("h3:has-text('Import File')", new() { Timeout = 5000 });
@@ -35,7 +37,8 @@ namespace LucidCartographer.Tests.Integration
         [Fact]
         public async Task FileUploadWithGpx_ImportsThreePois()
         {
-            await NavigateToDataSourcesAsync();
+            await NavigateAndWaitAsync("/");
+            await ClickDataSourcesTabAsync();
 
             // Open the file upload card
             await Page.Locator("h3:has-text('KML/GPX Upload')").ClickAsync();
@@ -60,7 +63,8 @@ namespace LucidCartographer.Tests.Integration
         [Fact]
         public async Task AfterImport_ManagedSourcesTableShowsCollection()
         {
-            await NavigateToDataSourcesAsync();
+            await NavigateAndWaitAsync("/");
+            await ClickDataSourcesTabAsync();
 
             // Open the file upload card and import
             await Page.Locator("h3:has-text('KML/GPX Upload')").ClickAsync();
@@ -85,7 +89,8 @@ namespace LucidCartographer.Tests.Integration
         [Fact]
         public async Task ImportTwoFiles_TableShowsTwoCollections()
         {
-            await NavigateToDataSourcesAsync();
+            await NavigateAndWaitAsync("/");
+            await ClickDataSourcesTabAsync();
 
             // Import first file (GPX)
             await Page.Locator("h3:has-text('KML/GPX Upload')").ClickAsync();
@@ -123,7 +128,8 @@ namespace LucidCartographer.Tests.Integration
         {
             // Pre-seed a collection
             await ImportTestFileAsync("sample.gpx", "To Delete", "#005bbf");
-            await NavigateToDataSourcesAsync();
+            await NavigateAndWaitAsync("/");
+            await ClickDataSourcesTabAsync();
 
             // Verify it exists
             Assert.True(await Page.Locator("text=To Delete").IsVisibleAsync(),
@@ -143,7 +149,8 @@ namespace LucidCartographer.Tests.Integration
         [Fact]
         public async Task GoogleTakeoutCard_ShowsInstructionsWithTakeoutUrl()
         {
-            await NavigateToDataSourcesAsync();
+            await NavigateAndWaitAsync("/");
+            await ClickDataSourcesTabAsync();
 
             await Page.Locator("h3:has-text('Google Takeout')").ClickAsync();
             await Page.WaitForSelectorAsync("text=takeout.google.com", new() { Timeout = 5000 });
@@ -155,7 +162,8 @@ namespace LucidCartographer.Tests.Integration
         [Fact]
         public async Task SharedGoogleListCard_ShowsUrlInputField()
         {
-            await NavigateToDataSourcesAsync();
+            await NavigateAndWaitAsync("/");
+            await ClickDataSourcesTabAsync();
 
             await Page.Locator("h3:has-text('Shared Google List')").ClickAsync();
             await Page.WaitForSelectorAsync("input[placeholder*='maps.app.goo.gl']", new() { Timeout = 5000 });
@@ -167,7 +175,8 @@ namespace LucidCartographer.Tests.Integration
         [Fact]
         public async Task CollectionName_AutoFillsFromFilename()
         {
-            await NavigateToDataSourcesAsync();
+            await NavigateAndWaitAsync("/");
+            await ClickDataSourcesTabAsync();
 
             await Page.Locator("h3:has-text('KML/GPX Upload')").ClickAsync();
             await Page.WaitForSelectorAsync("h3:has-text('Import File')", new() { Timeout = 5000 });
@@ -188,7 +197,8 @@ namespace LucidCartographer.Tests.Integration
         [Fact]
         public async Task ColorPicker_HasEightCircles()
         {
-            await NavigateToDataSourcesAsync();
+            await NavigateAndWaitAsync("/");
+            await ClickDataSourcesTabAsync();
 
             await Page.Locator("h3:has-text('KML/GPX Upload')").ClickAsync();
             await Page.WaitForSelectorAsync("h3:has-text('Import File')", new() { Timeout = 5000 });

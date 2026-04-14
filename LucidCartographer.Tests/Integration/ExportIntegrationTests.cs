@@ -11,9 +11,7 @@ namespace LucidCartographer.Tests.Integration
             await ImportTestFileAsync("sample.kml", "Set B", "#006e2c");
 
             await NavigateAndWaitAsync("/");
-            await Page.Locator("nav a:has-text('Operations')").ClickAsync();
-            await Page.WaitForURLAsync("**/operations");
-            await Page.WaitForSelectorAsync("h3:has-text('Source Selection')", new() { Timeout = 10000 });
+            await ClickOperationsTabAsync();
 
             var selectA = Page.Locator("select").First;
             var selectOptionsA = await selectA.Locator("option").AllInnerTextsAsync();
@@ -46,9 +44,7 @@ namespace LucidCartographer.Tests.Integration
             await ImportTestFileAsync("sample.gpx", "Set A", "#005bbf");
 
             await NavigateAndWaitAsync("/");
-            await Page.Locator("nav a:has-text('Operations')").ClickAsync();
-            await Page.WaitForURLAsync("**/operations");
-            await Page.WaitForSelectorAsync("h3:has-text('Source Selection')", new() { Timeout = 10000 });
+            await ClickOperationsTabAsync();
 
             // No operation run — Export button should not exist
             var exportBtn = Page.Locator("button:has-text('Export Result')");

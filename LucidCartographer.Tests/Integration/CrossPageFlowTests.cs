@@ -36,8 +36,8 @@ namespace LucidCartographer.Tests.Integration
             await Page.Locator("input[type='file']").SetInputFilesAsync(filePath);
             await Page.WaitForSelectorAsync("span.font-medium:has-text('Import complete')", new() { Timeout = 15000 });
 
-            // Navigate to Map
-            await NavigateToMapAsync();
+            // Navigate to Map via click (SPA navigation)
+            await ClickMapTabAsync();
 
             // Verify collection appears in sidebar
             var sidebarCollection = Page.Locator(".w-60 .cursor-pointer:has-text('Test GPX Collection')");
@@ -85,8 +85,8 @@ namespace LucidCartographer.Tests.Integration
             await Page.Locator("input[type='file']").SetInputFilesAsync(kmlPath);
             await Page.WaitForSelectorAsync("span.font-medium:has-text('Import complete')", new() { Timeout = 15000 });
 
-            // Navigate to Operations
-            await NavigateToOperationsAsync();
+            // Navigate to Operations via click (SPA navigation)
+            await ClickOperationsTabAsync();
 
             // Verify both collections appear in dropdowns
             var dropdownA = Page.Locator("select").First;
@@ -141,15 +141,11 @@ namespace LucidCartographer.Tests.Integration
             Assert.True(await Page.Locator("text=Wawel Castle").First.IsVisibleAsync(),
                 "Searched POI should be visible");
 
-            // Navigate away to another tab (e.g., Data Sources) and back to Map
-            await Page.Locator("nav a:has-text('Data Sources')").ClickAsync();
-            await Page.WaitForURLAsync("**/datasources");
-            await Page.WaitForSelectorAsync("h2:has-text('Data & Imports')", new() { Timeout = 10000 });
+            // Navigate away to another tab (e.g., Data Sources) and back to Map via click (SPA navigation)
+            await ClickDataSourcesTabAsync();
 
-            // Navigate back to Map (clicking the nav link navigates to "/" without search param)
-            await Page.Locator("nav a:has-text('Map')").ClickAsync();
-            await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-            await Page.WaitForSelectorAsync("nav a", new() { Timeout = 10000 });
+            // Navigate back to Map via click (SPA navigation)
+            await ClickMapTabAsync();
 
             // Verify the collection is visible in sidebar after navigation
             var sidebarCol = Page.Locator(".w-60 .text-sm.font-medium.truncate:has-text('Search Test Collection')");

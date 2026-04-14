@@ -11,9 +11,7 @@ namespace LucidCartographer.Tests.Integration
             await ImportTestFileAsync("sample.kml", "Set B", "#006e2c");
 
             await NavigateAndWaitAsync("/");
-            await Page.Locator("nav a:has-text('Operations')").ClickAsync();
-            await Page.WaitForURLAsync("**/operations");
-            await Page.WaitForSelectorAsync("h3:has-text('Source Selection')", new() { Timeout = 10000 });
+            await ClickOperationsTabAsync();
 
             // Select both datasets
             var selectA = Page.Locator("select").First;
@@ -97,9 +95,7 @@ namespace LucidCartographer.Tests.Integration
             await Page.WaitForSelectorAsync("text=Saved", new() { Timeout = 10000 });
 
             // Re-navigate to Operations to refresh dropdowns
-            await Page.Locator("nav a:has-text('Operations')").ClickAsync();
-            await Page.WaitForURLAsync("**/operations");
-            await Page.WaitForSelectorAsync("h3:has-text('Source Selection')", new() { Timeout = 10000 });
+            await ClickOperationsTabAsync();
 
             // Check if the new collection appears in dropdown A
             var selectA = Page.Locator("select").First;
@@ -149,9 +145,7 @@ namespace LucidCartographer.Tests.Integration
             await ImportTestFileAsync("sample.kml", "Set B", "#006e2c");
 
             await NavigateAndWaitAsync("/");
-            await Page.Locator("nav a:has-text('Operations')").ClickAsync();
-            await Page.WaitForURLAsync("**/operations");
-            await Page.WaitForSelectorAsync("h3:has-text('Source Selection')", new() { Timeout = 10000 });
+            await ClickOperationsTabAsync();
 
             // Do NOT run any operation
 

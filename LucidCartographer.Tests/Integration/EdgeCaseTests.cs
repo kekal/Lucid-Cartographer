@@ -33,9 +33,7 @@ namespace LucidCartographer.Tests.Integration
         {
             // Do NOT seed any data
             await NavigateAndWaitAsync("/");
-            await Page.Locator("nav a:has-text('Operations')").ClickAsync();
-            await Page.WaitForURLAsync("**/operations");
-            await Page.WaitForSelectorAsync("h3:has-text('Source Selection')", new() { Timeout = 10000 });
+            await ClickOperationsTabAsync();
 
             // Verify dropdown A only contains "Select collection..." option
             var dropdownA = Page.Locator("select").First;
@@ -60,9 +58,7 @@ namespace LucidCartographer.Tests.Integration
             await ImportTestFileAsync("sample.gpx", "Solo Collection", "#005bbf");
 
             await NavigateAndWaitAsync("/");
-            await Page.Locator("nav a:has-text('Operations')").ClickAsync();
-            await Page.WaitForURLAsync("**/operations");
-            await Page.WaitForSelectorAsync("h3:has-text('Source Selection')", new() { Timeout = 10000 });
+            await ClickOperationsTabAsync();
 
             // Verify collection appears in dropdown A - select by label (text includes point count)
             var dropdownA = Page.Locator("select").First;
@@ -94,9 +90,7 @@ namespace LucidCartographer.Tests.Integration
             await ImportTestFileAsync("sample.gpx", "Shared Collection", "#005bbf");
 
             await NavigateAndWaitAsync("/");
-            await Page.Locator("nav a:has-text('Operations')").ClickAsync();
-            await Page.WaitForURLAsync("**/operations");
-            await Page.WaitForSelectorAsync("h3:has-text('Source Selection')", new() { Timeout = 10000 });
+            await ClickOperationsTabAsync();
 
             // Select same collection for both A and B using label matching
             var dropdownA = Page.Locator("select").First;
@@ -138,9 +132,7 @@ namespace LucidCartographer.Tests.Integration
             await ImportTestFileAsync("sample.gpx", "Test Collection", "#005bbf");
 
             await NavigateAndWaitAsync("/");
-            await Page.Locator("nav a:has-text('Operations')").ClickAsync();
-            await Page.WaitForURLAsync("**/operations");
-            await Page.WaitForSelectorAsync("h3:has-text('Source Selection')", new() { Timeout = 10000 });
+            await ClickOperationsTabAsync();
 
             // Select the collection for both A and B using label matching
             var dropdownA = Page.Locator("select").First;

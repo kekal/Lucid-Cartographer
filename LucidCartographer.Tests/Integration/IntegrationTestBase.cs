@@ -158,6 +158,37 @@ public abstract class IntegrationTestBase : IAsyncLifetime
     protected async Task NavigateToDataSourcesAsync()
     {
         await NavigateAndWaitAsync("/");
+        await ClickDataSourcesTabAsync();
+    }
+
+    protected async Task NavigateToOperationsAsync()
+    {
+        await NavigateAndWaitAsync("/");
+        await ClickOperationsTabAsync();
+    }
+
+    // === In-app tab navigation helpers ===
+    //
+    // Real users don't type URLs to move between tabs — they click the nav.
+    // Tests should do the same: call NavigateAndWaitAsync exactly ONCE to
+    // represent the user opening the app, then use these helpers for every
+    // subsequent page change. This also exercises the real SPA-navigation
+    // code path, where component/service lifetimes differ from hard loads.
+
+    protected async Task ClickMapTabAsync()
+    {
+        await ClickAsync("nav a:has-text('Map')", "Map tab");
+        // Home URL is BaseUrl or BaseUrl + "/"
+        await Page.WaitForURLAsync(url => url.TrimEnd('/') == BaseUrl);
+        Log("  waiting for Map page");
+        // MapPage flips _isLoading=false after GetCollectionsAsync; the
+        // Collections sidebar header is the earliest reliable landmark.
+        await Page.WaitForSelectorAsync("text=COLLECTIONS", new() { Timeout = 10000 });
+        Log("  Map ready");
+    }
+
+    protected async Task ClickDataSourcesTabAsync()
+    {
         await ClickAsync("nav a:has-text('Data Sources')", "Data Sources tab");
         await Page.WaitForURLAsync("**/datasources");
         Log("  waiting for Data Sources page");
@@ -165,9 +196,8 @@ public abstract class IntegrationTestBase : IAsyncLifetime
         Log("  Data Sources ready");
     }
 
-    protected async Task NavigateToOperationsAsync()
+    protected async Task ClickOperationsTabAsync()
     {
-        await NavigateAndWaitAsync("/");
         await ClickAsync("nav a:has-text('Operations')", "Operations tab");
         await Page.WaitForURLAsync("**/operations");
         Log("  waiting for Operations page");

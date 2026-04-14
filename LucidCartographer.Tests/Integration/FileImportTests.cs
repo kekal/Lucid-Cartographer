@@ -29,7 +29,8 @@ namespace LucidCartographer.Tests.Integration
         [Fact]
         public async Task UploadGeoJsonFile_ImportsCorrectly()
         {
-            await NavigateToDataSourcesAsync();
+            await NavigateAndWaitAsync("/");
+            await ClickDataSourcesTabAsync();
             await UploadFileAsync("sample.geojson", "GeoJSON Places");
 
             // Verify "2" appears in result (sample.geojson has 2 POIs)
@@ -47,7 +48,8 @@ namespace LucidCartographer.Tests.Integration
         [Fact]
         public async Task UploadCsvFile_ImportsCorrectly()
         {
-            await NavigateToDataSourcesAsync();
+            await NavigateAndWaitAsync("/");
+            await ClickDataSourcesTabAsync();
             await UploadFileAsync("sample.csv", "CSV Places");
 
             // Verify "3" appears in result (sample.csv has 3 POIs: Zakopane, Gdansk, Malbork)
@@ -63,7 +65,8 @@ namespace LucidCartographer.Tests.Integration
         [Fact]
         public async Task UploadKmlFile_ImportsCorrectly()
         {
-            await NavigateToDataSourcesAsync();
+            await NavigateAndWaitAsync("/");
+            await ClickDataSourcesTabAsync();
             await UploadFileAsync("sample.kml", "KML Places");
 
             // Verify "2" appears in result (sample.kml has 2 POIs)
@@ -79,7 +82,8 @@ namespace LucidCartographer.Tests.Integration
         [Fact]
         public async Task UploadEmptyGpx_ShowsZeroPoisImported()
         {
-            await NavigateToDataSourcesAsync();
+            await NavigateAndWaitAsync("/");
+            await ClickDataSourcesTabAsync();
             await UploadFileAsync("empty.gpx", "Empty Collection");
 
             // Verify "0" appears in result
@@ -95,7 +99,8 @@ namespace LucidCartographer.Tests.Integration
         [Fact]
         public async Task UploadCorruptFile_ShowsErrorMessage()
         {
-            await NavigateToDataSourcesAsync();
+            await NavigateAndWaitAsync("/");
+            await ClickDataSourcesTabAsync();
 
             // Click KML/GPX Upload card
             await Page.Locator("h3:has-text('KML/GPX Upload')").ClickAsync();
