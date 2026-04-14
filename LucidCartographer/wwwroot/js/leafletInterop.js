@@ -26,6 +26,13 @@
             if (state.map) {
                 state.map.remove();
             }
+            if (state.resizeObserver) {
+                try { state.resizeObserver.disconnect(); } catch (_) { }
+                state.resizeObserver = null;
+            }
+
+            var container = document.getElementById(elementId);
+
             state.map = L.map(elementId, {
                 zoomControl: false
             }).setView([50.0, 20.0], 5);
@@ -40,9 +47,39 @@
             state.dotnetRef = dotnetRef;
             state.layerGroups = {};
             state.markers = {};
+
+            // On SPA navigation (e.g. from /datasources back to /), Leaflet may
+            // initialise before the flex layout has finalised the container's
+            // dimensions — it then measures 0x0 and the tile grid never paints
+            // until a hard refresh. Two defences:
+            //   1. Kick invalidateSize on the next animation frame + a short
+            //      timeout, so first paint picks up the real container size.
+            //   2. Attach a ResizeObserver so any later size change (sidebar
+            //      toggle, window resize, pane reopen) keeps the map in sync.
+            var invalidate = function () {
+                if (state.map) {
+                    state.map.invalidateSize();
+                }
+            };
+            if (typeof requestAnimationFrame === 'function') {
+                requestAnimationFrame(invalidate);
+            }
+            setTimeout(invalidate, 100);
+            setTimeout(invalidate, 400);
+
+            if (container && typeof ResizeObserver === 'function') {
+                state.resizeObserver = new ResizeObserver(function () {
+                    invalidate();
+                });
+                state.resizeObserver.observe(container);
+            }
         },
 
         destroyMap: function () {
+            if (state.resizeObserver) {
+                try { state.resizeObserver.disconnect(); } catch (_) { }
+                state.resizeObserver = null;
+            }
             if (state.map) {
                 state.map.remove();
                 state.map = null;
