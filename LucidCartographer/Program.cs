@@ -23,11 +23,34 @@ builder.Services.AddResponseCompression(opts =>
         new[] { "application/octet-stream" }); // SignalR uses octet-stream
 });
 
-// MED-06: DB path from configuration instead of manual env-var sniffing
-var dbPath = builder.Configuration.GetValue<string>("Database:Path")
-    ?? (builder.Environment.IsProduction() ? "/data/cartographer.db" : "data/cartographer.db");
+// MED-06 / OS-independent DB path resolution.
+// Precedence:
+//   1. DB_PATH environment variable (simple override for Docker/cloud)
+//   2. Database:Path from configuration (also honours Database__Path env var)
+//   3. Default "data/cartographer.db" relative to ContentRootPath
+// Relative paths are resolved against ContentRootPath so the process does not depend
+// on the current working directory. The containing directory is created if missing.
+var dbPath = ResolveDbPath(builder.Configuration, builder.Environment);
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
     options.UseSqlite($"Data Source={dbPath}"));
+
+static string ResolveDbPath(IConfiguration cfg, IHostEnvironment env)
+{
+    var raw = Environment.GetEnvironmentVariable("DB_PATH");
+    if (string.IsNullOrWhiteSpace(raw))
+        raw = cfg.GetValue<string>("Database:Path");
+    if (string.IsNullOrWhiteSpace(raw))
+        raw = Path.Combine("data", "cartographer.db");
+
+    var full = Path.IsPathRooted(raw)
+        ? raw
+        : Path.GetFullPath(Path.Combine(env.ContentRootPath, raw));
+
+    var dir = Path.GetDirectoryName(full);
+    if (!string.IsNullOrEmpty(dir))
+        Directory.CreateDirectory(dir);
+    return full;
+}
 builder.Services.AddScoped<IPoiService, PoiService>();
 // ARCH-HIGH-02: Importers are stateless parsers — register as Singleton (consistent with exporters)
 builder.Services.AddSingleton<IFileImporter, GpxImporter>();

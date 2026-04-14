@@ -24,6 +24,10 @@ USER appuser
 
 ENV ASPNETCORE_URLS=http://+:8080
 ENV ASPNETCORE_ENVIRONMENT=Production
+# SQLite DB location inside the container — points at the /data volume created above.
+# On non-container hosts this variable is unset and Program.cs falls back to
+# <ContentRoot>/data/cartographer.db, which works on any OS.
+ENV DB_PATH=/data/cartographer.db
 
 EXPOSE 8080
 
