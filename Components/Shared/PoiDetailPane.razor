@@ -1,7 +1,11 @@
 @using LucidCartographer.Data.Entities
 @using LucidCartographer.Services
 
-@* LOW-05: Parent owns the null check via @if (_selectedPoi != null) — no duplicate guard here *@
+@if (Poi is null)
+{
+    return;
+}
+
 <div class="flex flex-col h-full bg-white">
     @* Header *@
     <div class="flex items-center justify-between p-4 flex-shrink-0">

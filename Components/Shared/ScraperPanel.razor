@@ -9,7 +9,7 @@
         Works with shared lists, your own lists, or any Google Maps list URL. The app will open it in a headless browser and extract all places automatically.
     </p>
     <div class="flex gap-2">
-        <input type="text" @bind="Url" placeholder="https://maps.app.goo.gl/... or https://www.google.com/maps/..."
+        <input type="text" value="@Url" @oninput="OnUrlInput" placeholder="https://maps.app.goo.gl/... or https://www.google.com/maps/..."
                class="flex-1 px-3 py-2 rounded-lg bg-surface-container-highest border-0 text-on-surface placeholder:text-outline text-sm focus:ring-2 focus:ring-primary focus:bg-white transition-colors" />
         <button class="px-4 py-2 rounded-lg bg-gradient-to-r from-primary to-primary-container text-white text-sm font-medium hover:shadow-lg transition-all flex items-center gap-2 flex-shrink-0"
                 @onclick="HandleScrape"
@@ -45,5 +45,11 @@
     private async Task HandleScrape()
     {
         await OnScrape.InvokeAsync();
+    }
+
+    private async Task OnUrlInput(ChangeEventArgs e)
+    {
+        Url = e.Value?.ToString() ?? string.Empty;
+        await UrlChanged.InvokeAsync(Url);
     }
 }

@@ -75,10 +75,12 @@
         var input = document.getElementById('search-input');
         if (!form || !input) return;
 
+        // On explicit submit (Enter key / button), debounce the submission by 300ms
+        // to coalesce with any pending keyup-triggered submit.
         form.addEventListener('submit', function (e) {
+            if (timer) { clearTimeout(timer); timer = null; }
             e.preventDefault();
-            if (timer) clearTimeout(timer);
-            timer = setTimeout(function () { form.submit(); }, 300);
+            setTimeout(function () { form.submit(); }, 300);
         });
 
         input.addEventListener('keyup', function (e) {

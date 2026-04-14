@@ -39,8 +39,7 @@
         <span class="material-symbols-outlined text-4xl text-on-surface-variant mb-2 block">cloud_upload</span>
         <p class="text-on-surface-variant mb-2">Drag and drop a file here, or click to browse</p>
         <p class="text-sm text-outline">@AcceptDescription</p>
-        <InputFile OnChange="HandleFileSelected" accept="@AcceptExtensions"
-                   class="mt-3" />
+        <InputFile OnChange="HandleFileSelected" accept="@AcceptExtensions" class="mt-3" />
     </div>
 
     @if (IsImporting)

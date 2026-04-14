@@ -193,6 +193,7 @@ namespace LucidCartographer.Services.Operations
                 PoiId = p.Id,
                 PoiCollectionId = collection.Id
             }));
+            collection.PoiCount = pois.Count;
             await db.SaveChangesAsync(cancellationToken);
 
             await transaction.CommitAsync(cancellationToken);
