@@ -19,4 +19,43 @@
     <PackageReference Include="Microsoft.Playwright" Version="1.49.0" />
   </ItemGroup>
 
+  <!--
+    Tailwind CSS compile step for local `dotnet run`.
+    The Dockerfile already does this during image build; this target makes
+    sure a fresh checkout outside Docker doesn't ship an unstyled app
+    because wwwroot/css/tailwind.css (which is gitignored as a build
+    artifact) isn't present. Downloads the pinned standalone CLI into obj/
+    on first build — no Node.js required. Keep the version in sync with
+    the Dockerfile.
+  -->
+  <PropertyGroup>
+    <TailwindVersion>v3.4.17</TailwindVersion>
+    <TailwindInput>$(MSBuildProjectDirectory)/wwwroot/css/input.css</TailwindInput>
+    <TailwindOutput>$(MSBuildProjectDirectory)/wwwroot/css/tailwind.css</TailwindOutput>
+    <TailwindBinaryDir>$(MSBuildProjectDirectory)/obj/tailwindcss</TailwindBinaryDir>
+    <TailwindBinaryName Condition="$([MSBuild]::IsOSPlatform('Windows'))">tailwindcss-windows-x64.exe</TailwindBinaryName>
+    <TailwindBinaryName Condition="$([MSBuild]::IsOSPlatform('Linux'))">tailwindcss-linux-x64</TailwindBinaryName>
+    <TailwindBinaryName Condition="$([MSBuild]::IsOSPlatform('OSX')) And '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'Arm64'">tailwindcss-macos-arm64</TailwindBinaryName>
+    <TailwindBinaryName Condition="$([MSBuild]::IsOSPlatform('OSX')) And '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' != 'Arm64'">tailwindcss-macos-x64</TailwindBinaryName>
+    <TailwindBinaryPath>$(TailwindBinaryDir)/$(TailwindBinaryName)</TailwindBinaryPath>
+    <TailwindDownloadUrl>https://github.com/tailwindlabs/tailwindcss/releases/download/$(TailwindVersion)/$(TailwindBinaryName)</TailwindDownloadUrl>
+  </PropertyGroup>
+
+  <Target Name="EnsureTailwindBinary" Condition="!Exists('$(TailwindBinaryPath)')">
+    <MakeDir Directories="$(TailwindBinaryDir)" />
+    <Message Importance="high" Text="Downloading Tailwind CLI $(TailwindVersion) ($(TailwindBinaryName))..." />
+    <DownloadFile SourceUrl="$(TailwindDownloadUrl)" DestinationFolder="$(TailwindBinaryDir)" />
+    <Exec Command="chmod +x &quot;$(TailwindBinaryPath)&quot;" Condition="!$([MSBuild]::IsOSPlatform('Windows'))" />
+  </Target>
+
+  <Target Name="CompileTailwindCss"
+          BeforeTargets="BeforeBuild"
+          DependsOnTargets="EnsureTailwindBinary"
+          Inputs="$(TailwindInput);tailwind.config.js;@(Content);@(None)"
+          Outputs="$(TailwindOutput)">
+    <Message Importance="high" Text="Compiling Tailwind CSS: $(TailwindInput) -> $(TailwindOutput)" />
+    <Exec Command="&quot;$(TailwindBinaryPath)&quot; -i &quot;$(TailwindInput)&quot; -o &quot;$(TailwindOutput)&quot; --minify"
+          WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+
 </Project>

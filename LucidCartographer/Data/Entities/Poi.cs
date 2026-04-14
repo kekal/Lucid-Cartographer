@@ -38,6 +38,13 @@ namespace LucidCartographer.Data.Entities
 
         public string? ImageUrl { get; set; }
 
+        // Binary image data is stored in a separate PoiImage table so that
+        // default Poi queries don't drag BLOBs across the wire. This nav
+        // property is NOT auto-loaded — include it explicitly only when
+        // serving /api/poi-image/{id}. The presence of the image for a POI
+        // should be inferred from ImageUrl, not from this nav.
+        public PoiImage? Image { get; set; }
+
         public string? Country { get; set; }
 
         public string? Region { get; set; }

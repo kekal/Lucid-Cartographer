@@ -110,8 +110,28 @@ namespace LucidCartographer.Services.Import
                     if (await btn.IsVisibleAsync())
                     {
                         _logger.LogInformation("Clicking consent button: {Selector}", sel);
-                        await btn.ClickAsync();
-                        await page.WaitForTimeoutAsync(3000);
+                        // The consent button redirects back to the real maps URL;
+                        // WaitForNavigationAsync only works for real navigations, but
+                        // consent.google.com does a real one, so wait for the URL to
+                        // move off consent.google.com rather than sleeping blind.
+                        var clickTask = btn.ClickAsync();
+                        try
+                        {
+                            await page.WaitForURLAsync(
+                                u => !u.Contains("consent.google.com"),
+                                new() { Timeout = 15000 });
+                        }
+                        catch (TimeoutException)
+                        {
+                            _logger.LogWarning("Consent redirect did not complete within 15s; continuing anyway");
+                        }
+                        await clickTask;
+                        // Then wait for the maps UI to finish laying out.
+                        try
+                        {
+                            await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new() { Timeout = 15000 });
+                        }
+                        catch (TimeoutException) { /* NetworkIdle rarely reached on maps */ }
                         break;
                     }
                 }
@@ -121,16 +141,7 @@ namespace LucidCartographer.Services.Import
                 _logger.LogDebug(ex, "No cookie consent dialog found or failed to click it");
             }
 
-            _logger.LogDebug("Post-consent URL: {Url}", page.Url);
-
-            // Scroll the list panel to load all places
-            var scrollSelectors = new[]
-            {
-                "div[role='feed']",
-                "div.m6QErb.DxyBCb.kA9KIf.dS8AEf",
-                "div.m6QErb",
-                "div[aria-label] div.e07Vkf",
-            };
+            _logger.LogInformation("Post-consent URL: {Url}", page.Url);
 
             // Extract list name from the page header
             string? listName = null;
@@ -157,27 +168,79 @@ namespace LucidCartographer.Services.Import
                 _logger.LogWarning(ex, "Failed to extract list name");
             }
 
-            ILocator? scrollContainer = null;
-            foreach (var sel in scrollSelectors)
+            // === Structure discovery =================================================
+            //
+            // Obfuscated class names (div.BsJqK, div.Nv2PK …) rotate every few months
+            // whenever Google reships the maps UI, and link patterns vary across list
+            // views (some use `/maps/place/` anchors, others use click-handled buttons
+            // with no href at all). CSS overflow isn't reliable either: short lists
+            // fit without overflow, and virtualized panels use `overflow: hidden` with
+            // JS-driven scroll. So we lean on pure DOM topology:
+            //
+            //   A list panel is the div with the highest count of *repeating row*
+            //   children — direct children (or one-layer-nested if the container
+            //   wraps them in a single spacer) that have real height and real text.
+            //
+            // We walk every div, score it by how many card-like children it has,
+            // and pick the winner. Three-or-more card-like children rules out page
+            // chrome (header, footer, single buttons), and we skip any candidate
+            // that's an ancestor of a better one so we pick the *tightest* container.
+            //
+            // The chosen container gets `data-scraper-scroll='1'`; each card gets
+            // `data-scraper-idx='N'`. Everything after this runs in C# against those
+            // stable data attributes.
+            //
+            // Called repeatedly: at startup until the list hydrates, after each
+            // scroll pass (tags newly lazy-rendered cards, leaves existing indices
+            // intact), and after each GoBack from the detail view.
+            // JS source lives in GoogleMapsScraperScripts so it can be unit-tested
+            // against fixture HTML independently of the full scraper pipeline.
+
+            async Task<(int total, bool scrollFound, int divsExamined, string? diag)> DiscoverAsync()
             {
-                var loc = page.Locator(sel).First;
-                if (await loc.IsVisibleAsync())
+                var result = await page.EvaluateAsync<System.Text.Json.JsonElement>(GoogleMapsScraperScripts.Discover);
+                var total = result.GetProperty("total").GetInt32();
+                var scrollFound = result.GetProperty("scrollFound").GetBoolean();
+                var divsExamined = result.TryGetProperty("divsExamined", out var d) ? d.GetInt32() : 0;
+                string? diag = null;
+                if (result.TryGetProperty("diag", out var diagEl))
                 {
-                    scrollContainer = loc;
-                    _logger.LogInformation("Found scroll container: {Selector}", sel);
-                    break;
+                    diag = diagEl.GetRawText();
                 }
+                return (total, scrollFound, divsExamined, diag);
             }
 
-            if (scrollContainer == null)
+            // Initial discovery — wait up to ~15s for the list panel to hydrate.
+            // Consent redirect + lazy rendering can delay the list by several seconds.
+            (int total, bool scrollFound, int divsExamined, string? diag) discovery = (0, false, 0, null);
+            for (int attempt = 0; attempt < 15; attempt++)
             {
-                _logger.LogWarning("No scroll container found. Trying page-level scroll.");
-                scrollContainer = page.Locator("body").First;
+                discovery = await DiscoverAsync();
+                if (discovery.total > 0) break;
+                await page.WaitForTimeoutAsync(1000);
             }
 
-            if (await scrollContainer.IsVisibleAsync())
+            if (discovery.total == 0)
             {
-                var previousCount = 0;
+                _logger.LogWarning(
+                    "Could not locate list cards via DOM topology. " +
+                    "Divs examined: {Divs}. Top containers by text length: {Diag}. " +
+                    "Page may not be a list URL, or Google restructured the list panel.",
+                    discovery.divsExamined, discovery.diag ?? "(none)");
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "Discovered {Count} initial list items (examined {Divs} divs)",
+                    discovery.total, discovery.divsExamined);
+            }
+
+            // Scroll loop — drives lazy-loaded cards into the DOM, re-tags each
+            // pass, terminates when the tagged count stops growing for 3 rounds.
+            if (discovery.total > 0)
+            {
+                var scrollContainer = page.Locator("[data-scraper-scroll='1']").First;
+                var previousCount = discovery.total;
                 var stableRounds = 0;
 
                 for (int i = 0; i < 100; i++)
@@ -187,8 +250,8 @@ namespace LucidCartographer.Services.Import
                     await scrollContainer.EvaluateAsync("el => el.scrollTop = el.scrollHeight");
                     await page.WaitForTimeoutAsync(1500);
 
-                    var currentCount = await page.Locator("a[href*='/maps/place/']").CountAsync();
-                    _logger.LogInformation("Scroll {Round}: {Count} places found", i + 1, currentCount);
+                    var (currentCount, _, _, _) = await DiscoverAsync();
+                    _logger.LogInformation("Scroll {Round}: {Count} places tagged", i + 1, currentCount);
                     onProgress?.Invoke(currentCount);
 
                     if (currentCount == previousCount)
@@ -204,27 +267,7 @@ namespace LucidCartographer.Services.Import
                 }
             }
 
-            var itemSelectors = new[]
-            {
-                "div.Nv2PK",
-                "div.BsJqK",
-                "div.m6QErb div[role='article']",
-                "div.lI9IFe",
-            };
-
-            IReadOnlyList<ILocator> listItems = Array.Empty<ILocator>();
-            string usedSelector = "";
-            foreach (var sel in itemSelectors)
-            {
-                var items = await page.Locator(sel).AllAsync();
-                _logger.LogInformation("Selector '{Sel}': {Count} items", sel, items.Count);
-                if (items.Count > 0)
-                {
-                    listItems = items;
-                    usedSelector = sel;
-                    break;
-                }
-            }
+            var listItems = await page.Locator("[data-scraper-idx]").AllAsync();
 
             if (!listItems.Any())
             {
@@ -242,26 +285,49 @@ namespace LucidCartographer.Services.Import
 
                 try
                 {
-                    var items = await page.Locator(usedSelector).AllAsync();
+                    // Address the card by its stable data-scraper-idx tag instead of
+                    // re-enumerating — iteration order is preserved, and going back
+                    // via `GoBack` keeps the tags intact.
+                    var item = page.Locator($"[data-scraper-idx='{idx}']").First;
 
-                    if (idx >= items.Count)
+                    if (!await item.IsVisibleAsync())
                     {
-                        _logger.LogWarning("Item index {Idx} out of range ({Count} items)", idx, items.Count);
-                        break;
+                        _logger.LogWarning("Item {Idx} no longer present in DOM — skipping", idx);
+                        continue;
                     }
 
-                    var item = items[idx];
-
                     // === Extract data from list item (before clicking) ===
-                    string name;
+                    // Prefer the place anchor's aria-label (accessibility-required, set
+                    // by Google for screen readers) — it's the single most stable name
+                    // source on the card. Fall back to legacy class-based selectors,
+                    // then to the card's first text line.
+                    string name = "Unknown";
                     try
                     {
-                        var nameEl = item.Locator(".fontHeadlineSmall, .qBF1Pd, .NrDZNb").First;
-                        name = await nameEl.InnerTextAsync();
+                        var placeAnchor = item.Locator("a[href*='/maps/place/']").First;
+                        var ariaLabel = await placeAnchor.GetAttributeAsync("aria-label");
+                        if (!string.IsNullOrWhiteSpace(ariaLabel))
+                            name = ariaLabel.Trim();
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogDebug(ex, "Failed to extract name via specific selector for item {Idx}, falling back to full text", idx);
+                        _logger.LogDebug(ex, "aria-label name extraction failed for item {Idx}", idx);
+                    }
+                    if (name == "Unknown")
+                    {
+                        try
+                        {
+                            var nameEl = item.Locator(".fontHeadlineSmall, .qBF1Pd, .NrDZNb").First;
+                            if (await nameEl.IsVisibleAsync())
+                                name = (await nameEl.InnerTextAsync()).Trim();
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Class-based name extraction failed for item {Idx}", idx);
+                        }
+                    }
+                    if (name == "Unknown")
+                    {
                         name = (await item.InnerTextAsync()).Split('\n').FirstOrDefault()?.Trim() ?? "Unknown";
                     }
                     name = name.Split('\n').FirstOrDefault()?.Trim() ?? "Unknown";
@@ -329,13 +395,49 @@ namespace LucidCartographer.Services.Import
                         _logger.LogWarning(ex, "Failed to extract category/description for item {Idx} '{Name}'", idx, name);
                     }
 
-                    // Image URL
+                    // Image: extract URL from the list card, upsize it (`…=w92-h92-k-no`
+                    // → `…=w1024`), and download the bytes *now* while the signed
+                    // `gps-cs-s` token is still fresh. Google blocks cross-origin
+                    // hotlinking of these URLs and the token expires in ~minutes, so
+                    // persisting only the URL is useless. We fetch via Playwright's
+                    // APIRequest so the request carries the browser session's cookies
+                    // and bypasses Google's anti-hotlink checks, then store the bytes
+                    // on the Poi entity and serve them from /api/poi-image/{id}.
                     string? imageUrl = null;
+                    byte[]? imageData = null;
+                    string? imageContentType = null;
                     try
                     {
                         var imgEl = item.Locator("img").First;
                         if (await imgEl.IsVisibleAsync())
-                            imageUrl = await imgEl.GetAttributeAsync("src");
+                        {
+                            var rawSrc = await imgEl.GetAttributeAsync("src");
+                            if (!string.IsNullOrEmpty(rawSrc) && rawSrc.Contains("googleusercontent.com"))
+                            {
+                                var equalsIdx = rawSrc.LastIndexOf('=');
+                                var baseUrl = equalsIdx > 0 ? rawSrc[..equalsIdx] : rawSrc;
+                                imageUrl = baseUrl + "=w1024";
+
+                                try
+                                {
+                                    var resp = await context.APIRequest.GetAsync(imageUrl);
+                                    if (resp.Status == 200)
+                                    {
+                                        imageData = await resp.BodyAsync();
+                                        var headers = resp.Headers;
+                                        imageContentType = headers.TryGetValue("content-type", out var ct) ? ct : "image/jpeg";
+                                    }
+                                    else
+                                    {
+                                        _logger.LogWarning("Image fetch for item {Idx} '{Name}' returned HTTP {Status}", idx, name, resp.Status);
+                                    }
+                                }
+                                catch (Exception fetchEx)
+                                {
+                                    _logger.LogWarning(fetchEx, "Failed to download image bytes for item {Idx} '{Name}' from {Url}", idx, name, imageUrl);
+                                }
+                            }
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -431,7 +533,9 @@ namespace LucidCartographer.Services.Import
                             ReviewCount: reviewCount,
                             Website: website,
                             Phone: phone,
-                            ImageUrl: imageUrl
+                            ImageUrl: imageUrl,
+                            ImageData: imageData,
+                            ImageContentType: imageContentType
                         ));
                         _logger.LogInformation("[{Idx}/{Total}] {Name} ({Cat}) @ {Lat},{Lon}",
                             idx + 1, totalItems, name, category ?? "-", coords.Value.lat, coords.Value.lon);
@@ -443,9 +547,13 @@ namespace LucidCartographer.Services.Import
 
                     onProgress?.Invoke(results.Count);
 
-                    // Go back to the list
+                    // Go back to the list. The detail view is a full navigation on
+                    // Google Maps, so the DOM snapshot we come back to is a fresh one
+                    // — our data-scraper-* attributes are gone. Re-run discovery so
+                    // the next iteration can address its card by index again.
                     await page.GoBackAsync(new PageGoBackOptions { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 10000 });
                     await page.WaitForTimeoutAsync(1500);
+                    await DiscoverAsync();
                 }
                 catch (Exception ex)
                 {
@@ -454,6 +562,7 @@ namespace LucidCartographer.Services.Import
                     {
                         await page.GoBackAsync();
                         await page.WaitForTimeoutAsync(2000);
+                        await DiscoverAsync();
                     }
                     catch (Exception backEx)
                     {

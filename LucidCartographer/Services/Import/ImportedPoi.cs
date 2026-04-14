@@ -12,6 +12,8 @@ namespace LucidCartographer.Services.Import
         int? ReviewCount = null,
         string? Website = null,
         string? Phone = null,
-        string? ImageUrl = null
+        string? ImageUrl = null,
+        byte[]? ImageData = null,
+        string? ImageContentType = null
     );
 }

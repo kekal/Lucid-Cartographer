@@ -8,6 +8,7 @@ namespace LucidCartographer.Data
         public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
         public DbSet<Poi> Pois => Set<Poi>();
+        public DbSet<PoiImage> PoiImages => Set<PoiImage>();
         public DbSet<PoiCollection> PoiCollections => Set<PoiCollection>();
         public DbSet<PoiCollectionItem> PoiCollectionItems => Set<PoiCollectionItem>();
         public DbSet<Tag> Tags => Set<Tag>();
@@ -46,6 +47,16 @@ namespace LucidCartographer.Data
                     t.HasCheckConstraint("CK_Poi_GoogleRating", "GoogleRating IS NULL OR (GoogleRating >= 1.0 AND GoogleRating <= 5.0)");
                     t.HasCheckConstraint("CK_Poi_ReviewCount", "ReviewCount IS NULL OR ReviewCount >= 0");
                 });
+            });
+
+            modelBuilder.Entity<PoiImage>(entity =>
+            {
+                entity.HasKey(e => e.PoiId);
+                entity.Property(e => e.ContentType).HasMaxLength(100);
+                entity.HasOne(e => e.Poi)
+                    .WithOne(p => p.Image)
+                    .HasForeignKey<PoiImage>(e => e.PoiId)
+                    .OnDelete(DeleteBehavior.Cascade);
             });
 
             modelBuilder.Entity<PoiCollection>(entity =>

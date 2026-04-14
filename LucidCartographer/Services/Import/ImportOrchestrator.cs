@@ -189,6 +189,44 @@ namespace LucidCartographer.Services.Import
                         });
                         existingLinks.Add(existing.Id);
                     }
+
+                    // Narrow backfill on dedup: refresh the image bytes whenever
+                    // the new scrape produced any, and the existing record is
+                    // either empty or came from a Google source URL (safe to
+                    // overwrite). Non-Google source URLs are treated as user-set
+                    // and left alone. Other metadata (address/rating/phone) is
+                    // also left untouched to preserve user edits.
+                    var existingIsGoogleSourced = string.IsNullOrEmpty(existing.ImageUrl)
+                        || existing.ImageUrl.Contains("googleusercontent.com");
+                    if (imported.ImageData is { Length: > 0 } && existingIsGoogleSourced)
+                    {
+                        // Load or create the companion PoiImage row. Using Find
+                        // pulls from the tracker first, so concurrent backfills
+                        // in the same batch don't duplicate-insert.
+                        var existingImage = await db.PoiImages.FindAsync(new object[] { existing.Id }, cancellationToken);
+                        if (existingImage is null)
+                        {
+                            db.PoiImages.Add(new PoiImage
+                            {
+                                PoiId = existing.Id,
+                                Data = imported.ImageData,
+                                ContentType = imported.ImageContentType
+                            });
+                        }
+                        else
+                        {
+                            existingImage.Data = imported.ImageData;
+                            existingImage.ContentType = imported.ImageContentType;
+                        }
+                        existing.ImageUrl = imported.ImageUrl;
+                    }
+                    else if (!string.IsNullOrEmpty(imported.ImageUrl) && existingIsGoogleSourced)
+                    {
+                        // URL-only update as a weaker fallback (e.g. if the bytes
+                        // download failed but we still captured the source URL).
+                        existing.ImageUrl = imported.ImageUrl;
+                    }
+
                     skipped++;
                 }
                 else
@@ -209,6 +247,9 @@ namespace LucidCartographer.Services.Import
                         Website = imported.Website,
                         Phone = imported.Phone,
                         ImageUrl = imported.ImageUrl,
+                        Image = imported.ImageData is { Length: > 0 }
+                            ? new PoiImage { Data = imported.ImageData, ContentType = imported.ImageContentType }
+                            : null,
                         Status = ImportedStatus,
                         AddedDate = DateTime.UtcNow
                     };

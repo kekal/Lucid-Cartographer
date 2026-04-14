@@ -23,7 +23,14 @@
         @if (!string.IsNullOrEmpty(Poi.ImageUrl))
         {
             <div class="mb-3 rounded-lg overflow-hidden">
-                <img src="@Poi.ImageUrl" alt="@Poi.Name" class="w-full h-40 object-cover" />
+                @* Served from our own endpoint against PoiImages.Data — Google
+                   blocks hotlinking of googleusercontent URLs cross-origin and
+                   the signed tokens expire within minutes, so we persist the
+                   bytes at scrape time. ImageUrl (the original Google source)
+                   is the presence flag; the actual render goes through
+                   /api/poi-image/{id}. *@
+                <img src="/api/poi-image/@Poi.Id" alt="@Poi.Name"
+                     class="w-full h-40 object-cover" loading="lazy" />
             </div>
         }
 

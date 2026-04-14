@@ -17,7 +17,10 @@
     <link rel="stylesheet" href="lib/leaflet/leaflet.css" />
     <script src="lib/leaflet/leaflet.js"></script>
     <link rel="stylesheet" href="css/base.css" />
-    <link rel="stylesheet" href="LucidCartographer.styles.css" />
+    @* Scoped-CSS bundle (LucidCartographer.styles.css) intentionally omitted:
+       no .razor.css files exist in the project, so the bundle is never generated
+       and the link would 404 on every page load. Re-add if component-scoped CSS
+       is introduced later. *@
     <HeadOutlet />
 </head>
 <body class="font-body text-on-surface bg-surface">
