@@ -72,7 +72,12 @@ namespace LucidCartographer.Tests.Integration
             await Page.Locator("button:has-text('A - B')").ClickAsync();
             await Page.WaitForSelectorAsync("text=Result Preview", new() { Timeout = 10000 });
 
-            // The result table should show POI names from A that are not in B
+            // Virtualize only materialises rows once its scroll container has a
+            // measured height. On SPA nav into /operations the flex layout may
+            // settle a tick late, leaving zero rows rendered. Nudge the window to
+            // trigger a re-measure, then wait for the row.
+            await Page.EvaluateAsync("() => window.dispatchEvent(new Event('resize'))");
+            await Page.Locator("td:has-text('Wawel Castle')").WaitForAsync(new() { Timeout = 10000 });
             Assert.True(await Page.Locator("td:has-text('Wawel Castle')").IsVisibleAsync(),
                 "Wawel Castle should appear in the subtract result");
         }
