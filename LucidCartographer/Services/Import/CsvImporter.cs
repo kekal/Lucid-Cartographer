@@ -1,6 +1,5 @@
 using CsvHelper;
 using CsvHelper.Configuration;
-using Microsoft.Extensions.Logging;
 using System.Globalization;
 
 namespace LucidCartographer.Services.Import

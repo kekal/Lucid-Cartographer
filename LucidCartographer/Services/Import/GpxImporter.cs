@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using System.Xml.Linq;
 
 namespace LucidCartographer.Services.Import

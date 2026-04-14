@@ -1,5 +1,3 @@
-using Microsoft.Playwright;
-
 namespace LucidCartographer.Tests.Integration
 {
     [Collection("Integration")]

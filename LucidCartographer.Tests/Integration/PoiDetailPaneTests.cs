@@ -1,8 +1,4 @@
-using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 
 namespace LucidCartographer.Tests.Integration

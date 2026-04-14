@@ -1,7 +1,3 @@
-using LucidCartographer.Data;
-using LucidCartographer.Data.Entities;
-using Microsoft.Playwright;
-
 namespace LucidCartographer.Tests.Integration
 {
     [Collection("Integration")]

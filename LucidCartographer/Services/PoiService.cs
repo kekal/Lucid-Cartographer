@@ -2,7 +2,6 @@ using System.Text.RegularExpressions;
 using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 
 namespace LucidCartographer.Services
 {

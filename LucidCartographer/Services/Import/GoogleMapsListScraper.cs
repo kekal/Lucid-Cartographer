@@ -1,4 +1,3 @@
-using LucidCartographer.Services;
 using Microsoft.Playwright;
 
 namespace LucidCartographer.Services.Import
@@ -203,13 +202,36 @@ namespace LucidCartographer.Services.Import
                 return (total, scrollFound, divsExamined, diag);
             }
 
-            // Initial discovery — wait up to ~15s for the list panel to hydrate.
-            // Consent redirect + lazy rendering can delay the list by several seconds.
+            // Initial discovery — wait up to ~30s for the list panel to hydrate.
+            // Consent redirect + lazy rendering can delay the list panel by
+            // several seconds on a cold cache. If we still see nothing after
+            // ~10s, trigger a single Reload() — empirically, the first nav
+            // post-consent sometimes lands on a half-rendered `/@/` shell
+            // where the list data payload never gets parsed into cards, but
+            // a cheap reload picks up the correct state because the cookie
+            // jar and URL are already canonical by then.
             (int total, bool scrollFound, int divsExamined, string? diag) discovery = (0, false, 0, null);
-            for (int attempt = 0; attempt < 15; attempt++)
+            var reloadAttempted = false;
+            for (int attempt = 0; attempt < 30; attempt++)
             {
                 discovery = await DiscoverAsync();
                 if (discovery.total > 0) break;
+                if (attempt == 10 && !reloadAttempted)
+                {
+                    _logger.LogInformation(
+                        "List panel still empty after 10s (examined {Divs} divs); reloading once",
+                        discovery.divsExamined);
+                    reloadAttempted = true;
+                    try
+                    {
+                        await page.ReloadAsync(new PageReloadOptions
+                        {
+                            WaitUntil = WaitUntilState.DOMContentLoaded,
+                            Timeout = 15000
+                        });
+                    }
+                    catch (TimeoutException) { /* best effort */ }
+                }
                 await page.WaitForTimeoutAsync(1000);
             }
 
@@ -297,10 +319,18 @@ namespace LucidCartographer.Services.Import
                     string name = "Unknown";
                     try
                     {
+                        // IMPORTANT: check visibility BEFORE calling GetAttributeAsync.
+                        // Without the guard, GetAttributeAsync waits up to Playwright's
+                        // 30s default actionable timeout for the anchor to appear and
+                        // then throws TimeoutException — a silent ~30s-per-item tax for
+                        // any card that doesn't use a place anchor.
                         var placeAnchor = item.Locator("a[href*='/maps/place/']").First;
-                        var ariaLabel = await placeAnchor.GetAttributeAsync("aria-label");
-                        if (!string.IsNullOrWhiteSpace(ariaLabel))
-                            name = ariaLabel.Trim();
+                        if (await placeAnchor.IsVisibleAsync())
+                        {
+                            var ariaLabel = await placeAnchor.GetAttributeAsync("aria-label");
+                            if (!string.IsNullOrWhiteSpace(ariaLabel))
+                                name = ariaLabel.Trim();
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -544,9 +574,36 @@ namespace LucidCartographer.Services.Import
                     // Google Maps, so the DOM snapshot we come back to is a fresh one
                     // — our data-scraper-* attributes are gone. Re-run discovery so
                     // the next iteration can address its card by index again.
-                    await page.GoBackAsync(new PageGoBackOptions { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 10000 });
-                    await page.WaitForTimeoutAsync(1500);
-                    await DiscoverAsync();
+                    //
+                    // WaitUntil=DOMContentLoaded (not NetworkIdle): Google Maps keeps
+                    // background XHRs going indefinitely, so NetworkIdle virtually
+                    // never fires and we'd eat the full 10s timeout on every item.
+                    // DOMContentLoaded fires as soon as the list panel's static DOM
+                    // is back; we then poll DiscoverAsync until the cards are tagged.
+                    await page.GoBackAsync(new PageGoBackOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 10000 });
+                    // Google Maps re-hydrates the list panel client-side AFTER
+                    // DOMContentLoaded, replacing the card elements. If we call
+                    // DiscoverAsync too eagerly we tag the stale DOM, then the
+                    // tags vanish with the next render and subsequent items
+                    // report "no longer present in DOM". Wait for the tag count
+                    // to be stable across two consecutive polls before trusting
+                    // it — that proves hydration has settled.
+                    int lastCount = -1;
+                    int stableHits = 0;
+                    for (int wait = 0; wait < 20; wait++)
+                    {
+                        await page.WaitForTimeoutAsync(300);
+                        var (t, _, _, _) = await DiscoverAsync();
+                        if (t > 0 && t == lastCount)
+                        {
+                            if (++stableHits >= 2) break;
+                        }
+                        else
+                        {
+                            stableHits = 0;
+                        }
+                        lastCount = t;
+                    }
                 }
                 catch (Exception ex)
                 {

@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using System.IO.Compression;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
