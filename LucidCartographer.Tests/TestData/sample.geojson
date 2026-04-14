@@ -1,0 +1,29 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [19.9450, 50.0647]
+      },
+      "properties": {
+        "name": "Wawel Castle",
+        "Google Maps URL": "https://www.google.com/maps/place/Wawel",
+        "address": "Wawel 5, 31-001 Kraków",
+        "category": "Castle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [21.0122, 52.2297]
+      },
+      "properties": {
+        "name": "Old Town Warsaw",
+        "description": "UNESCO World Heritage"
+      }
+    }
+  ]
+}

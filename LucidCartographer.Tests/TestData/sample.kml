@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Test Places</name>
+    <Placemark>
+      <name>Wieliczka Salt Mine</name>
+      <description>UNESCO World Heritage Site. Visit https://www.google.com/maps/place/Wieliczka for details.</description>
+      <Point>
+        <coordinates>20.0556,49.9833,0</coordinates>
+      </Point>
+    </Placemark>
+    <Placemark>
+      <name>Auschwitz Memorial</name>
+      <description>Historical museum and memorial</description>
+      <Point>
+        <coordinates>19.2033,50.0344,0</coordinates>
+      </Point>
+    </Placemark>
+  </Document>
+</kml>

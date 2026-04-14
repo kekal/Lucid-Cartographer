@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Test" xmlns="http://www.topografix.com/GPX/1/1">
+  <wpt lat="50.0647" lon="19.9450">
+    <name>Wawel Castle</name>
+    <desc>Historic royal castle in Kraków</desc>
+    <link href="https://www.google.com/maps/place/Wawel+Castle/@50.0547,19.9352,17z">
+      <text>Google Maps</text>
+    </link>
+  </wpt>
+  <wpt lat="52.2297" lon="21.0122">
+    <name>Palace of Culture and Science</name>
+    <desc>Tallest building in Warsaw</desc>
+    <link href="https://www.google.com/maps/place/Palace+of+Culture/@52.2319,21.0067,17z">
+      <text>Google Maps</text>
+    </link>
+  </wpt>
+  <wpt lat="51.1079" lon="17.0385">
+    <name>Wrocław Market Square</name>
+  </wpt>
+</gpx>

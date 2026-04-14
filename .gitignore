@@ -19,5 +19,4 @@ wwwroot/css/tailwind.css
 *.db
 LucidCartographer/wwwroot/css/tailwind.css
 
-# Test project is its own git repository; tracked separately.
-LucidCartographer.Tests/
+
