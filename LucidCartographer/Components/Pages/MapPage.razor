@@ -135,6 +135,12 @@ else
         if (_leafletMap == null || !_leafletMap.IsInitialized) return;
 
         var grouped = await PoiService.GetVisiblePoisGroupedAsync();
+        // A POI can belong to multiple collections (import "links" existing POIs
+        // via the M:N CollectionPoi join). When more than one of those collections
+        // is visible the same Poi would appear in _visiblePois twice, which would
+        // crash PoiTable with "More than one sibling of element 'tr' has the same
+        // key value". Dedup by Id while flattening.
+        var seen = new HashSet<int>();
         var newPois = new List<Poi>();
 
         foreach (var vm in _collectionVMs)
@@ -142,7 +148,11 @@ else
             if (vm.IsVisible && grouped.ContainsKey(vm.Id))
             {
                 await _leafletMap.ShowCollectionAsync(vm.Id, grouped[vm.Id], vm.Color);
-                newPois.AddRange(grouped[vm.Id]);
+                foreach (var poi in grouped[vm.Id])
+                {
+                    if (seen.Add(poi.Id))
+                        newPois.Add(poi);
+                }
             }
             else
             {
