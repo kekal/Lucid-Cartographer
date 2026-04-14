@@ -17,6 +17,8 @@ wwwroot/css/tailwind.css
 # If your project prefers to exclude it, uncomment the line below:
 # Properties/launchSettings.json
 *.db
+*.db-shm
+*.db-wal
 LucidCartographer/wwwroot/css/tailwind.css
 
 
