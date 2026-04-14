@@ -15,6 +15,12 @@ namespace LucidCartographer.Services
         private DotNetObjectReference<LeafletMapService>? _dotnetRef;
         // REVIEW-11: Thread-safe disposed flag using Interlocked
         private int _disposed;
+        // Tracks whether the JS-side map was ever created. The service is scoped, so
+        // an instance is constructed for every request (including the static prerender
+        // pass that never reaches OnAfterRenderAsync). Gating DisposeAsync on this
+        // prevents JS interop calls during prerender scope teardown, which would throw
+        // "JavaScript interop calls cannot be issued at this time".
+        private int _initialized;
 
         public Func<int, Task>? OnMarkerClicked { get; set; }
 
@@ -28,6 +34,7 @@ namespace LucidCartographer.Services
             // Dispose existing ref to prevent GC handle leak on re-init
             _dotnetRef?.Dispose();
             _dotnetRef = DotNetObjectReference.Create(this);
+            Interlocked.Exchange(ref _initialized, 1);
             await InvokeJsVoidAsync("leafletInterop.initMap", elementId, _dotnetRef);
         }
 
@@ -84,6 +91,18 @@ namespace LucidCartographer.Services
             // REVIEW-11: Thread-safe dispose using Interlocked
             if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
+            // Only attempt JS cleanup if the map was actually initialised on the JS
+            // side. Without this guard, the static prerender pass — which constructs
+            // the scoped service but never reaches OnAfterRenderAsync — would try to
+            // invoke JS during scope disposal and throw InvalidOperationException
+            // ("JavaScript interop calls cannot be issued at this time").
+            if (Volatile.Read(ref _initialized) == 0)
+            {
+                _dotnetRef?.Dispose();
+                _dotnetRef = null;
+                return;
+            }
+
             // Clean up the JS-side map instance
             try
             {
@@ -96,6 +115,11 @@ namespace LucidCartographer.Services
             catch (ObjectDisposedException)
             {
                 // JS runtime already disposed
+            }
+            catch (InvalidOperationException)
+            {
+                // Defence-in-depth: interop unavailable (prerender / background scope
+                // teardown). The browser tab is responsible for its own cleanup.
             }
 
             _dotnetRef?.Dispose();
@@ -120,6 +144,11 @@ namespace LucidCartographer.Services
             catch (ObjectDisposedException)
             {
                 // JS runtime disposed — component is being torn down
+            }
+            catch (InvalidOperationException)
+            {
+                // Interop attempted while the component is statically prerendering.
+                // The post-prerender interactive pass will re-issue the call.
             }
         }
     }
