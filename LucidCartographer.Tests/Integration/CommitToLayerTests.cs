@@ -189,5 +189,39 @@ namespace LucidCartographer.Tests.Integration
             // The success message should reflect the count of non-discarded POIs
             Assert.Contains(visiblePoisBefore.ToString(), successText);
         }
+
+        [Fact]
+        public async Task CommittedResult_VisibleOnMap()
+        {
+            await SeedBothCollectionsAndRunSubtractAsync();
+
+            // Click "Commit to Layer"
+            await Page.Locator("button:has-text('Commit to Layer')").ClickAsync();
+            await Page.WaitForSelectorAsync("text=Save as new collection", new() { Timeout = 5000 });
+
+            // Fill in the name and save
+            var nameInput = Page.Locator("input[placeholder*='Filtered']");
+            await nameInput.ClearAsync();
+            await nameInput.FillAsync("Committed Subtract Result");
+            await Page.Locator("button:has-text('Save')").ClickAsync();
+            await Page.WaitForSelectorAsync("text=Saved", new() { Timeout = 10000 });
+
+            // Navigate to Map tab
+            await Page.Locator("nav a:has-text('Map')").ClickAsync();
+            await Page.WaitForURLAsync(url => url.TrimEnd('/') == BaseUrl);
+            await Page.WaitForSelectorAsync("text=COLLECTIONS", new() { Timeout = 10000 });
+
+            // Verify the committed collection appears in the COLLECTIONS sidebar
+            var collectionsText = await Page.Locator("text=COLLECTIONS").TextContentAsync();
+            Assert.NotNull(collectionsText);
+
+            // Verify the collection name is visible in the sidebar
+            var collectionVisible = await Page.Locator("text=Committed Subtract Result").IsVisibleAsync();
+            Assert.True(collectionVisible, "Committed collection should be visible in the Map sidebar");
+
+            // Verify at least one POI from the result is rendered on the map (Leaflet marker or icon)
+            var mapMarkers = await Page.Locator(".leaflet-marker-icon").CountAsync();
+            Assert.True(mapMarkers > 0, "Map should display POI markers for the committed result");
+        }
     }
 }
