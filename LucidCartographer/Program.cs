@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
+using Coravel;
 using LucidCartographer.Components;
 using LucidCartographer.Data;
 using LucidCartographer.Services;
@@ -68,6 +69,15 @@ builder.Services.AddSingleton<IFileImporter, KmlImporter>();
 builder.Services.AddSingleton<IFileImporter, GeoJsonImporter>();
 builder.Services.AddSingleton<IFileImporter, CsvImporter>();
 builder.Services.AddScoped<IImportOrchestrator, ImportOrchestrator>();
+// Background import pipeline (Coravel). User clicks Import -> job is enqueued
+// via IImportJobQueue -> Coravel's scheduler runs it on a background thread
+// inside its own DI scope, decoupled from the Blazor circuit. The user is
+// free to navigate away; ImportJobStatusService publishes lifecycle events
+// the UI subscribes to.
+builder.Services.AddQueue();
+builder.Services.AddSingleton<ImportJobStatusService>();
+builder.Services.AddTransient<ImportInvocable>();
+builder.Services.AddSingleton<IImportJobQueue, CoravelImportJobQueue>();
 builder.Services.AddSingleton<IFileExporter, KmlExporter>();
 builder.Services.AddSingleton<IFileExporter, GpxExporter>();
 // ARCH-HIGH-01: Removed duplicate concrete KmlExporter registration — use IEnumerable<IFileExporter> instead
