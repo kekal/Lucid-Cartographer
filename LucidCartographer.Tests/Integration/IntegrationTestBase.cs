@@ -1,11 +1,18 @@
 using System.Diagnostics;
+using System.Threading.RateLimiting;
+using Coravel;
 using LucidCartographer.Data;
+using LucidCartographer.Services.Enrichment;
+using LucidCartographer.Services.Import;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
+using Polly;
+using Polly.Retry;
+using Polly.Timeout;
 using LucidCartographer.Components;
 
 namespace LucidCartographer.Tests.Integration;
@@ -53,6 +60,55 @@ public abstract class IntegrationTestBase : IAsyncLifetime
         builder.Services.AddScoped<LucidCartographer.Services.Import.IFileImporter, LucidCartographer.Services.Import.GeoJsonImporter>();
         builder.Services.AddScoped<LucidCartographer.Services.Import.IFileImporter, LucidCartographer.Services.Import.CsvImporter>();
         builder.Services.AddScoped<LucidCartographer.Services.Import.IImportOrchestrator, LucidCartographer.Services.Import.ImportOrchestrator>();
+
+        // Background-import pipeline (mirrors Program.cs). Registered so
+        // ImportOrchestrator can resolve its EnrichmentTrigger dependency
+        // and tests that drive the DataSourcesPage via bUnit / Playwright
+        // can exercise the real IImportJobQueue + ImportJobStatusService.
+        // PoiEnrichmentBackgroundService is deliberately NOT added as a
+        // hosted service — tests don't want a Playwright enrichment loop
+        // starting on their shared BrowserContext. Tests that need
+        // enrichment behaviour can override RegisterAdditionalServices.
+        builder.Services.AddSingleton<EnrichmentProgressService>();
+        builder.Services.AddSingleton<EnrichmentTrigger>();
+        builder.Services.AddSingleton<ImportJobStatusService>();
+        builder.Services.AddQueue();
+        builder.Services.AddTransient<ImportInvocable>();
+        builder.Services.AddSingleton<IImportJobQueue, CoravelImportJobQueue>();
+
+        // Polly resilience pipelines — must mirror Program.cs registrations
+        // because GoogleMapsListScraper and PoiEnrichmentBackgroundService
+        // resolve them by name via ResiliencePipelineProvider<string>.
+        builder.Services.AddResiliencePipeline("scraper", pipeline =>
+        {
+            pipeline
+                .AddConcurrencyLimiter(new ConcurrencyLimiterOptions
+                {
+                    PermitLimit = 1,
+                    QueueLimit = int.MaxValue
+                })
+                .AddRetry(new RetryStrategyOptions
+                {
+                    MaxRetryAttempts = 2,
+                    BackoffType = DelayBackoffType.Exponential,
+                    UseJitter = true,
+                    Delay = TimeSpan.FromSeconds(2)
+                })
+                .AddTimeout(TimeSpan.FromMinutes(10));
+        });
+        builder.Services.AddResiliencePipeline("enrichment", pipeline =>
+        {
+            pipeline
+                .AddRetry(new RetryStrategyOptions
+                {
+                    MaxRetryAttempts = 3,
+                    BackoffType = DelayBackoffType.Exponential,
+                    UseJitter = true,
+                    Delay = TimeSpan.FromSeconds(1)
+                })
+                .AddTimeout(TimeSpan.FromMinutes(2));
+        });
+
         builder.Services.AddSingleton<LucidCartographer.Services.Export.KmlExporter>();
         builder.Services.AddSingleton<LucidCartographer.Services.Export.GpxExporter>();
         builder.Services.AddScoped<LucidCartographer.Services.Operations.IPoiMatcher, LucidCartographer.Services.Operations.PoiMatcher>();
