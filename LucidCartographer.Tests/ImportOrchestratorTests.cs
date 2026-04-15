@@ -8,20 +8,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace LucidCartographer.Tests
 {
-    /// <summary>
-    /// Spy subclass to track EnrichmentTrigger.Signal() calls for testing.
-    /// </summary>
-    internal class SpyEnrichmentTrigger : EnrichmentTrigger
-    {
-        public int SignalCount { get; private set; }
-
-        public new void Signal()
-        {
-            SignalCount++;
-            base.Signal();
-        }
-    }
-
     public class ImportOrchestratorTests
     {
         private readonly IFileImporter[] _importers = new IFileImporter[]
@@ -210,28 +196,37 @@ namespace LucidCartographer.Tests
         public async Task ImportAsync_SignalsEnrichmentTriggerAfterSuccessfulImport()
         {
             var factory = TestDbHelper.CreateFactory();
-            var trigger = new SpyEnrichmentTrigger();
+            var trigger = new EnrichmentTrigger();
             var orchestrator = CreateOrchestrator(factory, trigger);
 
             using var stream = File.OpenRead(Path.Combine("TestData", "sample.gpx"));
             var result = await orchestrator.ImportAsync(stream, "sample.gpx", "Test");
 
             result.AddedCount.Should().BeGreaterThan(0);
-            trigger.SignalCount.Should().Be(1, "EnrichmentTrigger.Signal() should be called once after import");
+
+            // Signal fires via a bounded Channel<Unit>; WaitAsync returns
+            // true if a signal was already in the channel. A real consumer
+            // would not need this timeout, but the test completes in <100ms.
+            var signaled = await trigger.WaitAsync(TimeSpan.FromMilliseconds(200), CancellationToken.None);
+            signaled.Should().BeTrue("EnrichmentTrigger.Signal() should be fired after a successful import that added rows");
         }
 
         [Fact]
         public async Task ImportAsync_DoesNotSignalEnrichmentTriggerWhenNoPoisAdded()
         {
             var factory = TestDbHelper.CreateFactory();
-            var trigger = new SpyEnrichmentTrigger();
+            var trigger = new EnrichmentTrigger();
             var orchestrator = CreateOrchestrator(factory, trigger);
 
             using var stream = File.OpenRead(Path.Combine("TestData", "empty.gpx"));
             var result = await orchestrator.ImportAsync(stream, "empty.gpx", "Empty");
 
             result.AddedCount.Should().Be(0);
-            trigger.SignalCount.Should().Be(0, "EnrichmentTrigger.Signal() should not be called when no POIs are added");
+
+            // No signal should be in the channel — WaitAsync should time
+            // out and return false.
+            var signaled = await trigger.WaitAsync(TimeSpan.FromMilliseconds(200), CancellationToken.None);
+            signaled.Should().BeFalse("EnrichmentTrigger.Signal() should NOT fire when the import added zero rows");
         }
     }
 }

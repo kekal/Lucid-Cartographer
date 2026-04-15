@@ -74,10 +74,13 @@ namespace LucidCartographer.Services.Import
 
                     if (scrape.Pois.Count == 0)
                     {
+                        // Error=null so the UI subscription falls back to
+                        // Message (the user-friendly sentence). Using a
+                        // sentinel like "empty scrape" for Error would
+                        // show up as-is in the error block.
                         _status.Publish(new ImportJobStatus(
                             ImportJobState.Failed,
-                            "No places found. Make sure the URL is a valid Google Maps list.",
-                            Error: "empty scrape"));
+                            "No places found. Make sure the URL is a valid Google Maps list."));
                         return;
                     }
 

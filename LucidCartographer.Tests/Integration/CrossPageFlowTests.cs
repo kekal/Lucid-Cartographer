@@ -160,50 +160,54 @@ namespace LucidCartographer.Tests.Integration
         }
 
         /// <summary>
-        /// Test: Import status persists across page navigation (BehaviorSubject replay)
-        /// Start file import → navigate to Map → return to DataSources → assert import status is still visible
-        /// Verifies that ImportJobStatusService's BehaviorSubject correctly replays state on resubscribe.
+        /// Test: a background import survives page navigation.
+        /// Upload file → navigate to Map → return to DataSources → assert the
+        /// collection is in the managed-sources table. Exercises the whole
+        /// Coravel pipeline end-to-end and proves the job is decoupled from
+        /// the Blazor circuit that triggered it — the user can navigate away
+        /// during the import window and the job still persists to the DB.
+        /// (ImportJobStatusService / BehaviorSubject replay is verified by
+        /// Components/DataSourcesPageTests at the unit level.)
         /// </summary>
         [Fact]
-        public async Task ImportJobStatus_PersistsAfterNavigationAwayAndBack()
+        public async Task ImportJob_SurvivesNavigationAwayAndBack()
         {
             await NavigateToDataSourcesAsync();
 
-            // Open file upload card
+            // Open file upload card and fill the collection name
             await Page.Locator("h3:has-text('KML/GPX Upload')").ClickAsync();
-            await Page.WaitForSelectorAsync("h3:has-text('Import File')", new() { Timeout = 5000 });
-
-            // Fill collection name
-            await Page.Locator("input[placeholder*='Poland']").FillAsync("Status Test Collection");
+            await Page.WaitForSelectorAsync("text=Collection Name", new() { Timeout = 5000 });
+            await Page.Locator("input[placeholder*='Poland']").FillAsync("Nav Test Collection");
             await Page.Locator("input[placeholder*='Poland']").PressAsync("Tab");
 
-            // Upload file (triggers import)
+            // Upload file (triggers enqueue → Coravel runs on a background thread)
             var filePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestData", "sample.gpx");
             await Page.Locator("input[type='file']").SetInputFilesAsync(filePath);
 
-            // Wait for import to START (not complete) — we want to catch it in progress
-            // Look for a "Processing" or "In Progress" indicator
-            await Page.WaitForSelectorAsync(
-                "span:has-text('Processing') , span:has-text('Importing') , span:has-text('Import in progress')",
-                new() { State = WaitForSelectorState.Attached, Timeout = 10000 });
-
-            // Navigate away to Map BEFORE import completes
+            // Immediately navigate away — do not wait for completion. The
+            // Blazor circuit for DataSources disposes; the Coravel invocable
+            // is running on a background thread with its own DI scope, so
+            // it should still finish. ClickMapTabAsync waits for the Map
+            // page's "COLLECTIONS" sidebar landmark, which is enough.
             await ClickMapTabAsync();
 
-            // Verify Map loaded and no import indicators are shown there
-            await Page.WaitForSelectorAsync("div[id^='leaflet-map-']", new() { State = WaitForSelectorState.Attached, Timeout = 10000 });
-
-            // Navigate back to DataSources
+            // Navigate back to DataSources. If the refactor works, the
+            // collection lands in the DB regardless of which page the user
+            // was on when Coravel actually dequeued the job.
             await ClickDataSourcesTabAsync();
 
-            // Verify the import status is STILL visible on DataSources page after returning
-            // The BehaviorSubject should have replayed the current state
-            var statusVisible = await Page.Locator(
-                "span:has-text('Processing') , span:has-text('Importing') , span:has-text('Import complete') , span:has-text('In progress')"
-            ).IsVisibleAsync();
+            // Coravel default ConsummationDelay is 30s in tests, and the
+            // tab-switch travelling adds a few seconds, so allow 40s for
+            // the table row to appear.
+            await Page.WaitForSelectorAsync(
+                "td span.font-medium:has-text('Nav Test Collection')",
+                new() { Timeout = 40000 });
 
-            Assert.True(statusVisible,
-                "Import job status should still be visible after navigating away and returning (BehaviorSubject replay)");
+            var collectionRow = await Page
+                .Locator("td span.font-medium:has-text('Nav Test Collection')")
+                .IsVisibleAsync();
+            Assert.True(collectionRow,
+                "The queued import must complete even when the user navigated away from DataSources mid-flight");
         }
     }
 }

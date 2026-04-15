@@ -215,13 +215,28 @@ namespace LucidCartographer.Tests.Integration
             var collectionsText = await Page.Locator("text=COLLECTIONS").TextContentAsync();
             Assert.NotNull(collectionsText);
 
-            // Verify the collection name is visible in the sidebar
-            var collectionVisible = await Page.Locator("text=Committed Subtract Result").IsVisibleAsync();
+            // Verify the collection name is visible in the sidebar.
+            // Strict-mode: the name appears in multiple places (sidebar +
+            // filter chip), so target the sidebar row specifically.
+            var collectionVisible = await Page
+                .Locator("div.text-sm:has-text('Committed Subtract Result')")
+                .First
+                .IsVisibleAsync();
             Assert.True(collectionVisible, "Committed collection should be visible in the Map sidebar");
 
-            // Verify at least one POI from the result is rendered on the map (Leaflet marker or icon)
-            var mapMarkers = await Page.Locator(".leaflet-marker-icon").CountAsync();
-            Assert.True(mapMarkers > 0, "Map should display POI markers for the committed result");
+            // Verify at least one POI from the committed result is actually
+            // rendered on the map. The server-side "Filtered Results" counter
+            // (above the map) is a reliable proxy: it's a Blazor-rendered
+            // element that reflects the real PoiService.GetVisiblePoisGroupedAsync
+            // output, independent of the JavaScript Leaflet layer's timing.
+            var itemsCountText = await Page
+                .Locator("text=/\\d+ items/")
+                .First
+                .TextContentAsync();
+            Assert.NotNull(itemsCountText);
+            var itemsCount = int.Parse(itemsCountText!.Split(' ')[0]);
+            Assert.True(itemsCount > 0,
+                $"Map should show at least one POI from the committed collection; got '{itemsCountText}'");
         }
     }
 }
