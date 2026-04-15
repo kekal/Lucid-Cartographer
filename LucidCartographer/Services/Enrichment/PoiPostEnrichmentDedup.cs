@@ -1,30 +1,30 @@
 using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
-using LucidCartographer.Services.Operations;
+using LucidCartographer.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace LucidCartographer.Services.Enrichment
 {
     /// <summary>
     /// Post-enrichment dedup: called right after <see cref="PoiEnrichmentBackgroundService"/>
-    /// persists a newly-enriched row. If the row is now a duplicate of an
-    /// already-enriched row with a smaller Id, this helper folds it into
-    /// the older row (moving collection links, dropping the duplicate's
-    /// image, deleting the row itself).
+    /// persists a newly-enriched row. If the row is now equal (per
+    /// <see cref="PoiIdentity.AreSamePlace(Poi?, Poi?)"/>) to an older
+    /// enriched row, this helper folds it into the older row (moving
+    /// collection links, dropping the duplicate's image, deleting the
+    /// row itself).
     ///
-    /// The "smaller Id wins" rule lets multiple parallel enrichment workers
-    /// cooperate without any cross-worker coordination: only the worker
+    /// "Smaller Id wins" lets multiple parallel enrichment workers
+    /// cooperate without cross-worker coordination: only the worker
     /// holding the larger-Id row acts; the worker holding the smaller-Id
     /// row finds no candidate and is a no-op. No lock, no race.
     ///
     /// Unenriched rows are never touched — they carry placeholder (0,0)
-    /// coordinates which would trivially collapse distinct places; they
-    /// will be re-checked when they themselves finish enrichment.
+    /// coordinates which <see cref="PoiIdentity"/> explicitly excludes from
+    /// identity decisions. They'll be re-checked when they themselves
+    /// finish enrichment.
     /// </summary>
     internal static class PoiPostEnrichmentDedup
     {
-        private const double ProximityThresholdMeters = 100;
-
         /// <summary>
         /// Returns true if <paramref name="justEnriched"/> was merged into an
         /// older canonical row and removed from the database.
@@ -53,33 +53,18 @@ namespace LucidCartographer.Services.Enrichment
         private static async Task<Poi?> FindCanonicalAsync(
             AppDbContext db, Poi justEnriched, CancellationToken ct)
         {
-            // Tier 1: exact normalized Google Maps URL. Rows reach this
-            // helper already-normalized because ImportPersister calls
-            // PoiMatcher.NormalizeUrl on insert.
-            if (!string.IsNullOrEmpty(justEnriched.GoogleMapsUrl))
-            {
-                var byUrl = await db.Pois
-                    .Where(p => p.Id < justEnriched.Id
-                             && p.IsEnriched
-                             && p.GoogleMapsUrl == justEnriched.GoogleMapsUrl)
-                    .OrderBy(p => p.Id)
-                    .FirstOrDefaultAsync(ct);
-                if (byUrl != null) return byUrl;
-            }
-
-            // Tier 2: exact name + real coords + proximity. Skipped when the
-            // just-enriched row lacks real coordinates (should not happen
-            // post-enrichment, but belt-and-suspenders for the enricher
-            // that legitimately returns null coords).
+            // PoiIdentity excludes (0,0) — nothing to find if the enricher
+            // didn't return real coords.
             if (justEnriched.Latitude == 0 && justEnriched.Longitude == 0)
                 return null;
 
+            // SQL-side pre-filter: same lowercased name, real coords, older
+            // Id, already enriched. PoiIdentity.AreSamePlace then decides
+            // in-memory using the full name-similarity + Haversine rule.
+            // The per-name candidate set is small in practice so in-memory
+            // fan-out is cheap.
             var nameLower = justEnriched.Name.ToLowerInvariant().Trim();
 
-            // Pull the by-name candidate set from SQLite with a cheap LOWER
-            // comparison, then apply the Haversine filter in memory — EF
-            // can't translate the math and the candidate set for a single
-            // name is tiny in practice.
             var candidates = await db.Pois
                 .Where(p => p.Id < justEnriched.Id
                          && p.IsEnriched
@@ -91,10 +76,7 @@ namespace LucidCartographer.Services.Enrichment
 
             foreach (var c in candidates)
             {
-                var distance = GeoUtils.HaversineDistance(
-                    c.Latitude, c.Longitude,
-                    justEnriched.Latitude, justEnriched.Longitude);
-                if (distance < ProximityThresholdMeters)
+                if (PoiIdentity.AreSamePlace(c, justEnriched))
                     return c;
             }
 

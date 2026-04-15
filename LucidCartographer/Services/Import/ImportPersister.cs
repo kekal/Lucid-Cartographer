@@ -10,11 +10,16 @@ namespace LucidCartographer.Services.Import
     /// deduplicates parsed POIs against existing rows, inserts the new ones,
     /// attaches images and collection links, and saves. Instance state is
     /// scoped to one import — construct, <see cref="RunAsync"/>, discard.
+    ///
+    /// Dedup uses <see cref="PoiIdentity.AreSamePlace(Poi?, Poi?)"/> — the
+    /// single source of truth for "same real place". Name similarity plus
+    /// geographic proximity, no URL tier: distinct franchise branches that
+    /// share a corporate URL stay distinct; rows pending enrichment at
+    /// (0,0) are never collapsed by coincidence.
     /// </summary>
     internal sealed class ImportPersister
     {
         private const string ImportedStatus = "imported";
-        private const double ProximityThresholdMeters = 100;
         private const string GoogleScrapeSourceType = "google_maps_scrape";
 
         private readonly AppDbContext _db;
@@ -29,8 +34,11 @@ namespace LucidCartographer.Services.Import
 
         // State built up during RunAsync.
         private PoiCollection _collection = null!;
-        private Dictionary<string, Poi> _existingByUrl = new();
-        private List<Poi> _existingByName = new();
+        // Candidate pool scanned by PoiIdentity.AreSamePlace for each
+        // incoming row. Seeded with existing DB rows that share a name,
+        // then augmented in-place as we add new rows so later items in
+        // the same batch dedup against items queued earlier.
+        private List<Poi> _candidatePool = new();
         private HashSet<int> _existingLinks = new();
 
         private readonly List<NewPoiEntry> _newPois = new();
@@ -93,31 +101,25 @@ namespace LucidCartographer.Services.Import
 
         private async Task LoadDedupLookupsAsync()
         {
-            _existingByUrl = await LoadExistingByUrlAsync();
-            _existingByName = await LoadExistingByNameAsync();
+            _candidatePool = await LoadCandidatePoolAsync();
             _existingLinks = await LoadExistingLinksAsync();
         }
 
-        private async Task<Dictionary<string, Poi>> LoadExistingByUrlAsync()
+        private async Task<List<Poi>> LoadCandidatePoolAsync()
         {
-            // IE-13: proper URL normalization via PoiMatcher, not naive lowercasing.
-            var importedUrls = _validParsed
-                .Where(p => !string.IsNullOrEmpty(p.GoogleMapsUrl))
-                .Select(p => PoiMatcher.NormalizeUrl(p.GoogleMapsUrl!))
-                .Distinct()
-                .ToHashSet();
-
-            if (importedUrls.Count == 0)
-                return new Dictionary<string, Poi>();
-
-            return await _db.Pois
-                .Where(p => p.GoogleMapsUrl != null && importedUrls.Contains(p.GoogleMapsUrl))
-                .ToDictionaryAsync(p => p.GoogleMapsUrl!, _ct);
-        }
-
-        private async Task<List<Poi>> LoadExistingByNameAsync()
-        {
-            // IE-18: invariant-culture lowercasing so dedup isn't locale-sensitive.
+            // Pull every existing row whose lowercased name matches any
+            // name being imported. PoiIdentity.AreSamePlace does the real
+            // matching work in memory — we only need the DB to narrow the
+            // candidate pool from "all POIs" to "POIs with a plausibly
+            // similar name", which SQLite can do cheaply on an indexed
+            // LOWER(Name) comparison.
+            //
+            // Note: this is an exact-lowercase pre-filter. Candidates that
+            // pass the PoiMatcher.NameSimilarity threshold but have
+            // different lowercased names (e.g., "Cafe Rio" vs "Café Rio"
+            // after Unicode normalisation) would be missed here. The
+            // existing behaviour already had this limitation; strengthening
+            // the pre-filter is a separate concern.
             var importedNames = _validParsed
                 .Select(p => p.Name.ToLowerInvariant().Trim())
                 .Distinct()
@@ -161,33 +163,25 @@ namespace LucidCartographer.Services.Import
 
         private Poi? FindExistingMatch(ImportedPoi imported)
         {
-            // Tier 1: Google Maps URL (normalized).
-            if (!string.IsNullOrEmpty(imported.GoogleMapsUrl))
+            // Delegate identity to the single PoiIdentity rule: name
+            // similarity + geographic proximity, real coords required.
+            // Construct a transient Poi shell for the incoming row so the
+            // rule can use the typed overload — no allocation outside the
+            // match path, and the shell is discarded immediately.
+            var shell = new Poi
             {
-                var normalizedUrl = PoiMatcher.NormalizeUrl(imported.GoogleMapsUrl);
-                if (_existingByUrl.TryGetValue(normalizedUrl, out var byUrl))
-                    return byUrl;
+                Name = imported.Name,
+                Latitude = imported.Latitude,
+                Longitude = imported.Longitude
+            };
+
+            foreach (var candidate in _candidatePool)
+            {
+                if (PoiIdentity.AreSamePlace(candidate, shell))
+                    return candidate;
             }
 
-            // Tier 2: exact name + geographic proximity.
-            //
-            // Guard: proximity matching is meaningless when either side has
-            // placeholder (0,0) coordinates. Google list scrapes emit cards
-            // at (0,0) until enrichment fills in real coords, so distinct
-            // playgrounds, rail-bike stops, viewpoints, etc. that share a
-            // common name (e.g. "Plac zabaw") would all collapse into one
-            // row because the (0,0)↔(0,0) Haversine distance is 0m < 100m.
-            // Wait for enrichment to land real coords before trusting
-            // proximity as a dedup signal.
-            if (imported.Latitude == 0 && imported.Longitude == 0)
-                return null;
-
-            var nameLower = imported.Name.ToLowerInvariant().Trim();
-            return _existingByName.FirstOrDefault(c =>
-                c.Name.ToLowerInvariant() == nameLower &&
-                !(c.Latitude == 0 && c.Longitude == 0) &&
-                GeoUtils.HaversineDistance(c.Latitude, c.Longitude, imported.Latitude, imported.Longitude)
-                    < ProximityThresholdMeters);
+            return null;
         }
 
         // ---- Phase 3a: dedup branch ----------------------------------------------
@@ -272,11 +266,11 @@ namespace LucidCartographer.Services.Import
             _db.Pois.Add(poi);
             _newPois.Add(new NewPoiEntry(poi, imported.ImageData, imported.ImageContentType));
 
-            // Update in-memory lookups so later items in this same batch can
-            // dedup against rows we just queued.
-            if (poi.GoogleMapsUrl != null && !_existingByUrl.ContainsKey(poi.GoogleMapsUrl))
-                _existingByUrl[poi.GoogleMapsUrl] = poi;
-            _existingByName.Add(poi);
+            // Extend the candidate pool so subsequent items in this same
+            // batch can dedup against rows we just queued. The row still
+            // has Id=0 until SaveChangesAsync — HandleDuplicateAsync has
+            // an explicit in-batch branch for that case.
+            _candidatePool.Add(poi);
 
             _added++;
         }

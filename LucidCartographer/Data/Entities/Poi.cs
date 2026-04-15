@@ -1,8 +1,9 @@
 using System.ComponentModel.DataAnnotations;
+using LucidCartographer.Services;
 
 namespace LucidCartographer.Data.Entities
 {
-    public class Poi
+    public class Poi : IEquatable<Poi>
     {
         public int Id { get; set; }
 
@@ -70,5 +71,29 @@ namespace LucidCartographer.Data.Entities
 
         public List<PoiCollectionItem> CollectionItems { get; set; } = new();
         public List<PoiTag> PoiTags { get; set; } = new();
+
+        // ---- IEquatable<Poi> ------------------------------------------------
+        //
+        // A Poi's identity is "the real place it represents", not its primary
+        // key. Two rows are equal when their name is similar enough AND they
+        // sit close enough on the globe. URL is deliberately NOT part of the
+        // rule — franchise branches can share a corporate URL and must stay
+        // distinct. See Services/PoiIdentity.cs for the single source of
+        // truth, used by ImportPersister, PoiPostEnrichmentDedup and
+        // PoiMatcher so "same place" means exactly one thing everywhere.
+        //
+        // GetHashCode is deliberately lossy (always returns 0). Fuzzy
+        // equality isn't hash-compatible — two rows at 99m distance are
+        // equal but hash-bucketing them together would collide all Pois
+        // in a HashSet. Do NOT store Poi instances in HashSet<Poi> /
+        // Dictionary<Poi,_>; use IEnumerable.Contains / FirstOrDefault
+        // (they fall through to Equals) or key by Id when you need a
+        // proper hash-based set.
+
+        public bool Equals(Poi? other) => PoiIdentity.AreSamePlace(this, other);
+
+        public override bool Equals(object? obj) => obj is Poi other && Equals(other);
+
+        public override int GetHashCode() => 0;
     }
 }
