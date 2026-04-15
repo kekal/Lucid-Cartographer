@@ -240,6 +240,20 @@ namespace LucidCartographer.Services.Enrichment
             {
                 await db.SaveChangesAsync(ct);
 
+                // Post-enrichment dedup against the enriched cohort.
+                // The just-enriched row now has real coords + (usually)
+                // a real Google Maps URL, so it becomes dedup-eligible.
+                // If an older enriched row already represents this place,
+                // fold collection links onto it and delete this row.
+                // "Smaller Id wins" so parallel workers can't race.
+                var merged = await PoiPostEnrichmentDedup.MergeIfDuplicateAsync(db, poi, ct);
+                if (merged)
+                {
+                    _logger.LogInformation(
+                        "Post-enrich dedup: Poi {Id} '{Name}' merged into an older canonical row",
+                        poi.Id, poi.Name);
+                }
+
                 // Per-POI tick: re-read the counter so the map page
                 // header updates as each worker finishes.
                 var newRemaining = await db.Pois.CountAsync(p => !p.IsEnriched, ct);

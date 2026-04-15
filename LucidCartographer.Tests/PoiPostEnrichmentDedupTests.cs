@@ -1,0 +1,271 @@
+using FluentAssertions;
+using LucidCartographer.Data;
+using LucidCartographer.Data.Entities;
+using LucidCartographer.Services.Enrichment;
+using Microsoft.EntityFrameworkCore;
+
+namespace LucidCartographer.Tests
+{
+    /// <summary>
+    /// Verifies the post-enrichment dedup helper fired by
+    /// <c>PoiEnrichmentBackgroundService</c> once a row finishes
+    /// enrichment. Exercises the helper directly against an in-memory
+    /// SQLite database so we don't need to spin up Playwright.
+    /// </summary>
+    public class PoiPostEnrichmentDedupTests
+    {
+        private static Poi NewEnriched(string name, double lat, double lon, string? url)
+            => new()
+            {
+                Name = name,
+                Latitude = lat,
+                Longitude = lon,
+                GoogleMapsUrl = url,
+                IsEnriched = true,
+                AddedDate = DateTime.UtcNow,
+                Status = "imported"
+            };
+
+        [Fact]
+        public async Task MergeIfDuplicate_UrlMatch_SingleCollection_FoldsDuplicateLinkOntoCanonical()
+        {
+            var factory = TestDbHelper.CreateFactory();
+            int collectionId, canonicalId, duplicateId;
+
+            await using (var seed = factory.CreateDbContext())
+            {
+                var col = new PoiCollection { Name = "C", Color = "#000", CreatedDate = DateTime.UtcNow };
+                seed.PoiCollections.Add(col);
+                var a = NewEnriched("Place", 52.0, 21.0, "https://maps.google.com/place/X");
+                var b = NewEnriched("Place", 52.0, 21.0, "https://maps.google.com/place/X");
+                seed.Pois.AddRange(a, b);
+                await seed.SaveChangesAsync();
+                seed.PoiCollectionItems.AddRange(
+                    new PoiCollectionItem { PoiCollectionId = col.Id, PoiId = a.Id },
+                    new PoiCollectionItem { PoiCollectionId = col.Id, PoiId = b.Id });
+                await seed.SaveChangesAsync();
+                collectionId = col.Id;
+                canonicalId = a.Id;
+                duplicateId = b.Id;
+            }
+
+            await using (var db = factory.CreateDbContext())
+            {
+                var duplicate = await db.Pois.FirstAsync(p => p.Id == duplicateId);
+                var merged = await PoiPostEnrichmentDedup.MergeIfDuplicateAsync(db, duplicate, CancellationToken.None);
+                merged.Should().BeTrue();
+            }
+
+            await using (var check = factory.CreateDbContext())
+            {
+                var pois = await check.Pois.ToListAsync();
+                pois.Should().HaveCount(1);
+                pois.Single().Id.Should().Be(canonicalId);
+
+                var links = await check.PoiCollectionItems
+                    .Where(ci => ci.PoiCollectionId == collectionId)
+                    .ToListAsync();
+                links.Should().HaveCount(1, "the duplicate link must be dropped so the managed-sources counter stays truthful");
+                links.Single().PoiId.Should().Be(canonicalId);
+            }
+        }
+
+        [Fact]
+        public async Task MergeIfDuplicate_UrlMatch_MultipleCollections_CanonicalPicksUpAllLinks()
+        {
+            var factory = TestDbHelper.CreateFactory();
+            int c1, c2, canonicalId, duplicateId;
+
+            await using (var seed = factory.CreateDbContext())
+            {
+                var col1 = new PoiCollection { Name = "Old", Color = "#000", CreatedDate = DateTime.UtcNow };
+                var col2 = new PoiCollection { Name = "New", Color = "#111", CreatedDate = DateTime.UtcNow };
+                seed.PoiCollections.AddRange(col1, col2);
+                var a = NewEnriched("Same Place", 50.0, 20.0, "https://maps.google.com/place/Y");
+                var b = NewEnriched("Same Place", 50.0, 20.0, "https://maps.google.com/place/Y");
+                seed.Pois.AddRange(a, b);
+                await seed.SaveChangesAsync();
+                seed.PoiCollectionItems.AddRange(
+                    new PoiCollectionItem { PoiCollectionId = col1.Id, PoiId = a.Id },
+                    new PoiCollectionItem { PoiCollectionId = col2.Id, PoiId = b.Id });
+                await seed.SaveChangesAsync();
+                c1 = col1.Id;
+                c2 = col2.Id;
+                canonicalId = a.Id;
+                duplicateId = b.Id;
+            }
+
+            await using (var db = factory.CreateDbContext())
+            {
+                var duplicate = await db.Pois.FirstAsync(p => p.Id == duplicateId);
+                (await PoiPostEnrichmentDedup.MergeIfDuplicateAsync(db, duplicate, CancellationToken.None))
+                    .Should().BeTrue();
+            }
+
+            await using (var check = factory.CreateDbContext())
+            {
+                (await check.Pois.CountAsync()).Should().Be(1);
+                (await check.PoiCollectionItems.CountAsync(ci => ci.PoiCollectionId == c1 && ci.PoiId == canonicalId)).Should().Be(1);
+                (await check.PoiCollectionItems.CountAsync(ci => ci.PoiCollectionId == c2 && ci.PoiId == canonicalId)).Should().Be(1,
+                    "the duplicate's link should be redirected onto the canonical row, not deleted");
+            }
+        }
+
+        [Fact]
+        public async Task MergeIfDuplicate_ProximityMatch_NoUrl_SameName_MergesWithin100m()
+        {
+            var factory = TestDbHelper.CreateFactory();
+            int canonicalId, duplicateId;
+
+            await using (var seed = factory.CreateDbContext())
+            {
+                // Two points ~1m apart, same name, no URL — this is the
+                // "enrichment returned coords but no URL" shape.
+                var a = NewEnriched("Bieszczadzkie Drezyny", 49.3000, 22.5000, null);
+                var b = NewEnriched("Bieszczadzkie Drezyny", 49.30001, 22.50001, null);
+                seed.Pois.AddRange(a, b);
+                await seed.SaveChangesAsync();
+                canonicalId = a.Id;
+                duplicateId = b.Id;
+            }
+
+            await using (var db = factory.CreateDbContext())
+            {
+                var duplicate = await db.Pois.FirstAsync(p => p.Id == duplicateId);
+                (await PoiPostEnrichmentDedup.MergeIfDuplicateAsync(db, duplicate, CancellationToken.None))
+                    .Should().BeTrue();
+            }
+
+            await using (var check = factory.CreateDbContext())
+            {
+                var remaining = await check.Pois.ToListAsync();
+                remaining.Should().HaveCount(1);
+                remaining.Single().Id.Should().Be(canonicalId);
+            }
+        }
+
+        [Fact]
+        public async Task MergeIfDuplicate_SameName_FarApart_IsNotMerged()
+        {
+            var factory = TestDbHelper.CreateFactory();
+            int duplicateId;
+
+            await using (var seed = factory.CreateDbContext())
+            {
+                // Two "Plac zabaw" (playground) entries in different Polish
+                // cities — distinct places that should NOT be collapsed.
+                var warsaw = NewEnriched("Plac zabaw", 52.2297, 21.0122, null);
+                var krakow = NewEnriched("Plac zabaw", 50.0647, 19.9450, null); // 250+ km away
+                seed.Pois.AddRange(warsaw, krakow);
+                await seed.SaveChangesAsync();
+                duplicateId = krakow.Id;
+            }
+
+            await using (var db = factory.CreateDbContext())
+            {
+                var kr = await db.Pois.FirstAsync(p => p.Id == duplicateId);
+                (await PoiPostEnrichmentDedup.MergeIfDuplicateAsync(db, kr, CancellationToken.None))
+                    .Should().BeFalse("distance >> 100m — these are different playgrounds");
+            }
+
+            await using (var check = factory.CreateDbContext())
+            {
+                (await check.Pois.CountAsync()).Should().Be(2);
+            }
+        }
+
+        [Fact]
+        public async Task MergeIfDuplicate_CalledOnSmallerIdRow_IsNoOp()
+        {
+            // Deterministic race guard: only the worker holding the larger
+            // Id acts. Calling the helper on the older row finds no
+            // smaller-Id canonical and returns false.
+            var factory = TestDbHelper.CreateFactory();
+            int canonicalId;
+
+            await using (var seed = factory.CreateDbContext())
+            {
+                var a = NewEnriched("X", 1.0, 1.0, "https://maps.google.com/place/Z");
+                var b = NewEnriched("X", 1.0, 1.0, "https://maps.google.com/place/Z");
+                seed.Pois.AddRange(a, b);
+                await seed.SaveChangesAsync();
+                canonicalId = a.Id;
+            }
+
+            await using (var db = factory.CreateDbContext())
+            {
+                var older = await db.Pois.FirstAsync(p => p.Id == canonicalId);
+                (await PoiPostEnrichmentDedup.MergeIfDuplicateAsync(db, older, CancellationToken.None))
+                    .Should().BeFalse();
+            }
+
+            await using (var check = factory.CreateDbContext())
+            {
+                (await check.Pois.CountAsync()).Should().Be(2,
+                    "helper must be a no-op when invoked on the canonical (smaller-Id) row");
+            }
+        }
+
+        [Fact]
+        public async Task MergeIfDuplicate_UnenrichedRow_IsNoOp()
+        {
+            var factory = TestDbHelper.CreateFactory();
+            int rowId;
+
+            await using (var seed = factory.CreateDbContext())
+            {
+                var a = NewEnriched("Y", 2.0, 2.0, "https://maps.google.com/place/A");
+                var pending = new Poi
+                {
+                    Name = "Y",
+                    Latitude = 0,
+                    Longitude = 0,
+                    IsEnriched = false,
+                    Status = "imported",
+                    AddedDate = DateTime.UtcNow
+                };
+                seed.Pois.AddRange(a, pending);
+                await seed.SaveChangesAsync();
+                rowId = pending.Id;
+            }
+
+            await using (var db = factory.CreateDbContext())
+            {
+                var pending = await db.Pois.FirstAsync(p => p.Id == rowId);
+                (await PoiPostEnrichmentDedup.MergeIfDuplicateAsync(db, pending, CancellationToken.None))
+                    .Should().BeFalse("unenriched rows are never touched — they'll be checked when they themselves finish enrichment");
+            }
+
+            await using (var check = factory.CreateDbContext())
+            {
+                (await check.Pois.CountAsync()).Should().Be(2);
+            }
+        }
+
+        [Fact]
+        public async Task MergeIfDuplicate_NoCollision_IsNoOp()
+        {
+            var factory = TestDbHelper.CreateFactory();
+            int rowId;
+
+            await using (var seed = factory.CreateDbContext())
+            {
+                seed.Pois.Add(NewEnriched("Alone", 3.0, 3.0, "https://maps.google.com/place/Solo"));
+                await seed.SaveChangesAsync();
+                rowId = seed.Pois.Single().Id;
+            }
+
+            await using (var db = factory.CreateDbContext())
+            {
+                var row = await db.Pois.FirstAsync(p => p.Id == rowId);
+                (await PoiPostEnrichmentDedup.MergeIfDuplicateAsync(db, row, CancellationToken.None))
+                    .Should().BeFalse();
+            }
+
+            await using (var check = factory.CreateDbContext())
+            {
+                (await check.Pois.CountAsync()).Should().Be(1);
+            }
+        }
+    }
+}
