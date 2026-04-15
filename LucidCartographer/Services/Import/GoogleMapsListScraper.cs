@@ -1,4 +1,6 @@
 using Microsoft.Playwright;
+using Polly;
+using Polly.Registry;
 
 namespace LucidCartographer.Services.Import
 {
@@ -6,9 +8,11 @@ namespace LucidCartographer.Services.Import
     {
         private const string DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-        // HIGH-07: Limit to one concurrent scrape to prevent multiple Chromium instances
-        // exhausting server memory. Additional requests will wait in the queue.
-        private static readonly SemaphoreSlim _scrapeSemaphore = new(1, 1);
+        // HIGH-07: Concurrency, retry, and timeout are now enforced by the
+        // "scraper" Polly resilience pipeline registered in Program.cs
+        // (ConcurrencyLimiter(permits=1) + Retry + Timeout). This replaces
+        // the previous static SemaphoreSlim + manual timeout plumbing.
+        private readonly ResiliencePipeline _pipeline;
 
         private static readonly string[] AllowedUrlPrefixes =
         [
@@ -24,9 +28,12 @@ namespace LucidCartographer.Services.Import
 
         private readonly ILogger<GoogleMapsListScraper> _logger;
 
-        public GoogleMapsListScraper(ILogger<GoogleMapsListScraper> logger)
+        public GoogleMapsListScraper(
+            ILogger<GoogleMapsListScraper> logger,
+            ResiliencePipelineProvider<string> pipelineProvider)
         {
             _logger = logger;
+            _pipeline = pipelineProvider.GetPipeline("scraper");
         }
 
         public async Task<ScrapeResult> ScrapeAsync(string listUrl, Action<int>? onProgress = null, CancellationToken cancellationToken = default)
@@ -39,22 +46,22 @@ namespace LucidCartographer.Services.Import
             if (!AllowedUrlPrefixes.Any(prefix => trimmedUrl.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
                 throw new ArgumentException("URL must be a Google Maps URL (https://www.google.com/maps/... or https://maps.app.goo.gl/...).", nameof(listUrl));
 
-            // HIGH-07: Acquire semaphore to ensure only one scrape runs at a time
-            // ARCH-HIGH-04: Add timeout to semaphore wait to prevent unbounded queuing
-            if (!await _scrapeSemaphore.WaitAsync(TimeSpan.FromMinutes(10), cancellationToken))
-            {
-                throw new TimeoutException("Timed out waiting for scraper availability. Another scrape may be in progress.");
-            }
+            // Polly "scraper" pipeline enforces: single-flight (permit=1),
+            // retry (2 attempts with jittered backoff), and a 10-minute
+            // per-attempt timeout. Upstream callers should catch
+            // Polly.RateLimiting.RateLimiterRejectedException if they want
+            // to surface a "scraper busy" message; previously this was
+            // TimeoutException("Timed out waiting for scraper availability…").
             try
             {
-                // ARCH-HIGH-08: Overall operation timeout of 10 minutes
-                using var operationCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                operationCts.CancelAfter(TimeSpan.FromMinutes(10));
-                return await ScrapeInternalAsync(trimmedUrl, onProgress, operationCts.Token);
+                return await _pipeline.ExecuteAsync(
+                    async ct => await ScrapeInternalAsync(trimmedUrl, onProgress, ct),
+                    cancellationToken);
             }
-            finally
+            catch (Polly.RateLimiting.RateLimiterRejectedException ex)
             {
-                _scrapeSemaphore.Release();
+                _logger.LogWarning(ex, "Scraper rate limiter rejected the request — another scrape is already running");
+                throw;
             }
         }
 
