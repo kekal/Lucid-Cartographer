@@ -313,6 +313,47 @@ namespace LucidCartographer.Tests
         }
 
         [Fact]
+        public async Task MergeIfDuplicate_NameWithPolishDiacritics_StillMergesViaBboxPreFilter()
+        {
+            // Regression: SQLite's built-in LOWER() is ASCII-only, so the
+            // previous name-based SQL pre-filter missed candidates whose
+            // names contained characters like Ż, Ś, Ł, Ą. Those same
+            // characters lowercase correctly via C#'s Unicode-aware
+            // ToLowerInvariant, producing "wieża" on the incoming side
+            // and "wieŻa" on the SQL side — mismatch, no merge. The fix
+            // is a coordinate-bbox pre-filter, so Unicode has nothing to
+            // do with candidate discovery any more.
+            var factory = TestDbHelper.CreateFactory();
+            int canonicalId, duplicateId;
+
+            await using (var seed = factory.CreateDbContext())
+            {
+                // Exact same name, both enriched, same coords — the case
+                // the original bug hit on re-import of a Polish list.
+                var a = NewEnriched("WIEŻA WIDOKOWA SKY WALK", 50.9, 15.3, null);
+                var b = NewEnriched("WIEŻA WIDOKOWA SKY WALK", 50.9, 15.3, null);
+                seed.Pois.AddRange(a, b);
+                await seed.SaveChangesAsync();
+                canonicalId = a.Id;
+                duplicateId = b.Id;
+            }
+
+            await using (var db = factory.CreateDbContext())
+            {
+                var duplicate = await db.Pois.FirstAsync(p => p.Id == duplicateId);
+                (await PoiPostEnrichmentDedup.MergeIfDuplicateAsync(db, duplicate, CancellationToken.None))
+                    .Should().BeTrue("the bbox pre-filter must find the canonical regardless of SQLite's ASCII-only LOWER()");
+            }
+
+            await using (var check = factory.CreateDbContext())
+            {
+                var remaining = await check.Pois.ToListAsync();
+                remaining.Should().HaveCount(1);
+                remaining.Single().Id.Should().Be(canonicalId);
+            }
+        }
+
+        [Fact]
         public async Task MergeIfDuplicate_BothHaveImages_DropsDuplicatesImage()
         {
             var factory = TestDbHelper.CreateFactory();

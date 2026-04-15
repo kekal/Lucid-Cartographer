@@ -58,19 +58,31 @@ namespace LucidCartographer.Services.Enrichment
             if (justEnriched.Latitude == 0 && justEnriched.Longitude == 0)
                 return null;
 
-            // SQL-side pre-filter: same lowercased name, real coords, older
-            // Id, already enriched. PoiIdentity.AreSamePlace then decides
-            // in-memory using the full name-similarity + Haversine rule.
-            // The per-name candidate set is small in practice so in-memory
-            // fan-out is cheap.
-            var nameLower = justEnriched.Name.ToLowerInvariant().Trim();
+            // SQL-side pre-filter: a coordinate bounding box around the
+            // just-enriched row. Using name-based filtering on SQLite was
+            // broken for non-ASCII text because SQLite's built-in LOWER()
+            // only lowercases ASCII — `WIEŻA WIDOKOWA` would stay
+            // `wieŻa widokowa` and never match `wieża widokowa` produced
+            // by C#'s Unicode-aware ToLowerInvariant. The bbox avoids the
+            // issue entirely and is itself indexable on lat/lon.
+            //
+            // The box is intentionally generous (≈222m at 50°N latitude,
+            // vs PoiIdentity's 100m threshold) so the in-memory
+            // AreSamePlace check still has the final say without missing
+            // candidates sitting right on the edge.
+            const double BoundingBoxDegrees = 0.002;
+            double latLo = justEnriched.Latitude - BoundingBoxDegrees;
+            double latHi = justEnriched.Latitude + BoundingBoxDegrees;
+            double lonLo = justEnriched.Longitude - BoundingBoxDegrees;
+            double lonHi = justEnriched.Longitude + BoundingBoxDegrees;
 
             var candidates = await db.Pois
                 .Where(p => p.Id < justEnriched.Id
                          && p.IsEnriched
-                         && p.Name.ToLower() == nameLower
-                         && p.Latitude != 0
-                         && p.Longitude != 0)
+                         && p.Latitude >= latLo
+                         && p.Latitude <= latHi
+                         && p.Longitude >= lonLo
+                         && p.Longitude <= lonHi)
                 .OrderBy(p => p.Id)
                 .ToListAsync(ct);
 
