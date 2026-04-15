@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Text;
 using System.Text.RegularExpressions;
 using LucidCartographer.Data.Entities;
@@ -299,49 +298,23 @@ namespace LucidCartographer.Services.Operations
         }
 
         /// <summary>
-        /// Computes Levenshtein edit distance using two-row optimization (OPS-C04).
-        /// Space: O(min(n,m)) instead of O(n*m). Uses ArrayPool to avoid GC pressure (OPS-R15).
+        /// Computes Levenshtein edit distance. Delegates to the Fastenshtein
+        /// library, which implements the same classic edit-distance algorithm
+        /// with matrix-row optimization and returns the identical integer
+        /// semantics as the previous hand-rolled implementation. The swap is
+        /// regression-pinned via PoiMatcherPinningTests.
         /// </summary>
         internal static int LevenshteinDistance(string s, string t)
         {
-            // Ensure s is the shorter string to minimize buffer size
+            // Preserve historical short-circuit semantics for empty strings
+            // and maintain the shorter-first ordering so behavior is identical
+            // regardless of argument order.
             if (s.Length > t.Length)
                 (s, t) = (t, s);
 
-            int sLen = s.Length;
-            int tLen = t.Length;
+            if (s.Length == 0) return t.Length;
 
-            if (sLen == 0) return tLen;
-
-            var pool = ArrayPool<int>.Shared;
-            var prev = pool.Rent(sLen + 1);
-            var curr = pool.Rent(sLen + 1);
-
-            try
-            {
-                for (int i = 0; i <= sLen; i++)
-                    prev[i] = i;
-
-                for (int j = 1; j <= tLen; j++)
-                {
-                    curr[0] = j;
-                    for (int i = 1; i <= sLen; i++)
-                    {
-                        int cost = s[i - 1] == t[j - 1] ? 0 : 1;
-                        curr[i] = Math.Min(
-                            Math.Min(curr[i - 1] + 1, prev[i] + 1),
-                            prev[i - 1] + cost);
-                    }
-                    (prev, curr) = (curr, prev);
-                }
-
-                return prev[sLen];
-            }
-            finally
-            {
-                pool.Return(prev);
-                pool.Return(curr);
-            }
+            return Fastenshtein.Levenshtein.Distance(s, t);
         }
 
         /// <summary>
