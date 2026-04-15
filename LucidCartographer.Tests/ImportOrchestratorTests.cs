@@ -8,6 +8,20 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace LucidCartographer.Tests
 {
+    /// <summary>
+    /// Spy subclass to track EnrichmentTrigger.Signal() calls for testing.
+    /// </summary>
+    internal class SpyEnrichmentTrigger : EnrichmentTrigger
+    {
+        public int SignalCount { get; private set; }
+
+        public new void Signal()
+        {
+            SignalCount++;
+            base.Signal();
+        }
+    }
+
     public class ImportOrchestratorTests
     {
         private readonly IFileImporter[] _importers = new IFileImporter[]
@@ -18,8 +32,8 @@ namespace LucidCartographer.Tests
             new CsvImporter(NullLogger<CsvImporter>.Instance)
         };
 
-        private ImportOrchestrator CreateOrchestrator(IDbContextFactory<AppDbContext> factory) =>
-            new(factory, _importers, new EnrichmentTrigger(), NullLogger<ImportOrchestrator>.Instance);
+        private ImportOrchestrator CreateOrchestrator(IDbContextFactory<AppDbContext> factory, EnrichmentTrigger? trigger = null) =>
+            new(factory, _importers, trigger ?? new EnrichmentTrigger(), NullLogger<ImportOrchestrator>.Instance);
 
         [Fact]
         public async Task ImportAsync_CreatesCollectionWithCorrectMetadata()
@@ -190,6 +204,34 @@ namespace LucidCartographer.Tests
             var orchestrator = CreateOrchestrator(factory);
 
             orchestrator.CanImport("test.xyz").Should().BeFalse();
+        }
+
+        [Fact]
+        public async Task ImportAsync_SignalsEnrichmentTriggerAfterSuccessfulImport()
+        {
+            var factory = TestDbHelper.CreateFactory();
+            var trigger = new SpyEnrichmentTrigger();
+            var orchestrator = CreateOrchestrator(factory, trigger);
+
+            using var stream = File.OpenRead(Path.Combine("TestData", "sample.gpx"));
+            var result = await orchestrator.ImportAsync(stream, "sample.gpx", "Test");
+
+            result.AddedCount.Should().BeGreaterThan(0);
+            trigger.SignalCount.Should().Be(1, "EnrichmentTrigger.Signal() should be called once after import");
+        }
+
+        [Fact]
+        public async Task ImportAsync_DoesNotSignalEnrichmentTriggerWhenNoPoisAdded()
+        {
+            var factory = TestDbHelper.CreateFactory();
+            var trigger = new SpyEnrichmentTrigger();
+            var orchestrator = CreateOrchestrator(factory, trigger);
+
+            using var stream = File.OpenRead(Path.Combine("TestData", "empty.gpx"));
+            var result = await orchestrator.ImportAsync(stream, "empty.gpx", "Empty");
+
+            result.AddedCount.Should().Be(0);
+            trigger.SignalCount.Should().Be(0, "EnrichmentTrigger.Signal() should not be called when no POIs are added");
         }
     }
 }

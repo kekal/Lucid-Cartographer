@@ -22,8 +22,8 @@ namespace LucidCartographer.Tests.Integration
             var filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestData", fileName);
             await Page.Locator("input[type='file']").SetInputFilesAsync(filePath);
 
-            // Wait for import to complete
-            await Page.WaitForSelectorAsync("span.font-medium:has-text('Import complete')", new() { Timeout = 15000 });
+            // Wait for import to complete. Coravel default ConsummationDelay is 30s, so use >=35s timeout.
+            await Page.WaitForSelectorAsync("span.font-medium:has-text('Import complete')", new() { Timeout = 40000 });
         }
 
         [Fact]
@@ -115,8 +115,8 @@ namespace LucidCartographer.Tests.Integration
             var filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestData", "corrupt.gpx");
             await Page.Locator("input[type='file']").SetInputFilesAsync(filePath);
 
-            // Wait for error message to appear — a corrupt file should show "Import failed"
-            await Page.WaitForSelectorAsync("span.font-medium:has-text('Import failed')", new() { Timeout = 10000 });
+            // Wait for error message to appear. Use >=35s timeout for Coravel delay.
+            await Page.WaitForSelectorAsync("span.font-medium:has-text('Import failed')", new() { Timeout = 40000 });
 
             Assert.True(await Page.Locator("span.font-medium:has-text('Import failed')").IsVisibleAsync(),
                 "Error message should be displayed for corrupt file");
