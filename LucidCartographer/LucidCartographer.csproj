@@ -10,6 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Coravel" Version="6.0.2" />
     <PackageReference Include="CsvHelper" Version="33.0.1" />
     <PackageReference Include="Fastenshtein" Version="1.0.10" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.12">
@@ -58,14 +59,9 @@
     <Exec Command="chmod +x &quot;$(TailwindBinaryPath)&quot;" Condition="!$([MSBuild]::IsOSPlatform('Windows'))" />
   </Target>
 
-  <Target Name="CompileTailwindCss"
-          BeforeTargets="BeforeBuild"
-          DependsOnTargets="EnsureTailwindBinary"
-          Inputs="$(TailwindInput);tailwind.config.js;@(Content);@(None)"
-          Outputs="$(TailwindOutput)">
-    <Message Importance="high" Text="Compiling Tailwind CSS: $(TailwindInput) -> $(TailwindOutput)" />
-    <Exec Command="&quot;$(TailwindBinaryPath)&quot; -i &quot;$(TailwindInput)&quot; -o &quot;$(TailwindOutput)&quot; --minify"
-          WorkingDirectory="$(MSBuildProjectDirectory)" />
+  <Target Name="CompileTailwindCss" BeforeTargets="BeforeBuild" DependsOnTargets="EnsureTailwindBinary" Inputs="$(TailwindInput);tailwind.config.js;@(Content);@(None)" Outputs="$(TailwindOutput)">
+    <Message Importance="high" Text="Compiling Tailwind CSS: $(TailwindInput) -&gt; $(TailwindOutput)" />
+    <Exec Command="&quot;$(TailwindBinaryPath)&quot; -i &quot;$(TailwindInput)&quot; -o &quot;$(TailwindOutput)&quot; --minify" WorkingDirectory="$(MSBuildProjectDirectory)" />
   </Target>
 
 </Project>
