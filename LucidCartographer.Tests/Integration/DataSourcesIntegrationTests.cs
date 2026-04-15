@@ -52,8 +52,8 @@ namespace LucidCartographer.Tests.Integration
             var filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestData", "sample.gpx");
             await Page.Locator("input[type='file']").SetInputFilesAsync(filePath);
 
-            // Wait for import to complete (35s timeout accounts for Coravel's ~30s ConsummationDelay)
-            await Page.WaitForSelectorAsync("span.font-medium:has-text('Import complete')", new() { Timeout = 35000 });
+            // Wait for import to complete
+            await Page.WaitForSelectorAsync("span.font-medium:has-text('Import complete')", new() { Timeout = 15000 });
 
             // Verify "3" new POIs added
             var resultText = await Page.Locator("span:has-text('Import complete')").Locator("..").Locator("..").InnerTextAsync();
@@ -74,8 +74,7 @@ namespace LucidCartographer.Tests.Integration
 
             var filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestData", "sample.gpx");
             await Page.Locator("input[type='file']").SetInputFilesAsync(filePath);
-            // Wait for import to complete (35s timeout accounts for Coravel's ~30s ConsummationDelay)
-            await Page.WaitForSelectorAsync("span.font-medium:has-text('Import complete')", new() { Timeout = 35000 });
+            await Page.WaitForSelectorAsync("span.font-medium:has-text('Import complete')", new() { Timeout = 15000 });
 
             // Wait for the managed sources table to show the collection
             await Page.WaitForSelectorAsync("td span.font-medium:has-text('My GPX Places')", new() { Timeout = 5000 });
@@ -100,8 +99,7 @@ namespace LucidCartographer.Tests.Integration
             await Page.Locator("input[placeholder*='Poland']").PressAsync("Tab");
             var gpxPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestData", "sample.gpx");
             await Page.Locator("input[type='file']").SetInputFilesAsync(gpxPath);
-            // Wait for import to complete (35s timeout accounts for Coravel's ~30s ConsummationDelay)
-            await Page.WaitForSelectorAsync("span.font-medium:has-text('Import complete')", new() { Timeout = 35000 });
+            await Page.WaitForSelectorAsync("span.font-medium:has-text('Import complete')", new() { Timeout = 15000 });
 
             // Import second file (KML) — reopen the card
             await Page.Locator("h3:has-text('KML/GPX Upload')").ClickAsync();
@@ -110,8 +108,7 @@ namespace LucidCartographer.Tests.Integration
             await Page.Locator("input[placeholder*='Poland']").PressAsync("Tab");
             var kmlPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestData", "sample.kml");
             await Page.Locator("input[type='file']").SetInputFilesAsync(kmlPath);
-            // Wait for import to complete (35s timeout accounts for Coravel's ~30s ConsummationDelay)
-            await Page.WaitForSelectorAsync("span.font-medium:has-text('Import complete')", new() { Timeout = 35000 });
+            await Page.WaitForSelectorAsync("span.font-medium:has-text('Import complete')", new() { Timeout = 15000 });
 
             // Wait for the managed sources table to update
             await Page.WaitForSelectorAsync("td span.font-medium:has-text('KML Places')", new() { Timeout = 5000 });
@@ -190,8 +187,7 @@ namespace LucidCartographer.Tests.Integration
 
             var filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestData", "sample.gpx");
             await Page.Locator("input[type='file']").SetInputFilesAsync(filePath);
-            // Wait for import to complete (35s timeout accounts for Coravel's ~30s ConsummationDelay)
-            await Page.WaitForSelectorAsync("span.font-medium:has-text('Import complete')", new() { Timeout = 35000 });
+            await Page.WaitForSelectorAsync("span.font-medium:has-text('Import complete')", new() { Timeout = 15000 });
 
             // The collection should be named "sample" (from filename without extension)
             Assert.True(await Page.Locator("text=sample").First.IsVisibleAsync(),

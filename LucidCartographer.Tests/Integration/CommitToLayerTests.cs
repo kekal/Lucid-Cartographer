@@ -220,8 +220,7 @@ namespace LucidCartographer.Tests.Integration
             Assert.True(collectionVisible, "Committed collection should be visible in the Map sidebar");
 
             // Verify at least one POI from the result is rendered on the map (Leaflet marker or icon)
-            // The Leaflet map uses data-cy or similar markers; we look for the collection's POI indicators
-            var mapMarkers = await Page.Locator("[role='button'][title*='']").CountAsync();
+            var mapMarkers = await Page.Locator(".leaflet-marker-icon").CountAsync();
             Assert.True(mapMarkers > 0, "Map should display POI markers for the committed result");
         }
     }

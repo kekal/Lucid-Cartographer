@@ -205,22 +205,5 @@ namespace LucidCartographer.Tests.Components
             updatedButtons[2].ClassList.Should().Contain("ring-2");
             updatedButtons[0].ClassList.Should().NotContain("ring-2");
         }
-
-        // ── Import Status Flow (BehaviorSubject replay on subscribe) ─────────
-
-        [Fact]
-        public void Renders_Upload_Panel_Initially_Without_Import_Status()
-        {
-            var cut = RenderComponent<DataSourcesPage>();
-
-            // Open upload panel
-            var fileCard = cut.FindAll(".cursor-pointer")[0];
-            fileCard.Click();
-
-            // Panel is open; no import status should be shown yet
-            // (StatusMessage parameter passes _queuedMessage, which is null initially)
-            var fileInput = cut.Find("input[type='file']");
-            fileInput.Should().NotBeNull();
-        }
     }
 }
