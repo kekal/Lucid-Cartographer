@@ -42,7 +42,7 @@ namespace LucidCartographer.Services.Enrichment
                 return false;
 
             await RewriteCollectionLinksAsync(db, justEnriched, canonical, ct);
-            await DropDuplicateImageAsync(db, justEnriched, ct);
+            await ReassignOrDropDuplicateImageAsync(db, justEnriched, canonical, ct);
             db.Pois.Remove(justEnriched);
             await db.SaveChangesAsync(ct);
             return true;
@@ -119,17 +119,34 @@ namespace LucidCartographer.Services.Enrichment
             }
         }
 
-        private static async Task DropDuplicateImageAsync(
-            AppDbContext db, Poi duplicate, CancellationToken ct)
+        private static async Task ReassignOrDropDuplicateImageAsync(
+            AppDbContext db, Poi duplicate, Poi canonical, CancellationToken ct)
         {
-            // PoiImage.PoiId is the primary key, so we can't reassign it —
-            // we'd need remove+add. For now, unconditionally drop the
-            // duplicate's image; the canonical keeps whatever it already
-            // has (which will itself have been enriched before this
-            // merge runs, so it's almost certainly populated).
-            var image = await db.PoiImages.FindAsync(new object?[] { duplicate.Id }, ct);
-            if (image != null)
-                db.PoiImages.Remove(image);
+            var duplicateImage = await db.PoiImages.FindAsync(new object?[] { duplicate.Id }, ct);
+            if (duplicateImage == null)
+                return;
+
+            var canonicalImage = await db.PoiImages.FindAsync(new object?[] { canonical.Id }, ct);
+            if (canonicalImage != null)
+            {
+                // Canonical already has an image — drop the duplicate's.
+                db.PoiImages.Remove(duplicateImage);
+                return;
+            }
+
+            // PoiImage.PoiId is the primary key, so we can't UPDATE it in
+            // place. Snapshot the bytes, remove the old row, add a new one
+            // under the canonical's Id. Both operations land in the same
+            // SaveChanges so there is no observable "no image" window.
+            var bytes = duplicateImage.Data;
+            var contentType = duplicateImage.ContentType;
+            db.PoiImages.Remove(duplicateImage);
+            db.PoiImages.Add(new PoiImage
+            {
+                PoiId = canonical.Id,
+                Data = bytes,
+                ContentType = contentType
+            });
         }
     }
 }

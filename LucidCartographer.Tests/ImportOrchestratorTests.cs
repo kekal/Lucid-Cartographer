@@ -230,6 +230,53 @@ namespace LucidCartographer.Tests
         }
 
         [Fact]
+        public async Task ImportFromScrapedAsync_DiacriticVariant_DocumentsCandidatePoolExactMatchLimitation()
+        {
+            // KNOWN LIMITATION: ImportPersister.LoadCandidatePoolAsync uses
+            // `Name.ToLower() == nameLower` as its SQL pre-filter, which is
+            // byte-exact. PoiMatcher.NameSimilarity would return 1.0 after
+            // NFC normalisation on "Café Rio" vs "Cafe Rio" — but the
+            // existing row is never pulled into the candidate pool, so the
+            // in-memory PoiIdentity.AreSamePlace check never runs, and the
+            // incoming row lands as a fresh Poi. If the pre-filter is
+            // widened to use NFC-normalised lowercase (or full-text search),
+            // this test will start to fail and should flip to assert the
+            // correct dedup behaviour.
+            var factory = TestDbHelper.CreateFactory();
+
+            // Seed an existing enriched row with an ASCII name at real coords.
+            await using (var seed = factory.CreateDbContext())
+            {
+                seed.Pois.Add(new Poi
+                {
+                    Name = "Cafe Rio",
+                    Latitude = 50.0647,
+                    Longitude = 19.9450,
+                    IsEnriched = true,
+                    Status = "imported",
+                    AddedDate = DateTime.UtcNow
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            var orchestrator = CreateOrchestrator(factory);
+            var scraped = new List<ImportedPoi>
+            {
+                new("Café Rio", 50.0647, 19.9450) // diacritic, same coords
+            };
+
+            var result = await orchestrator.ImportFromScrapedAsync(scraped, "Test");
+
+            result.AddedCount.Should().Be(1,
+                "documents the current pre-filter limitation: diacritic-variant names don't hit the candidate pool");
+            result.SkippedCount.Should().Be(0);
+
+            await using var check = factory.CreateDbContext();
+            (await check.Pois.CountAsync()).Should().Be(2,
+                "both rows exist until the pre-filter is widened to normalise diacritics");
+        }
+
+        [Fact]
         public async Task ImportFromScrapedAsync_DistinctPoisSharingANameAtPlaceholderCoordsAreNotDeduped()
         {
             // Regression: a Google Maps list scrape emits cards without

@@ -267,5 +267,88 @@ namespace LucidCartographer.Tests
                 (await check.Pois.CountAsync()).Should().Be(1);
             }
         }
+
+        [Fact]
+        public async Task MergeIfDuplicate_CanonicalHasNoImage_ReassignsDuplicatesImage()
+        {
+            var factory = TestDbHelper.CreateFactory();
+            int canonicalId, duplicateId;
+            var imageBytes = new byte[] { 0x89, 0x50, 0x4E, 0x47 }; // PNG header-ish
+
+            await using (var seed = factory.CreateDbContext())
+            {
+                var a = NewEnriched("Gallery", 51.5, -0.1, "https://maps.google.com/place/gal");
+                var b = NewEnriched("Gallery", 51.5, -0.1, "https://maps.google.com/place/gal");
+                seed.Pois.AddRange(a, b);
+                await seed.SaveChangesAsync();
+                canonicalId = a.Id;
+                duplicateId = b.Id;
+
+                // Only the duplicate (newer, larger Id) carries an image.
+                seed.PoiImages.Add(new PoiImage
+                {
+                    PoiId = duplicateId,
+                    Data = imageBytes,
+                    ContentType = "image/png"
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            await using (var db = factory.CreateDbContext())
+            {
+                var duplicate = await db.Pois.FirstAsync(p => p.Id == duplicateId);
+                (await PoiPostEnrichmentDedup.MergeIfDuplicateAsync(db, duplicate, CancellationToken.None))
+                    .Should().BeTrue();
+            }
+
+            await using (var check = factory.CreateDbContext())
+            {
+                // Image survived the merge by being reassigned to the canonical row.
+                var images = await check.PoiImages.ToListAsync();
+                images.Should().HaveCount(1);
+                images.Single().PoiId.Should().Be(canonicalId);
+                images.Single().Data.Should().Equal(imageBytes);
+                images.Single().ContentType.Should().Be("image/png");
+            }
+        }
+
+        [Fact]
+        public async Task MergeIfDuplicate_BothHaveImages_DropsDuplicatesImage()
+        {
+            var factory = TestDbHelper.CreateFactory();
+            int canonicalId, duplicateId;
+
+            await using (var seed = factory.CreateDbContext())
+            {
+                var a = NewEnriched("Museum", 48.86, 2.35, "https://maps.google.com/place/mus");
+                var b = NewEnriched("Museum", 48.86, 2.35, "https://maps.google.com/place/mus");
+                seed.Pois.AddRange(a, b);
+                await seed.SaveChangesAsync();
+                canonicalId = a.Id;
+                duplicateId = b.Id;
+
+                seed.PoiImages.AddRange(
+                    new PoiImage { PoiId = canonicalId, Data = new byte[] { 0x01 }, ContentType = "image/jpeg" },
+                    new PoiImage { PoiId = duplicateId, Data = new byte[] { 0x02 }, ContentType = "image/png" });
+                await seed.SaveChangesAsync();
+            }
+
+            await using (var db = factory.CreateDbContext())
+            {
+                var duplicate = await db.Pois.FirstAsync(p => p.Id == duplicateId);
+                (await PoiPostEnrichmentDedup.MergeIfDuplicateAsync(db, duplicate, CancellationToken.None))
+                    .Should().BeTrue();
+            }
+
+            await using (var check = factory.CreateDbContext())
+            {
+                // Canonical keeps its own image; the duplicate's image is dropped.
+                var images = await check.PoiImages.ToListAsync();
+                images.Should().HaveCount(1);
+                images.Single().PoiId.Should().Be(canonicalId);
+                images.Single().Data.Should().Equal(new byte[] { 0x01 });
+                images.Single().ContentType.Should().Be("image/jpeg");
+            }
+        }
     }
 }

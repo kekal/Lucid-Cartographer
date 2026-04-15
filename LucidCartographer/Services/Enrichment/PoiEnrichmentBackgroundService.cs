@@ -1,6 +1,7 @@
 using LucidCartographer.Data;
 using LucidCartographer.Services.Import;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Microsoft.Playwright;
 using Polly;
 using Polly.Registry;
@@ -10,7 +11,7 @@ namespace LucidCartographer.Services.Enrichment
     /// <summary>
     /// Polls the Poi table for rows with IsEnriched=false and fills in
     /// address / website / phone by opening each place URL in a headless
-    /// Playwright tab. Enrichment runs <see cref="EnrichmentConcurrency"/>
+    /// Playwright tab. Enrichment runs <see cref="EnrichmentOptions.Concurrency"/>
     /// POIs in parallel via <see cref="Parallel.ForEachAsync{T}"/>; all
     /// workers share a single <see cref="IBrowserContext"/> so cookies /
     /// consent state are reused across tabs and iterations. Each worker
@@ -25,9 +26,6 @@ namespace LucidCartographer.Services.Enrichment
     /// </summary>
     public class PoiEnrichmentBackgroundService : BackgroundService
     {
-        private static readonly TimeSpan IdlePollInterval = TimeSpan.FromSeconds(30);
-        private const int EnrichmentConcurrency = 4;
-        private const int BatchSize = 16;
         private const string UserAgent =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -37,12 +35,15 @@ namespace LucidCartographer.Services.Enrichment
         private readonly EnrichmentTrigger _trigger;
         private readonly ILogger<PoiEnrichmentBackgroundService> _logger;
         private readonly ResiliencePipeline _pipeline;
+        private readonly EnrichmentOptions _options;
+        private readonly TimeSpan _idlePollInterval;
 
         public PoiEnrichmentBackgroundService(
             IDbContextFactory<AppDbContext> factory,
             EnrichmentProgressService progress,
             EnrichmentTrigger trigger,
             ResiliencePipelineProvider<string> pipelineProvider,
+            IOptions<EnrichmentOptions> options,
             ILogger<PoiEnrichmentBackgroundService> logger)
         {
             _factory = factory;
@@ -50,6 +51,8 @@ namespace LucidCartographer.Services.Enrichment
             _trigger = trigger;
             _logger = logger;
             _pipeline = pipelineProvider.GetPipeline("enrichment");
+            _options = options.Value;
+            _idlePollInterval = TimeSpan.FromSeconds(Math.Max(1, _options.IdlePollSeconds));
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -95,7 +98,7 @@ namespace LucidCartographer.Services.Enrichment
                         // are waiting. This keeps the worst-case latency at
                         // IdlePollInterval for things we can't observe (e.g.
                         // manual DB edits) while reacting instantly to imports.
-                        try { await _trigger.WaitAsync(IdlePollInterval, stoppingToken); }
+                        try { await _trigger.WaitAsync(_idlePollInterval, stoppingToken); }
                         catch (OperationCanceledException) { break; }
                     }
                 }
@@ -103,7 +106,7 @@ namespace LucidCartographer.Services.Enrichment
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Enrichment batch failed; sleeping before retry");
-                    try { await Task.Delay(IdlePollInterval, stoppingToken); }
+                    try { await Task.Delay(_idlePollInterval, stoppingToken); }
                     catch (OperationCanceledException) { break; }
                 }
             }
@@ -127,7 +130,7 @@ namespace LucidCartographer.Services.Enrichment
             int processed = 0;
 
             // Pull a batch of pending IDs, fan them out across
-            // `EnrichmentConcurrency` parallel Playwright tabs (all sharing
+            // `_options.Concurrency` parallel Playwright tabs (all sharing
             // the same BrowserContext), then loop until the queue drains.
             // Each worker owns its own DbContext because EF Core contexts
             // are not thread-safe.
@@ -139,7 +142,7 @@ namespace LucidCartographer.Services.Enrichment
                     batchIds = await loadDb.Pois
                         .Where(p => !p.IsEnriched)
                         .OrderBy(p => p.Id)
-                        .Take(BatchSize)
+                        .Take(_options.BatchSize)
                         .Select(p => p.Id)
                         .ToListAsync(ct);
                 }
@@ -150,7 +153,7 @@ namespace LucidCartographer.Services.Enrichment
                     batchIds,
                     new ParallelOptions
                     {
-                        MaxDegreeOfParallelism = EnrichmentConcurrency,
+                        MaxDegreeOfParallelism = Math.Max(1, _options.Concurrency),
                         CancellationToken = ct
                     },
                     async (poiId, innerCt) =>

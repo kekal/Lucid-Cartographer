@@ -28,35 +28,37 @@ namespace LucidCartographer.Tests
         };
 
         /// <summary>
-        /// Representative 10-POI fixture exercising:
+        /// Representative POI fixture pinning the PoiIdentity rule
+        /// (name similarity + geographic proximity, no URL tier):
         /// - Exact name + coord duplicates
-        /// - Near-duplicates within tolerance with typos (Levenshtein path)
+        /// - Near-duplicates within tolerance with typos (Levenshtein)
         /// - Substring-match name pairs (length-ratio guard)
-        /// - URL-matched pair at different coords
-        /// - URL-mismatched pair at same coords (must NOT match)
-        /// - POIs far apart that must not merge
+        /// - Different-name pair at same coords (must NOT match)
+        /// - Same-name pair far apart (must NOT match)
         /// </summary>
         private static List<Poi> BuildFixture() => new()
         {
-            // Group A: same CID URL, different coords -> URL tier match
-            P(1, "Rynek Glowny", 50.0619, 19.9370, "https://maps.google.com/?cid=12345"),
-            P(2, "Main Square",  50.0625, 19.9375, "https://maps.google.com/?cid=12345"),
-
-            // Group B: no URLs, near-duplicate names within 50m, Levenshtein path
+            // Group A: no URLs, near-duplicate names within 50m, Levenshtein path.
             P(3, "Cafe Camelot",     50.0647, 19.9450),
             P(4, "Cafe Camellot",    50.0647, 19.9451), // typo, 1 edit
             P(5, "Cafe Camelot Bar", 50.0648, 19.9449), // substring-match
 
-            // Isolated: same coord, different URLs -> must NOT match (Tier 1 rejection)
-            P(6, "Place X", 52.2297, 21.0122, "https://maps.google.com/?cid=111"),
-            P(7, "Place Y", 52.2297, 21.0122, "https://maps.google.com/?cid=222"),
+            // Isolated: same coord but clearly different names — names are
+            // the identity, so these must NOT collapse regardless of URL.
+            P(6, "Cafe Alpha",   52.2297, 21.0122, "https://maps.google.com/?cid=111"),
+            P(7, "Library Beta", 52.2297, 21.0122, "https://maps.google.com/?cid=222"),
 
-            // Isolated: far from everything else
+            // Isolated: far from everything else.
             P(8, "Eiffel Tower", 48.8584, 2.2945),
 
-            // Group C: no URLs, exact same name + coord
+            // Group B: no URLs, exact same name + coord.
             P(9,  "Wawel Castle", 50.0544, 19.9355),
             P(10, "Wawel Castle", 50.0544, 19.9355),
+
+            // Same name far apart — must NOT match (independent parks in
+            // different cities sharing "Plac zabaw" was the 230→226 bug).
+            P(11, "Plac zabaw", 52.2297, 21.0122),
+            P(12, "Plac zabaw", 50.0647, 19.9450), // ~250 km away
         };
 
         [Fact]
@@ -66,37 +68,44 @@ namespace LucidCartographer.Tests
 
             var groups = _matcher.FindDuplicateGroups(pois);
 
-            // Project to sorted id-sets for stable comparison
+            // Project to sorted id-sets for stable comparison.
             var projected = groups
                 .Select(g => g.Select(p => p.Id).OrderBy(i => i).ToArray())
                 .OrderBy(a => a[0])
                 .ToArray();
 
-            projected.Should().HaveCount(3);
-            projected[0].Should().Equal(new[] { 1, 2 });       // URL tier
-            projected[1].Should().Equal(new[] { 3, 4, 5 });    // name-sim tier (transitive)
-            projected[2].Should().Equal(new[] { 9, 10 });      // exact duplicate
+            projected.Should().HaveCount(2);
+            projected[0].Should().Equal(new[] { 3, 4, 5 });    // name similarity transitive
+            projected[1].Should().Equal(new[] { 9, 10 });      // exact duplicate
 
-            // POIs 6 and 7 must NOT be grouped (differing URLs at same coords)
+            // Different names at same coords must not group.
             projected.SelectMany(x => x).Should().NotContain(6);
             projected.SelectMany(x => x).Should().NotContain(7);
+            // Isolated eiffel tower never merges.
             projected.SelectMany(x => x).Should().NotContain(8);
+            // Same name in different cities must stay distinct.
+            projected.SelectMany(x => x).Should().NotContain(11);
+            projected.SelectMany(x => x).Should().NotContain(12);
         }
 
         [Fact]
-        public void IsMatch_UrlTierMismatch_AtSameCoord_ReturnsFalse()
+        public void IsMatch_DifferentNames_AtSameCoord_ReturnsFalse()
         {
+            // At identical coords, the name still has to be similar enough.
+            // Two distinct businesses sharing an address don't collapse.
             var pois = BuildFixture();
-            _matcher.IsMatch(pois[5], pois[6]).Should().BeFalse();
+            _matcher.IsMatch(pois[3], pois[4]).Should().BeFalse(); // Cafe Alpha vs Library Beta
         }
 
         [Fact]
-        public void IsMatch_UrlTierMatch_AtFarCoord_ReturnsTrue()
+        public void IsMatch_SameName_BeyondTolerance_ReturnsFalse()
         {
-            // Same CID but we still care that URL tier wins
-            var a = P(1, "A", 50.0619, 19.9370, "https://maps.google.com/?cid=12345");
-            var b = P(2, "B", 50.0625, 19.9375, "https://maps.google.com/?cid=12345");
-            _matcher.IsMatch(a, b).Should().BeTrue();
+            // "Plac zabaw" in Warsaw vs Kraków — ~250 km apart. Names
+            // are identical, proximity fails. The whole reason the
+            // ImportPersister (0,0) guard exists.
+            var a = P(1, "Plac zabaw", 52.2297, 21.0122);
+            var b = P(2, "Plac zabaw", 50.0647, 19.9450);
+            _matcher.IsMatch(a, b).Should().BeFalse();
         }
 
         [Fact]

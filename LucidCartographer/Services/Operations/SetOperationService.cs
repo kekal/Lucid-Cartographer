@@ -48,22 +48,23 @@ namespace LucidCartographer.Services.Operations
         {
             var poisB = await GetCollectionPois(db, collectionBId, cancellationToken);
 
-            // Pre-build URL indexes for O(1) lookup (OPS-C02)
-            var urlIndexB = _matcher.BuildUrlIndex(poisB);
-            var urlIndexA = _matcher.BuildUrlIndex(poisA);
-
+            // Matching runs directly against the candidate lists via
+            // PoiIdentity.AreSamePlace (name + proximity). The old URL-index
+            // optimisation is gone because URL is no longer part of the
+            // identity rule — two franchise branches at different coords
+            // must stay distinct.
             return operation switch
             {
-                SetOperation.Subtract => ExecuteSubtract(poisA, poisB, urlIndexB, toleranceMeters),
-                SetOperation.Intersect => ExecuteIntersect(poisA, poisB, urlIndexB, toleranceMeters),
-                SetOperation.Union => ExecuteUnion(poisA, poisB, urlIndexA, toleranceMeters),
+                SetOperation.Subtract => ExecuteSubtract(poisA, poisB, toleranceMeters),
+                SetOperation.Intersect => ExecuteIntersect(poisA, poisB, toleranceMeters),
+                SetOperation.Union => ExecuteUnion(poisA, poisB, toleranceMeters),
                 _ => throw new ArgumentOutOfRangeException(nameof(operation))
             };
         }
 
-        private OperationResult ExecuteSubtract(List<Poi> poisA, List<Poi> poisB, Dictionary<string, Poi> urlIndexB, double toleranceMeters)
+        private OperationResult ExecuteSubtract(List<Poi> poisA, List<Poi> poisB, double toleranceMeters)
         {
-            var result = poisA.Where(a => _matcher.FindMatch(a, urlIndexB, poisB, toleranceMeters) == null).ToList();
+            var result = poisA.Where(a => _matcher.FindMatch(a, poisB, toleranceMeters) == null).ToList();
             return new OperationResult
             {
                 Pois = result,
@@ -72,15 +73,15 @@ namespace LucidCartographer.Services.Operations
         }
 
         /// <summary>
-        /// OPS-R06: Intersect now merges B-side metadata into A-side POIs.
+        /// OPS-R06: Intersect merges B-side metadata into A-side POIs.
         /// When A has a match in B, any fields that A is missing but B has are filled in.
         /// </summary>
-        private OperationResult ExecuteIntersect(List<Poi> poisA, List<Poi> poisB, Dictionary<string, Poi> urlIndexB, double toleranceMeters)
+        private OperationResult ExecuteIntersect(List<Poi> poisA, List<Poi> poisB, double toleranceMeters)
         {
             var result = new List<Poi>();
             foreach (var a in poisA)
             {
-                var matchB = _matcher.FindMatch(a, urlIndexB, poisB, toleranceMeters);
+                var matchB = _matcher.FindMatch(a, poisB, toleranceMeters);
                 if (matchB != null)
                 {
                     MergeBSideData(a, matchB);
@@ -123,20 +124,17 @@ namespace LucidCartographer.Services.Operations
         /// OPS-R05: Deduplicates within A first, then adds unique items from B.
         /// A true set union contains each unique element exactly once.
         /// </summary>
-        private OperationResult ExecuteUnion(List<Poi> poisA, List<Poi> poisB, Dictionary<string, Poi> urlIndexA, double toleranceMeters)
+        private OperationResult ExecuteUnion(List<Poi> poisA, List<Poi> poisB, double toleranceMeters)
         {
-            // Dedup within A first so the union result contains no internal duplicates
+            // Dedup within A first so the union result contains no internal duplicates.
             var dedupGroups = _matcher.FindDuplicateGroups(poisA, toleranceMeters);
             var dupIdsInA = dedupGroups.SelectMany(g => g.Skip(1).Select(p => p.Id)).ToHashSet();
             var dedupedA = poisA.Where(p => !dupIdsInA.Contains(p.Id)).ToList();
 
-            // Rebuild URL index for deduped A
-            var dedupedUrlIndexA = _matcher.BuildUrlIndex(dedupedA);
-
             var result = new List<Poi>(dedupedA);
             foreach (var b in poisB)
             {
-                if (_matcher.FindMatch(b, dedupedUrlIndexA, dedupedA, toleranceMeters) == null)
+                if (_matcher.FindMatch(b, dedupedA, toleranceMeters) == null)
                 {
                     result.Add(b);
                 }

@@ -3,8 +3,12 @@ using LucidCartographer.Data.Entities;
 namespace LucidCartographer.Services.Operations
 {
     /// <summary>
-    /// Defines matching operations for Points of Interest.
-    /// Implementations are stateless and safe for concurrent use.
+    /// Defines matching operations for Points of Interest. All matching
+    /// delegates to <see cref="PoiIdentity.AreSamePlace(Poi?, Poi?, double, double)"/>
+    /// — the single source of truth for "same real place" across import,
+    /// enrichment and set operations. Name similarity + geographic
+    /// proximity, no URL tier. Implementations are stateless and safe for
+    /// concurrent use.
     /// </summary>
     public interface IPoiMatcher
     {
@@ -15,57 +19,25 @@ namespace LucidCartographer.Services.Operations
         const double DefaultNameSimilarityThreshold = 0.6;
 
         /// <summary>
-        /// Determines if two POIs represent the same place.
-        /// Tier 1: Google Maps URL match (normalized).
-        /// Tier 2: Within spatial tolerance + name similarity (only when both POIs lack URLs or exactly one has a URL).
-        /// If both POIs have URLs that differ, returns false immediately.
+        /// Determines if two POIs represent the same real place — name
+        /// similarity above the threshold AND geographic distance below
+        /// the tolerance. Placeholder (0,0) coordinates always return
+        /// false (wait for enrichment before deciding identity).
         /// </summary>
-        /// <param name="a">First POI.</param>
-        /// <param name="b">Second POI.</param>
-        /// <param name="toleranceMeters">Maximum distance in meters for proximity matching.</param>
-        /// <param name="nameSimilarityThreshold">Minimum name similarity score (0.0 - 1.0) for proximity matching.</param>
-        /// <returns>True if the two POIs are considered a match.</returns>
         bool IsMatch(Poi a, Poi b, double toleranceMeters = DefaultToleranceMeters, double nameSimilarityThreshold = DefaultNameSimilarityThreshold);
 
         /// <summary>
         /// Finds the best match for a POI in a collection of candidates.
-        /// Uses URL pre-indexing for O(1) lookup when possible, falling back to proximity matching.
+        /// Scans all candidates and returns the closest passing match by
+        /// Haversine distance (so ties break toward the nearest row).
         /// </summary>
-        /// <param name="poi">The POI to match.</param>
-        /// <param name="candidates">The candidates to search.</param>
-        /// <param name="toleranceMeters">Maximum distance in meters for proximity matching.</param>
-        /// <param name="nameSimilarityThreshold">Minimum name similarity score (0.0 - 1.0) for proximity matching.</param>
-        /// <returns>The best matching POI, or null if no match found.</returns>
         Poi? FindMatch(Poi poi, IEnumerable<Poi> candidates, double toleranceMeters = DefaultToleranceMeters, double nameSimilarityThreshold = DefaultNameSimilarityThreshold);
 
         /// <summary>
-        /// Finds the best match for a POI using a pre-built URL index and a candidate list for proximity fallback.
+        /// Finds all duplicate groups within a single list using union-find
+        /// for transitive grouping — if A~B and B~C but not A~C, all three
+        /// still end up in the same group. Returns groups of 2+ POIs.
         /// </summary>
-        /// <param name="poi">The POI to match.</param>
-        /// <param name="urlIndex">Pre-built dictionary mapping normalized URLs to POIs.</param>
-        /// <param name="candidates">Candidates for proximity-based matching.</param>
-        /// <param name="toleranceMeters">Maximum distance in meters for proximity matching.</param>
-        /// <param name="nameSimilarityThreshold">Minimum name similarity score (0.0 - 1.0) for proximity matching.</param>
-        /// <returns>The best matching POI, or null if no match found.</returns>
-        Poi? FindMatch(Poi poi, Dictionary<string, Poi> urlIndex, IEnumerable<Poi> candidates, double toleranceMeters = DefaultToleranceMeters, double nameSimilarityThreshold = DefaultNameSimilarityThreshold);
-
-        /// <summary>
-        /// Finds all duplicate groups within a single list using union-find for transitive grouping.
-        /// Returns groups of 2+ POIs that match each other (directly or transitively).
-        /// </summary>
-        /// <param name="pois">The list of POIs to check for duplicates.</param>
-        /// <param name="toleranceMeters">Maximum distance in meters for proximity matching.</param>
-        /// <param name="nameSimilarityThreshold">Minimum name similarity score (0.0 - 1.0) for proximity matching.</param>
-        /// <param name="cancellationToken">Cancellation token for long-running operations.</param>
-        /// <returns>Groups of duplicate POIs (each group has 2+ members).</returns>
         List<List<Poi>> FindDuplicateGroups(List<Poi> pois, double toleranceMeters = DefaultToleranceMeters, double nameSimilarityThreshold = DefaultNameSimilarityThreshold, CancellationToken cancellationToken = default);
-
-        /// <summary>
-        /// Builds a dictionary mapping normalized URLs to POIs for O(1) URL-based lookup.
-        /// If multiple POIs share the same normalized URL, the first one wins and a diagnostic is logged.
-        /// </summary>
-        /// <param name="pois">The POIs to index.</param>
-        /// <returns>Dictionary from normalized URL to POI.</returns>
-        Dictionary<string, Poi> BuildUrlIndex(IEnumerable<Poi> pois);
     }
 }

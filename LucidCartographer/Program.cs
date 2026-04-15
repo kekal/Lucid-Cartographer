@@ -94,6 +94,11 @@ builder.Services.AddSingleton<IGoogleMapsListScraper, GoogleMapsListScraper>();
 // subscribes to for its "N pending" counter.
 builder.Services.AddSingleton<EnrichmentProgressService>();
 builder.Services.AddSingleton<EnrichmentTrigger>();
+// Tunable via the "Enrichment" section of appsettings.json — Concurrency,
+// BatchSize, IdlePollSeconds. Defaults match the hard-coded values the
+// service used before extraction, so an upgrade without config changes
+// behaves identically.
+builder.Services.Configure<EnrichmentOptions>(builder.Configuration.GetSection("Enrichment"));
 builder.Services.AddHostedService<PoiEnrichmentBackgroundService>();
 builder.Services.AddScoped<IMapService, LeafletMapService>();
 
@@ -181,6 +186,41 @@ TaskScheduler.UnobservedTaskException += (_, e) =>
     logger?.LogError(e.Exception, "Unobserved task exception");
     e.SetObserved();
 };
+
+// Sweep orphaned lucid-import-* temp files left by a previous crash that
+// died between "file streamed to disk" and "Coravel invocable ran + deleted
+// it in finally". Cheap and safe: only files matching the specific pattern
+// we wrote ourselves, older than 1h, are removed.
+{
+    var sweepLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("TempFileSweep");
+    try
+    {
+        var tempRoot = Path.GetTempPath();
+        var cutoff = DateTime.UtcNow - TimeSpan.FromHours(1);
+        int swept = 0;
+        foreach (var path in Directory.EnumerateFiles(tempRoot, "lucid-import-*"))
+        {
+            try
+            {
+                if (File.GetLastWriteTimeUtc(path) < cutoff)
+                {
+                    File.Delete(path);
+                    swept++;
+                }
+            }
+            catch (Exception ex)
+            {
+                sweepLogger.LogDebug(ex, "Could not remove orphaned temp file {Path}", path);
+            }
+        }
+        if (swept > 0)
+            sweepLogger.LogInformation("Removed {Count} orphaned lucid-import-* temp files from {Path}", swept, tempRoot);
+    }
+    catch (Exception ex)
+    {
+        sweepLogger.LogWarning(ex, "Startup temp-file sweep failed; continuing");
+    }
+}
 
 // NEW-02: Warn when Auth:Password is empty — authentication is silently disabled
 {

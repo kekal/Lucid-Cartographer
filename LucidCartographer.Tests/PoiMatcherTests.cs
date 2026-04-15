@@ -18,12 +18,16 @@ namespace LucidCartographer.Tests
         };
 
         [Fact]
-        public void IsMatch_SameGoogleMapsUrl_ReturnsTrue()
+        public void IsMatch_SameGoogleMapsUrl_DoesNotOverrideNameAndCoords()
         {
+            // URL is no longer part of the identity rule. Two rows with the
+            // same corporate URL (e.g. franchise branches) but different
+            // names at different coords must stay distinct — that is the
+            // whole reason the URL tier was removed.
             var a = CreatePoi(1, "Place A", 52.0, 21.0, "https://maps.google.com/place/abc");
             var b = CreatePoi(2, "Different Name", 10.0, 10.0, "https://maps.google.com/place/abc");
 
-            _matcher.IsMatch(a, b).Should().BeTrue();
+            _matcher.IsMatch(a, b).Should().BeFalse();
         }
 
         [Fact]
@@ -55,21 +59,16 @@ namespace LucidCartographer.Tests
         }
 
         [Fact]
-        public void IsMatch_UrlNormalization_HttpVsHttps_ReturnsTrue()
+        public void IsMatch_PlaceholderZeroCoords_NeverMatches()
         {
-            var a = CreatePoi(1, "A", 0, 0, "http://maps.google.com/place/abc");
-            var b = CreatePoi(2, "B", 0, 0, "https://maps.google.com/place/abc");
+            // (0,0) is the placeholder that Google-list scrapes use until
+            // enrichment fills real coordinates. PoiIdentity explicitly
+            // excludes it so three "Plac zabaw" playgrounds can't collapse
+            // into one by sharing the Gulf of Guinea.
+            var a = CreatePoi(1, "Playground", 0, 0);
+            var b = CreatePoi(2, "Playground", 0, 0);
 
-            _matcher.IsMatch(a, b).Should().BeTrue();
-        }
-
-        [Fact]
-        public void IsMatch_UrlNormalization_TrailingSlash_ReturnsTrue()
-        {
-            var a = CreatePoi(1, "A", 0, 0, "https://maps.google.com/place/abc/");
-            var b = CreatePoi(2, "B", 0, 0, "https://maps.google.com/place/abc");
-
-            _matcher.IsMatch(a, b).Should().BeTrue();
+            _matcher.IsMatch(a, b).Should().BeFalse();
         }
 
         [Fact]
@@ -157,9 +156,10 @@ namespace LucidCartographer.Tests
         }
 
         [Fact]
-        public void IsMatch_OneHasUrlOtherDoesNot_UsesProximityMatching()
+        public void IsMatch_OneHasUrlOtherDoesNot_StillMatchesOnNameAndProximity()
         {
-            // When only one has a URL, it should fall back to proximity + name matching
+            // The presence or absence of a URL on either side is irrelevant
+            // — the rule is always name similarity + coord proximity.
             var a = CreatePoi(1, "Coffee Shop", 52.22970, 21.01220, "https://maps.google.com/place/abc");
             var b = CreatePoi(2, "Coffee Shop", 52.22975, 21.01225); // No URL
 
@@ -167,13 +167,17 @@ namespace LucidCartographer.Tests
         }
 
         [Fact]
-        public void IsMatch_DifferentUrlsDenyMatch_ReturnsFalseImmediately()
+        public void IsMatch_SameNameAndCoords_DifferentUrls_StillMatches()
         {
-            // If both have URLs but they differ, it's an immediate false (OPS-H05)
+            // URL is not part of the rule. Two rows at the same coords with
+            // the same name match regardless of URL — they almost certainly
+            // represent the same real place (e.g. one from a KML import
+            // and one from a Google Maps scrape with different canonical
+            // URL shapes).
             var a = CreatePoi(1, "Coffee Shop", 52.22970, 21.01220, "https://maps.google.com/place/abc");
             var b = CreatePoi(2, "Coffee Shop", 52.22970, 21.01220, "https://maps.google.com/place/xyz");
 
-            _matcher.IsMatch(a, b).Should().BeFalse();
+            _matcher.IsMatch(a, b).Should().BeTrue();
         }
 
         [Fact]

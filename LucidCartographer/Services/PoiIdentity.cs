@@ -40,33 +40,41 @@ namespace LucidCartographer.Services
         /// <summary>
         /// True if the two (name, lat, lon) triples describe the same real
         /// place. Used by <see cref="Poi.Equals(Poi?)"/> and by the import
-        /// and enrichment dedup paths.
+        /// and enrichment dedup paths. Optional parameters let callers
+        /// (e.g. the operations page's tolerance slider) widen or narrow
+        /// the default strictness; defaults match <see cref="Poi.Equals"/>.
         /// </summary>
         public static bool AreSamePlace(
             string nameA, double latA, double lonA,
-            string nameB, double latB, double lonB)
+            string nameB, double latB, double lonB,
+            double toleranceMeters = ProximityThresholdMeters,
+            double nameSimilarityThreshold = NameSimilarityThreshold)
         {
             // Placeholder coordinates can't be compared meaningfully — wait
             // for enrichment to fill real values before deciding identity.
             if (latA == 0 && lonA == 0) return false;
             if (latB == 0 && lonB == 0) return false;
 
-            if (GeoUtils.HaversineDistance(latA, lonA, latB, lonB) >= ProximityThresholdMeters)
+            if (GeoUtils.HaversineDistance(latA, lonA, latB, lonB) >= toleranceMeters)
                 return false;
 
-            return PoiMatcher.NameSimilarity(nameA, nameB) >= NameSimilarityThreshold;
+            return PoiMatcher.NameSimilarity(nameA, nameB) >= nameSimilarityThreshold;
         }
 
         /// <summary>
-        /// Same as <see cref="AreSamePlace(string,double,double,string,double,double)"/>
+        /// Same as <see cref="AreSamePlace(string,double,double,string,double,double,double,double)"/>
         /// but typed against <see cref="Poi"/> directly. Never dereferences
         /// nulls — two nulls are NOT equal (distinct non-existent rows).
         /// </summary>
-        public static bool AreSamePlace(Poi? a, Poi? b)
+        public static bool AreSamePlace(
+            Poi? a, Poi? b,
+            double toleranceMeters = ProximityThresholdMeters,
+            double nameSimilarityThreshold = NameSimilarityThreshold)
         {
             if (a is null || b is null) return false;
             return AreSamePlace(a.Name, a.Latitude, a.Longitude,
-                                b.Name, b.Latitude, b.Longitude);
+                                b.Name, b.Latitude, b.Longitude,
+                                toleranceMeters, nameSimilarityThreshold);
         }
     }
 }
