@@ -102,8 +102,12 @@ else
         // flips Pois from placeholder (0,0) coords to real ones. Without
         // this, the user has to toggle collection visibility to see new
         // rows show up.
-        EnrichmentProgress.Changed += OnEnrichmentChanged;
+        _enrichmentSubscription = System.Reactive.Linq.Observable
+            .Skip(EnrichmentProgress.Changes, 1)
+            .Subscribe(_ => OnEnrichmentChanged());
     }
+
+    private IDisposable? _enrichmentSubscription;
 
     private void OnEnrichmentChanged()
     {
@@ -243,7 +247,7 @@ else
 
     public async ValueTask DisposeAsync()
     {
-        EnrichmentProgress.Changed -= OnEnrichmentChanged;
+        _enrichmentSubscription?.Dispose();
         if (_leafletMap != null)
         {
             await _leafletMap.DisposeAsync();
