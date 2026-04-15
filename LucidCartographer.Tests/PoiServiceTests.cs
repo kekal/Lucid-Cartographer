@@ -71,8 +71,8 @@ namespace LucidCartographer.Tests
         {
             var (service, _) = await CreateServiceAsync(db =>
             {
-                var poi1 = new Poi { Id = 1, Name = "Poi1", Latitude = 52.0, Longitude = 21.0, AddedDate = DateTime.UtcNow };
-                var poi2 = new Poi { Id = 2, Name = "Poi2", Latitude = 50.0, Longitude = 19.0, AddedDate = DateTime.UtcNow };
+                var poi1 = new Poi { Id = 1, Name = "Poi1", Latitude = 52.0, Longitude = 21.0, AddedDate = DateTime.UtcNow, IsEnriched = true };
+                var poi2 = new Poi { Id = 2, Name = "Poi2", Latitude = 50.0, Longitude = 19.0, AddedDate = DateTime.UtcNow, IsEnriched = true };
                 db.Pois.AddRange(poi1, poi2);
 
                 db.PoiCollections.AddRange(
