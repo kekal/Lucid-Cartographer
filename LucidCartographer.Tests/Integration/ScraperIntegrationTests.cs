@@ -160,8 +160,9 @@ namespace LucidCartographer.Tests.Integration
             await FillUrlAndWaitForButtonAsync("https://maps.app.goo.gl/empty");
             await Page.Locator("button:has-text('Import')").ClickAsync();
 
-            // When 0 POIs are returned, the component shows an error: "No places found"
-            await Page.WaitForSelectorAsync("text=No places found", new() { Timeout = 15000 });
+            // When 0 POIs are returned, the invocable publishes Failed with "No places found"
+            // Coravel's default ConsummationDelay is 30s, so we wait longer than the default 15s timeout
+            await Page.WaitForSelectorAsync("text=No places found", new() { Timeout = 35000 });
 
             // Verify error message mentions "No places found"
             var errorText = await Page.Locator("text=No places found").IsVisibleAsync();
@@ -273,16 +274,16 @@ namespace LucidCartographer.Tests.Integration
             await Page.Locator("button:has-text('Import')").ClickAsync();
 
             // Wait for error message (should appear instead of success)
-            // The error div shows "Import failed" heading and "Scraping failed: ..." detail
-            await Page.WaitForSelectorAsync("text=Import failed", new() { Timeout = 15000 });
+            // The invocable publishes "Import failed: Scrape failed" as the error message
+            await Page.WaitForSelectorAsync("text=Import failed", new() { Timeout = 35000 });
 
-            // Verify error message is visible
+            // Verify error heading is visible
             Assert.True(await Page.Locator("text=Import failed").IsVisibleAsync(),
-                "Error message should be displayed when scraper throws");
+                "Error message heading should be displayed when scraper throws");
 
-            // Verify error detail mentions the exception
-            Assert.True(await Page.Locator("text=Scraping failed").IsVisibleAsync(),
-                "Error detail should mention scraping failure");
+            // Verify error detail mentions the exception message
+            Assert.True(await Page.Locator("text=Scrape failed").IsVisibleAsync(),
+                "Error detail should mention the exception message 'Scrape failed'");
 
             // Verify no success message appears
             Assert.False(await Page.Locator("span.font-medium:has-text('Import complete')").IsVisibleAsync(),
