@@ -4,6 +4,7 @@
 @using Microsoft.AspNetCore.WebUtilities
 @inject IPoiService PoiService
 @inject NavigationManager Navigation
+@inject LucidCartographer.Services.Enrichment.EnrichmentProgressService EnrichmentProgress
 @implements IAsyncDisposable
 
 <PageTitle>@UiStrings.MapPageTitle</PageTitle>
@@ -96,6 +97,23 @@ else
         _collections = await PoiService.GetCollectionsAsync();
         _collectionVMs = _collections.Select(c => new CollectionViewModel(c)).ToList();
         _isLoading = false;
+
+        // Refresh the map + list when the background enrichment service
+        // flips Pois from placeholder (0,0) coords to real ones. Without
+        // this, the user has to toggle collection visibility to see new
+        // rows show up.
+        EnrichmentProgress.Changed += OnEnrichmentChanged;
+    }
+
+    private void OnEnrichmentChanged()
+    {
+        // LoadVisibleCollections touches the JS map and mutates state;
+        // marshal to the renderer thread and fire-and-forget.
+        _ = InvokeAsync(async () =>
+        {
+            try { await LoadVisibleCollections(); }
+            catch { /* best effort — don't crash the progress callback */ }
+        });
     }
 
     // HIGH-01: Cache previous search term; skip if unchanged
@@ -225,6 +243,7 @@ else
 
     public async ValueTask DisposeAsync()
     {
+        EnrichmentProgress.Changed -= OnEnrichmentChanged;
         if (_leafletMap != null)
         {
             await _leafletMap.DisposeAsync();

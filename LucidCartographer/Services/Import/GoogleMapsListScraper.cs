@@ -248,6 +248,25 @@ namespace LucidCartographer.Services.Import
                 _logger.LogInformation(
                     "Discovered {Count} initial list items (examined {Divs} divs)",
                     discovery.total, discovery.divsExamined);
+
+                // DIAG: dump first card's structure so we can spot place-id attrs
+                try
+                {
+                    var dump = await page.EvaluateAsync<string>(@"
+                        (() => {
+                            const card = document.querySelector('[data-scraper-idx=""0""]');
+                            if (!card) return '(none)';
+                            const btn = card.querySelector('button');
+                            const attrs = (el) => el ? Array.from(el.attributes).map(a => a.name + '=' + a.value.slice(0, 120)).join(' | ') : '(no el)';
+                            return JSON.stringify({
+                                cardAttrs: attrs(card),
+                                btnAttrs: attrs(btn),
+                                html: card.outerHTML.slice(0, 1500)
+                            });
+                        })()");
+                    _logger.LogInformation("DIAG first-card: {Dump}", dump);
+                }
+                catch (Exception ex) { _logger.LogWarning(ex, "DIAG dump failed"); }
             }
 
             // Scroll loop — drives lazy-loaded cards into the DOM, re-tags each
@@ -282,343 +301,146 @@ namespace LucidCartographer.Services.Import
                 }
             }
 
-            var listItems = await page.Locator("[data-scraper-idx]").AllAsync();
-
-            if (!listItems.Any())
-            {
-                _logger.LogWarning("No list items found with any selector.");
-            }
-
+            // Fast-path harvest: read every tagged card's visible data in one
+            // JS round-trip. All card-level metadata (name, rating, category,
+            // description, image URL) comes from this single pass — we do NOT
+            // re-read the DOM per item. For each card we then try the fast
+            // path: if the card embeds a place anchor whose href contains
+            // `@lat,lon,…`, we parse coords directly. Otherwise the card is
+            // an anchor-less `<button jsaction>` (common on personal / shared
+            // lists) and we fall back to a click-through just to navigate the
+            // URL bar, read the coords, and go back. Address / website / phone
+            // are filled later by PoiEnrichmentBackgroundService.
+            var harvestJson = await page.EvaluateAsync<System.Text.Json.JsonElement>(GoogleMapsScraperScripts.HarvestAll);
+            var cards = harvestJson.EnumerateArray().ToList();
+            var totalItems = cards.Count;
             var results = new List<ImportedPoi>();
 
-            _logger.LogInformation("Using click-through strategy for {Count} items", listItems.Count);
+            if (totalItems == 0)
+            {
+                _logger.LogWarning("Harvest returned zero cards — list panel may have been empty.");
+            }
+            else
+            {
+                _logger.LogInformation("Harvested metadata for {Count} list cards", totalItems);
+            }
 
-            var totalItems = listItems.Count;
-            for (int idx = 0; idx < totalItems; idx++)
+            for (int i = 0; i < cards.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                var card = cards[i];
 
-                try
+                var idx = card.TryGetProperty("idx", out var idxEl) && idxEl.ValueKind == System.Text.Json.JsonValueKind.Number ? idxEl.GetInt32() : i;
+                string? name = card.TryGetProperty("name", out var nEl) && nEl.ValueKind == System.Text.Json.JsonValueKind.String ? nEl.GetString() : null;
+                string? href = card.TryGetProperty("href", out var hEl) && hEl.ValueKind == System.Text.Json.JsonValueKind.String ? hEl.GetString() : null;
+
+                if (string.IsNullOrWhiteSpace(name))
                 {
-                    // Address the card by its stable data-scraper-idx tag instead of
-                    // re-enumerating — iteration order is preserved, and going back
-                    // via `GoBack` keeps the tags intact.
-                    var item = page.Locator($"[data-scraper-idx='{idx}']").First;
+                    _logger.LogWarning("[{Idx}/{Total}] Skipping card — missing name", i + 1, totalItems);
+                    continue;
+                }
 
-                    if (!await item.IsVisibleAsync())
-                    {
-                        _logger.LogWarning("Item {Idx} no longer present in DOM — skipping", idx);
-                        continue;
-                    }
+                // Fast path: href may already contain coordinates.
+                (double lat, double lon)? coords = null;
+                if (!string.IsNullOrEmpty(href))
+                {
+                    coords = ExtractCoordinates(href);
+                }
 
-                    // === Extract data from list item (before clicking) ===
-                    // Prefer the place anchor's aria-label (accessibility-required, set
-                    // by Google for screen readers) — it's the single most stable name
-                    // source on the card. Fall back to legacy class-based selectors,
-                    // then to the card's first text line.
-                    string name = "Unknown";
-                    try
+                // No click-through here. When href has no coords (common on
+                // personal / shared lists whose cards are anchor-less
+                // `<button jsaction>` elements), we leave coords null and
+                // persist the POI with a (0,0) placeholder. The background
+                // enrichment service then runs a name-based Google Maps
+                // search per POI to fill real coords + address/website/phone.
+                if (coords == null)
+                {
+                    _logger.LogInformation("[{Idx}/{Total}] '{Name}' — no href coords, deferred to enrichment", i + 1, totalItems, name);
+                }
+
+                // Rating (text → double)
+                double? rating = null;
+                if (card.TryGetProperty("rating", out var rEl) && rEl.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    if (double.TryParse(rEl.GetString()!.Replace(',', '.'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var r))
+                        rating = r;
+                }
+
+                // Review count (raw text → digits → int)
+                int? reviewCount = null;
+                if (card.TryGetProperty("reviewCount", out var rcEl) && rcEl.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    var digits = new string(rcEl.GetString()!.Where(char.IsDigit).ToArray());
+                    if (int.TryParse(digits, out var rc)) reviewCount = rc;
+                }
+
+                string? category = card.TryGetProperty("category", out var cEl) && cEl.ValueKind == System.Text.Json.JsonValueKind.String ? cEl.GetString() : null;
+                string? description = card.TryGetProperty("description", out var dEl) && dEl.ValueKind == System.Text.Json.JsonValueKind.String ? dEl.GetString() : null;
+
+                // Image: upsize the thumbnail URL (`…=w92-h92-k-no` → `…=w1024`)
+                // and download the bytes now, while the signed `gps-cs-s` token
+                // is still fresh. Google blocks cross-origin hotlinking and the
+                // token expires in minutes, so persisting only the URL is useless.
+                // APIRequest carries session cookies and bypasses the anti-hotlink
+                // check; bytes land on the Poi entity and are served from
+                // /api/poi-image/{id}.
+                string? imageUrl = null;
+                byte[]? imageData = null;
+                string? imageContentType = null;
+                if (card.TryGetProperty("imageSrc", out var imgEl) && imgEl.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    var rawSrc = imgEl.GetString();
+                    if (!string.IsNullOrEmpty(rawSrc) && rawSrc.Contains("googleusercontent.com"))
                     {
-                        // IMPORTANT: check visibility BEFORE calling GetAttributeAsync.
-                        // Without the guard, GetAttributeAsync waits up to Playwright's
-                        // 30s default actionable timeout for the anchor to appear and
-                        // then throws TimeoutException — a silent ~30s-per-item tax for
-                        // any card that doesn't use a place anchor.
-                        var placeAnchor = item.Locator("a[href*='/maps/place/']").First;
-                        if (await placeAnchor.IsVisibleAsync())
-                        {
-                            var ariaLabel = await placeAnchor.GetAttributeAsync("aria-label");
-                            if (!string.IsNullOrWhiteSpace(ariaLabel))
-                                name = ariaLabel.Trim();
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogDebug(ex, "aria-label name extraction failed for item {Idx}", idx);
-                    }
-                    if (name == "Unknown")
-                    {
+                        var equalsIdx = rawSrc.LastIndexOf('=');
+                        var baseUrl = equalsIdx > 0 ? rawSrc[..equalsIdx] : rawSrc;
+                        imageUrl = baseUrl + "=w1024";
                         try
                         {
-                            var nameEl = item.Locator(".fontHeadlineSmall, .qBF1Pd, .NrDZNb").First;
-                            if (await nameEl.IsVisibleAsync())
-                                name = (await nameEl.InnerTextAsync()).Trim();
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug(ex, "Class-based name extraction failed for item {Idx}", idx);
-                        }
-                    }
-                    if (name == "Unknown")
-                    {
-                        name = (await item.InnerTextAsync()).Split('\n').FirstOrDefault()?.Trim() ?? "Unknown";
-                    }
-                    name = name.Split('\n').FirstOrDefault()?.Trim() ?? "Unknown";
-
-                    // Rating
-                    double? rating = null;
-                    try
-                    {
-                        var ratingEl = item.Locator("span.MW4etd").First;
-                        if (await ratingEl.IsVisibleAsync())
-                        {
-                            var ratingText = await ratingEl.InnerTextAsync();
-                            if (double.TryParse(ratingText.Trim().Replace(',', '.'), System.Globalization.CultureInfo.InvariantCulture, out var r))
-                                rating = r;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogDebug(ex, "Failed to extract rating for item {Idx}", idx);
-                    }
-
-                    // Review count
-                    int? reviewCount = null;
-                    try
-                    {
-                        var reviewEl = item.Locator("span.UY7F9").First;
-                        if (await reviewEl.IsVisibleAsync())
-                        {
-                            var reviewText = await reviewEl.InnerTextAsync();
-                            reviewText = new string(reviewText.Where(c => char.IsDigit(c)).ToArray());
-                            if (int.TryParse(reviewText, out var rc))
-                                reviewCount = rc;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogDebug(ex, "Failed to extract review count for item {Idx}", idx);
-                    }
-
-                    // Category from list item
-                    string? category = null;
-                    string? description = null;
-                    try
-                    {
-                        var bodyEls = await item.Locator(".W4Efsd").AllAsync();
-                        foreach (var bodyEl in bodyEls)
-                        {
-                            var text = (await bodyEl.InnerTextAsync()).Trim();
-                            if (string.IsNullOrEmpty(text) || text == name) continue;
-                            var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                            foreach (var line in lines)
+                            var resp = await context.APIRequest.GetAsync(imageUrl);
+                            if (resp.Status == 200)
                             {
-                                var clean = line.Trim(' ', '\u00B7', '\u00B7');
-                                if (clean.Length < 2 || clean == name) continue;
-                                if (clean.All(c => char.IsDigit(c) || c == '.' || c == ',' || c == '(' || c == ')' || c == ' ' || c == '\u2605')) continue;
-                                if (category == null)
-                                    category = clean;
-                                else if (description == null && clean != category)
-                                    description = clean;
+                                imageData = await resp.BodyAsync();
+                                imageContentType = resp.Headers.TryGetValue("content-type", out var ct) ? ct : "image/jpeg";
+                            }
+                            else
+                            {
+                                _logger.LogWarning("Image fetch for '{Name}' returned HTTP {Status}", name, resp.Status);
                             }
                         }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to extract category/description for item {Idx} '{Name}'", idx, name);
-                    }
-
-                    // Image: extract URL from the list card, upsize it (`…=w92-h92-k-no`
-                    // → `…=w1024`), and download the bytes *now* while the signed
-                    // `gps-cs-s` token is still fresh. Google blocks cross-origin
-                    // hotlinking of these URLs and the token expires in ~minutes, so
-                    // persisting only the URL is useless. We fetch via Playwright's
-                    // APIRequest so the request carries the browser session's cookies
-                    // and bypasses Google's anti-hotlink checks, then store the bytes
-                    // on the Poi entity and serve them from /api/poi-image/{id}.
-                    string? imageUrl = null;
-                    byte[]? imageData = null;
-                    string? imageContentType = null;
-                    try
-                    {
-                        var imgEl = item.Locator("img").First;
-                        if (await imgEl.IsVisibleAsync())
+                        catch (Exception fetchEx)
                         {
-                            var rawSrc = await imgEl.GetAttributeAsync("src");
-                            if (!string.IsNullOrEmpty(rawSrc) && rawSrc.Contains("googleusercontent.com"))
-                            {
-                                var equalsIdx = rawSrc.LastIndexOf('=');
-                                var baseUrl = equalsIdx > 0 ? rawSrc[..equalsIdx] : rawSrc;
-                                imageUrl = baseUrl + "=w1024";
-
-                                try
-                                {
-                                    var resp = await context.APIRequest.GetAsync(imageUrl);
-                                    if (resp.Status == 200)
-                                    {
-                                        imageData = await resp.BodyAsync();
-                                        var headers = resp.Headers;
-                                        imageContentType = headers.TryGetValue("content-type", out var ct) ? ct : "image/jpeg";
-                                    }
-                                    else
-                                    {
-                                        _logger.LogWarning("Image fetch for item {Idx} '{Name}' returned HTTP {Status}", idx, name, resp.Status);
-                                    }
-                                }
-                                catch (Exception fetchEx)
-                                {
-                                    _logger.LogWarning(fetchEx, "Failed to download image bytes for item {Idx} '{Name}' from {Url}", idx, name, imageUrl);
-                                }
-                            }
+                            _logger.LogWarning(fetchEx, "Failed to download image bytes for '{Name}' from {Url}", name, imageUrl);
                         }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogDebug(ex, "Failed to extract image URL for item {Idx}", idx);
-                    }
-
-                    // === Click the item to get coordinates + address ===
-                    await item.ClickAsync();
-
-                    (double lat, double lon)? coords = null;
-                    string currentUrl = "";
-                    for (int wait = 0; wait < 5; wait++)
-                    {
-                        await page.WaitForTimeoutAsync(1000);
-                        currentUrl = page.Url;
-                        coords = ExtractCoordinates(currentUrl);
-                        if (coords != null && currentUrl.Contains("!3d"))
-                            break;
-                    }
-
-                    // Fallback: directions button
-                    if (coords == null || !currentUrl.Contains("!3d"))
-                    {
-                        try
-                        {
-                            var dirBtn = page.Locator("a[data-value='Directions'], button[data-tooltip='Directions']").First;
-                            if (await dirBtn.IsVisibleAsync())
-                            {
-                                var dirHref = await dirBtn.GetAttributeAsync("href");
-                                if (dirHref != null)
-                                {
-                                    var dirCoords = ExtractCoordinates(dirHref);
-                                    if (dirCoords != null) coords = dirCoords;
-                                }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug(ex, "Failed to extract coordinates from directions button for item {Idx}", idx);
-                        }
-                    }
-
-                    // Extract address
-                    string? address = null;
-                    try
-                    {
-                        var addrEl = page.Locator("button[data-item-id='address'] .fontBodyMedium, div[data-item-id='address']").First;
-                        if (await addrEl.IsVisibleAsync())
-                            address = (await addrEl.InnerTextAsync()).Trim();
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to extract address for item {Idx} '{Name}'", idx, name);
-                    }
-
-                    // Extract website
-                    string? website = null;
-                    try
-                    {
-                        var webEl = page.Locator("a[data-item-id='authority'] .fontBodyMedium, a[data-item-id='authority']").First;
-                        if (await webEl.IsVisibleAsync())
-                            website = await webEl.GetAttributeAsync("href") ?? (await webEl.InnerTextAsync()).Trim();
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to extract website for item {Idx} '{Name}'", idx, name);
-                    }
-
-                    // Extract phone
-                    string? phone = null;
-                    try
-                    {
-                        var phoneEl = page.Locator("button[data-item-id*='phone'] .fontBodyMedium").First;
-                        if (await phoneEl.IsVisibleAsync())
-                            phone = (await phoneEl.InnerTextAsync()).Trim();
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to extract phone for item {Idx} '{Name}'", idx, name);
-                    }
-
-                    if (coords != null)
-                    {
-                        results.Add(new ImportedPoi(
-                            Name: name,
-                            Latitude: coords.Value.lat,
-                            Longitude: coords.Value.lon,
-                            GoogleMapsUrl: currentUrl,
-                            Address: address,
-                            Category: category,
-                            Description: description,
-                            Rating: rating,
-                            ReviewCount: reviewCount,
-                            Website: website,
-                            Phone: phone,
-                            ImageUrl: imageUrl,
-                            ImageData: imageData,
-                            ImageContentType: imageContentType
-                        ));
-                        _logger.LogInformation("[{Idx}/{Total}] {Name} ({Cat}) @ {Lat},{Lon}",
-                            idx + 1, totalItems, name, category ?? "-", coords.Value.lat, coords.Value.lon);
-                    }
-                    else
-                    {
-                        _logger.LogWarning("[{Idx}/{Total}] Skipped {Name} -- no coordinates found", idx + 1, totalItems, name);
-                    }
-
-                    onProgress?.Invoke(results.Count);
-
-                    // Go back to the list. The detail view is a full navigation on
-                    // Google Maps, so the DOM snapshot we come back to is a fresh one
-                    // — our data-scraper-* attributes are gone. Re-run discovery so
-                    // the next iteration can address its card by index again.
-                    //
-                    // WaitUntil=DOMContentLoaded (not NetworkIdle): Google Maps keeps
-                    // background XHRs going indefinitely, so NetworkIdle virtually
-                    // never fires and we'd eat the full 10s timeout on every item.
-                    // DOMContentLoaded fires as soon as the list panel's static DOM
-                    // is back; we then poll DiscoverAsync until the cards are tagged.
-                    await page.GoBackAsync(new PageGoBackOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 10000 });
-                    // Google Maps re-hydrates the list panel client-side AFTER
-                    // DOMContentLoaded, replacing the card elements. If we call
-                    // DiscoverAsync too eagerly we tag the stale DOM, then the
-                    // tags vanish with the next render and subsequent items
-                    // report "no longer present in DOM". Wait for the tag count
-                    // to be stable across two consecutive polls before trusting
-                    // it — that proves hydration has settled.
-                    int lastCount = -1;
-                    int stableHits = 0;
-                    for (int wait = 0; wait < 20; wait++)
-                    {
-                        await page.WaitForTimeoutAsync(300);
-                        var (t, _, _, _) = await DiscoverAsync();
-                        if (t > 0 && t == lastCount)
-                        {
-                            if (++stableHits >= 2) break;
-                        }
-                        else
-                        {
-                            stableHits = 0;
-                        }
-                        lastCount = t;
                     }
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to process item {Idx}", idx);
-                    try
-                    {
-                        await page.GoBackAsync();
-                        await page.WaitForTimeoutAsync(2000);
-                        await DiscoverAsync();
-                    }
-                    catch (Exception backEx)
-                    {
-                        _logger.LogWarning(backEx, "Failed to go back after error on item {Idx}", idx);
-                    }
-                }
+
+                // Placeholder (0,0) coords when href had none — enrichment
+                // service will fill real lat/lon via a name-based search.
+                var lat = coords?.lat ?? 0.0;
+                var lon = coords?.lon ?? 0.0;
+                results.Add(new ImportedPoi(
+                    Name: name!,
+                    Latitude: lat,
+                    Longitude: lon,
+                    GoogleMapsUrl: href,
+                    // Address / Website / Phone deliberately null — filled later
+                    // by PoiEnrichmentBackgroundService via the place URL.
+                    Address: null,
+                    Category: category,
+                    Description: description,
+                    Rating: rating,
+                    ReviewCount: reviewCount,
+                    Website: null,
+                    Phone: null,
+                    ImageUrl: imageUrl,
+                    ImageData: imageData,
+                    ImageContentType: imageContentType
+                ));
+
+                _logger.LogInformation("[{Idx}/{Total}] {Name} ({Cat}) @ {Lat},{Lon}",
+                    i + 1, totalItems, name, category ?? "-", lat, lon);
+                onProgress?.Invoke(results.Count);
             }
 
             _logger.LogInformation("Successfully scraped {Count} places from list '{ListName}'", results.Count, listName ?? "unknown");

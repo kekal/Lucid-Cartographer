@@ -26,6 +26,9 @@
             </nav>
         </div>
         <div class="flex items-center gap-3">
+            @* Live background-enrichment counter — interactive island inside
+               the otherwise static layout. Hides itself when queue is empty. *@
+            <EnrichmentStatus />
             @* Search form with client-side debounce *@
             <form id="search-form" action="/" method="get" class="relative" role="search">
                 <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-base" aria-hidden="true">search</span>

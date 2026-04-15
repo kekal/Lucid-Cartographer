@@ -4,11 +4,21 @@ using System.Text;
 using LucidCartographer.Components;
 using LucidCartographer.Data;
 using LucidCartographer.Services;
+using LucidCartographer.Services.Enrichment;
 using LucidCartographer.Services.Export;
 using LucidCartographer.Services.Import;
 using LucidCartographer.Services.Operations;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
+
+// DIAG: tee Console to a log file so scrape logs are readable from outside preview_start
+try
+{
+    var _diagLog = new StreamWriter(@"C:\backup\maps_editor\LucidCartographer\scrape-diag.log", append: false) { AutoFlush = true };
+    Console.SetOut(new MultiTextWriter(Console.Out, _diagLog));
+    Console.SetError(new MultiTextWriter(Console.Error, _diagLog));
+}
+catch { }
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -65,6 +75,13 @@ builder.Services.AddScoped<IPoiMatcher, PoiMatcher>();
 builder.Services.AddScoped<ISetOperationService, SetOperationService>();
 // HIGH-07: Scraper registered as Singleton with internal SemaphoreSlim to limit concurrency
 builder.Services.AddSingleton<IGoogleMapsListScraper, GoogleMapsListScraper>();
+// Background enrichment: fills address/website/phone for Google-scraped Pois
+// by opening each place URL in a headless tab. Runs continuously, polling the
+// DB for IsEnriched=false rows. Progress service is a singleton the MapPage
+// subscribes to for its "N pending" counter.
+builder.Services.AddSingleton<EnrichmentProgressService>();
+builder.Services.AddSingleton<EnrichmentTrigger>();
+builder.Services.AddHostedService<PoiEnrichmentBackgroundService>();
 builder.Services.AddScoped<IMapService, LeafletMapService>();
 
 // Health checks endpoint
@@ -301,3 +318,14 @@ static string ComputeHash(string input)
 
 // Make Program accessible for WebApplicationFactory in integration tests
 public partial class Program { }
+
+internal sealed class MultiTextWriter : System.IO.TextWriter
+{
+    private readonly System.IO.TextWriter[] _writers;
+    public MultiTextWriter(params System.IO.TextWriter[] writers) { _writers = writers; }
+    public override System.Text.Encoding Encoding => System.Text.Encoding.UTF8;
+    public override void Write(char value) { foreach (var w in _writers) w.Write(value); }
+    public override void Write(string? value) { foreach (var w in _writers) w.Write(value); }
+    public override void WriteLine(string? value) { foreach (var w in _writers) w.WriteLine(value); }
+    public override void Flush() { foreach (var w in _writers) w.Flush(); }
+}

@@ -52,6 +52,19 @@ namespace LucidCartographer.Data.Entities
         public DateTime AddedDate { get; set; }
         public DateTime? VisitedDate { get; set; }
 
+        /// <summary>
+        /// False means the background enrichment service should fetch
+        /// detail-page data (address / website / phone) for this POI.
+        /// File imports (KML/GPX/CSV/GeoJSON) set this to true because
+        /// the source file already carries whatever metadata exists.
+        /// Google-scraped rows start as false — the scraper captures only
+        /// what the list card exposes and the background service fills
+        /// the rest by opening each place URL in a headless tab. If
+        /// enrichment fails, the row is left as-is and will be retried
+        /// on the next poll cycle (no retry cap, per design).
+        /// </summary>
+        public bool IsEnriched { get; set; }
+
         [ConcurrencyCheck]
         public int Version { get; set; }
 

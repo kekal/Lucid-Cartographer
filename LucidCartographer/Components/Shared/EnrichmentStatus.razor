@@ -1,0 +1,38 @@
+@rendermode InteractiveServer
+@inject LucidCartographer.Services.Enrichment.EnrichmentProgressService Progress
+@implements IDisposable
+
+@if (_remaining > 0)
+{
+    <div class="flex items-center gap-2 text-xs text-on-surface-variant" title="POIs awaiting background enrichment">
+        <div class="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" aria-hidden="true"></div>
+        <span>Fetching details for new POIs. @_fetched / @_total fetched.</span>
+    </div>
+}
+
+@code {
+    private int _remaining;
+    private int _total;
+    private int _fetched;
+
+    protected override void OnInitialized()
+    {
+        _remaining = Progress.Remaining;
+        _total = Progress.Total;
+        _fetched = Progress.Fetched;
+        Progress.Changed += OnChanged;
+    }
+
+    private void OnChanged()
+    {
+        _remaining = Progress.Remaining;
+        _total = Progress.Total;
+        _fetched = Progress.Fetched;
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Progress.Changed -= OnChanged;
+    }
+}

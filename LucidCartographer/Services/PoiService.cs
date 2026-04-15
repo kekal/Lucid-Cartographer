@@ -58,8 +58,14 @@ namespace LucidCartographer.Services
         public async Task<Dictionary<int, List<Poi>>> GetVisiblePoisGroupedAsync(CancellationToken cancellationToken = default)
         {
             await using var db = await _factory.CreateDbContextAsync(cancellationToken);
+            // Hide Pois that are still waiting for background enrichment.
+            // Scraped rows are created with IsEnriched=false + placeholder
+            // (0,0) coords; the background service flips the flag once it
+            // has pulled real coords + address/website/phone. Showing them
+            // on the map before enrichment would put every pending pin at
+            // null island off the coast of Africa.
             var items = await db.PoiCollectionItems
-                .Where(ci => ci.PoiCollection.IsVisible)
+                .Where(ci => ci.PoiCollection.IsVisible && ci.Poi.IsEnriched)
                 .Select(ci => new { ci.PoiCollectionId, ci.Poi })
                 .ToListAsync(cancellationToken);
 

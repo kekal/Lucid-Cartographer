@@ -37,6 +37,9 @@ namespace LucidCartographer.Data
                 entity.HasIndex(e => new { e.Latitude, e.Longitude });
                 entity.HasIndex(e => e.Status);
                 entity.HasIndex(e => e.Name);
+                // Used by PoiEnrichmentBackgroundService to page through
+                // the queue of un-enriched Pois cheaply.
+                entity.HasIndex(e => e.IsEnriched);
 
                 // Check constraints for data integrity
                 entity.ToTable(t =>
