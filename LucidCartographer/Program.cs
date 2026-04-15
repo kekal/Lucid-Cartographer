@@ -1,6 +1,6 @@
-using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading.RateLimiting;
 using LucidCartographer.Components;
 using LucidCartographer.Data;
 using LucidCartographer.Services;
@@ -8,8 +8,11 @@ using LucidCartographer.Services.Enrichment;
 using LucidCartographer.Services.Export;
 using LucidCartographer.Services.Import;
 using LucidCartographer.Services.Operations;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
+using Polly;
+using Polly.Retry;
 
 // DIAG: tee Console to a log file so scrape logs are readable from outside preview_start
 try
@@ -83,6 +86,70 @@ builder.Services.AddSingleton<EnrichmentProgressService>();
 builder.Services.AddSingleton<EnrichmentTrigger>();
 builder.Services.AddHostedService<PoiEnrichmentBackgroundService>();
 builder.Services.AddScoped<IMapService, LeafletMapService>();
+
+// Polly v8 resilience pipelines.
+// Replaces hand-rolled SemaphoreSlim in GoogleMapsListScraper and adds
+// retry/timeout to Playwright-based scraping + enrichment. Pipelines are
+// registered by name and resolved via ResiliencePipelineProvider<string>.
+//   - "scraper": single-flight (concurrency=1) + timeout + retry. Used for
+//     list scrapes so at most one Chromium instance runs at a time.
+//   - "enrichment": retry + timeout for per-POI enrichment work.
+builder.Services.AddResiliencePipeline("scraper", pipeline =>
+{
+    pipeline
+        .AddConcurrencyLimiter(new ConcurrencyLimiterOptions
+        {
+            PermitLimit = 1,
+            QueueLimit = int.MaxValue
+        })
+        .AddRetry(new RetryStrategyOptions
+        {
+            MaxRetryAttempts = 2,
+            BackoffType = DelayBackoffType.Exponential,
+            UseJitter = true,
+            Delay = TimeSpan.FromSeconds(2)
+        })
+        .AddTimeout(TimeSpan.FromMinutes(10));
+});
+
+builder.Services.AddResiliencePipeline("enrichment", pipeline =>
+{
+    pipeline
+        .AddRetry(new RetryStrategyOptions
+        {
+            MaxRetryAttempts = 3,
+            BackoffType = DelayBackoffType.Exponential,
+            UseJitter = true,
+            Delay = TimeSpan.FromSeconds(1)
+        })
+        .AddTimeout(TimeSpan.FromMinutes(2));
+});
+
+// BCL rate limiter — replaces hand-rolled ConcurrentDictionary counter.
+// 5 attempts per minute per client IP, partitioned fixed window.
+// Semantic drift: counts ALL attempts (success + fail), not just failures.
+// Acceptable for a single-user app — brute-force protection still holds.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, ct) =>
+    {
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        await context.HttpContext.Response.WriteAsync(
+            "Too many login attempts. Try again later.", ct);
+    };
+    options.AddPolicy("login", httpContext =>
+    {
+        var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        return RateLimitPartition.GetFixedWindowLimiter(ip, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 5,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            AutoReplenishment = true
+        });
+    });
+});
 
 // Health checks endpoint
 builder.Services.AddHealthChecks();
@@ -198,15 +265,18 @@ app.Use(async (context, next) =>
 
 app.UseAntiforgery();
 
+app.UseRateLimiter();
+
 app.UseStaticFiles();
 
 // Health check endpoint (MED-01)
 app.MapHealthChecks("/health");
 
-// ARCH-CRIT-03: Rate limiting for login — in-memory counter per IP (5 attempts per minute)
-var _loginAttempts = new ConcurrentDictionary<string, (int count, DateTime windowStart)>();
-
-// ARCH-CRIT-03: Login endpoint with rate limiting, CSRF validation, constant-time comparison, Secure cookie
+// ARCH-CRIT-03: Login endpoint with rate limiting (BCL Microsoft.AspNetCore.RateLimiting),
+// CSRF validation, constant-time comparison, Secure cookie.
+// Rate limit: 5 attempts/min/IP via the "login" policy registered above.
+// Counts ALL attempts (successful + failed) — acceptable semantic drift for
+// a single-user app; brute-force protection still holds.
 app.MapPost("/login", async (HttpContext context) =>
 {
     // ARCH-CRIT-03: Validate antiforgery token on login POST
@@ -218,32 +288,6 @@ app.MapPost("/login", async (HttpContext context) =>
     catch (Microsoft.AspNetCore.Antiforgery.AntiforgeryValidationException)
     {
         context.Response.Redirect("/login?error=1");
-        return;
-    }
-
-    // NEW-01: Periodically clean up expired rate-limiter entries to prevent memory leak
-    if (_loginAttempts.Count > 1000)
-    {
-        var cutoff = DateTime.UtcNow.AddMinutes(-1);
-        foreach (var key in _loginAttempts.Keys.ToList())
-        {
-            if (_loginAttempts.TryGetValue(key, out var entry) && entry.windowStart < cutoff)
-                _loginAttempts.TryRemove(key, out _);
-        }
-    }
-
-    // ARCH-CRIT-03: Rate limiting — block after 5 failed attempts per minute per IP
-    var clientIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-    var now = DateTime.UtcNow;
-    var attempt = _loginAttempts.GetOrAdd(clientIp, _ => (0, now));
-    if ((now - attempt.windowStart).TotalMinutes >= 1)
-    {
-        attempt = (0, now);
-    }
-    if (attempt.count >= 5)
-    {
-        context.Response.StatusCode = 429;
-        await context.Response.WriteAsync("Too many login attempts. Try again later.");
         return;
     }
 
@@ -260,9 +304,6 @@ app.MapPost("/login", async (HttpContext context) =>
 
     if (passwordMatch)
     {
-        // Reset rate limit on success
-        _loginAttempts.TryRemove(clientIp, out _);
-
         context.Response.Cookies.Append("cartographer_auth", ComputeHash(password), new CookieOptions
         {
             HttpOnly = true,
@@ -275,11 +316,9 @@ app.MapPost("/login", async (HttpContext context) =>
     }
     else
     {
-        // Increment failed attempt counter
-        _loginAttempts[clientIp] = (attempt.count + 1, attempt.windowStart);
         context.Response.Redirect("/login?error=1");
     }
-});
+}).RequireRateLimiting("login");
 
 // CRIT-03: Logout endpoint
 app.MapGet("/logout", (HttpContext context) =>
