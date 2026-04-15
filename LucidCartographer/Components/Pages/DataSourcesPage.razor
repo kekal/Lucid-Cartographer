@@ -5,7 +5,6 @@
 @inject IImportJobQueue ImportJobQueue
 @inject ImportJobStatusService ImportJobStatus
 @inject IPoiService PoiService
-@inject IGoogleMapsListScraper Scraper
 @implements IAsyncDisposable
 
 <PageTitle>@UiStrings.DataSourcesPageTitle</PageTitle>
@@ -72,6 +71,7 @@
                          OnFileSelected="HandleFileSelected"
                          IsImporting="_isImporting"
                          ImportingFileName="@_importingFileName"
+                         StatusMessage="@_queuedMessage"
                          ImportResult="_importResult"
                          ImportError="@_importError"
                          ShowFileInput="@(_activeCard != "shared")">
@@ -95,8 +95,8 @@
             {
                 <ScraperPanel Url="@_sharedListUrl"
                               UrlChanged="(val) => _sharedListUrl = val"
-                              IsScraping="_isScraping"
-                              ScrapeProgress="_scrapeProgress"
+                              IsScraping="_isImporting"
+                              ScrapeProgress="0"
                               OnScrape="ScrapeSharedList" />
             }
             else if (_activeCard == "file")
@@ -194,8 +194,6 @@
     private ImportResult? _importResult;
     private string? _importError;
     private string _sharedListUrl = string.Empty;
-    private bool _isScraping = false;
-    private int _scrapeProgress = 0;
     private string? _queuedMessage;
     private CancellationTokenSource _cts = new();
     private IDisposable? _statusSubscription;
@@ -336,42 +334,24 @@
         }
     }
 
-    private async Task ScrapeSharedList()
+    private void ScrapeSharedList()
     {
         if (string.IsNullOrWhiteSpace(_sharedListUrl)) return;
 
-        _isScraping = true;
-        _scrapeProgress = 0;
+        // The whole scrape-then-persist pipeline now runs inside the
+        // background job, so the user can navigate away during the 20–40s
+        // scrape without killing the circuit. The UI reacts to the
+        // ImportJobStatusService Rx stream (BehaviorSubject replays on
+        // subscribe, so returning to the page mid-job shows current state).
         _importResult = null;
         _importError = null;
-        StateHasChanged();
 
         try
         {
-            var result = await Scraper.ScrapeAsync(_sharedListUrl, count =>
-            {
-                _scrapeProgress = count;
-                _ = InvokeAsync(StateHasChanged).ContinueWith(t =>
-                {
-                    if (t.IsFaulted)
-                        System.Diagnostics.Debug.WriteLine($"Scrape progress render failed: {t.Exception?.Message}");
-                }, TaskScheduler.Default);
-            }, _cts.Token);
-
-            if (!result.Pois.Any())
-            {
-                _importError = "No places found. Make sure the URL is a valid Google Maps list.";
-                return;
-            }
-
-            var name = !string.IsNullOrWhiteSpace(_collectionName)
-                ? _collectionName
-                : result.ListName ?? $"Shared List ({result.Pois.Count} places)";
-
             ImportJobQueue.Enqueue(new ImportJobPayload
             {
-                ScrapedPois = result.Pois,
-                CollectionName = name,
+                SharedListUrl = _sharedListUrl,
+                CollectionName = _collectionName, // may be empty — invocable fills a default from the scraped list name
                 Color = _selectedColor
             });
             _collectionName = string.Empty;
@@ -379,11 +359,7 @@
         }
         catch (Exception ex)
         {
-            _importError = $"Scraping failed: {ex.Message}";
-        }
-        finally
-        {
-            _isScraping = false;
+            _importError = $"Failed to queue scrape: {ex.Message}";
         }
     }
 

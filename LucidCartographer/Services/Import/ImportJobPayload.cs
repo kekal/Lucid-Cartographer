@@ -6,9 +6,10 @@ namespace LucidCartographer.Services.Import
     /// payload only carries what Coravel needs to hand across the queue
     /// boundary.
     ///
-    /// Two modes:
-    ///   * File import     — <see cref="TempFilePath"/> + <see cref="FileName"/> set, <see cref="ScrapedPois"/> null.
-    ///   * Scraped import  — <see cref="ScrapedPois"/> set, file fields null.
+    /// Three modes:
+    ///   * File import       — <see cref="TempFilePath"/> + <see cref="FileName"/> set.
+    ///   * Shared-list URL   — <see cref="SharedListUrl"/> set; the invocable runs the scraper server-side.
+    ///   * Already-scraped   — <see cref="ScrapedPois"/> set (reserved for future re-imports; not used from the UI).
     /// </summary>
     public sealed class ImportJobPayload
     {
@@ -19,9 +20,13 @@ namespace LucidCartographer.Services.Import
         public string? TempFilePath { get; init; }
         public string? FileName { get; init; }
 
-        // Scraped mode
+        // Shared Google Maps list URL — scraped inside the job
+        public string? SharedListUrl { get; init; }
+
+        // Already-scraped mode (legacy / re-import path)
         public IReadOnlyList<ImportedPoi>? ScrapedPois { get; init; }
 
-        public bool IsFileImport => TempFilePath != null && FileName != null;
+        public bool IsFileImport  => TempFilePath != null && FileName != null;
+        public bool IsSharedList  => !string.IsNullOrWhiteSpace(SharedListUrl);
     }
 }

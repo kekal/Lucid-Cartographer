@@ -10,8 +10,13 @@ namespace LucidCartographer.Services.Enrichment
     /// <summary>
     /// Polls the Poi table for rows with IsEnriched=false and fills in
     /// address / website / phone by opening each place URL in a headless
-    /// tab. Two parallel tabs share a single Playwright BrowserContext so
-    /// cookies / consent state are reused across tabs and iterations.
+    /// Playwright tab. Enrichment runs <see cref="EnrichmentConcurrency"/>
+    /// POIs in parallel via <see cref="Parallel.ForEachAsync{T}"/>; all
+    /// workers share a single <see cref="IBrowserContext"/> so cookies /
+    /// consent state are reused across tabs and iterations. Each worker
+    /// gets its own <see cref="AppDbContext"/> from the factory — EF Core
+    /// contexts are not thread-safe, but SQLite handles concurrent readers
+    /// and serializes writers for us.
     ///
     /// Failures are not retried with a counter — the row stays
     /// IsEnriched=false and the next poll cycle picks it up again. This
@@ -21,6 +26,8 @@ namespace LucidCartographer.Services.Enrichment
     public class PoiEnrichmentBackgroundService : BackgroundService
     {
         private static readonly TimeSpan IdlePollInterval = TimeSpan.FromSeconds(30);
+        private const int EnrichmentConcurrency = 4;
+        private const int BatchSize = 16;
         private const string UserAgent =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -106,10 +113,11 @@ namespace LucidCartographer.Services.Enrichment
 
         private async Task<int> ProcessBatchAsync(IBrowserContext context, CancellationToken ct)
         {
-            await using var db = await _factory.CreateDbContextAsync(ct);
-
-            var remaining = await db.Pois
-                .CountAsync(p => !p.IsEnriched, ct);
+            int remaining;
+            await using (var db = await _factory.CreateDbContextAsync(ct))
+            {
+                remaining = await db.Pois.CountAsync(p => !p.IsEnriched, ct);
+            }
             _progress.Set(remaining);
 
             if (remaining == 0) return 0;
@@ -117,96 +125,132 @@ namespace LucidCartographer.Services.Enrichment
             _logger.LogInformation("Enriching queue: {Remaining} Pois pending", remaining);
 
             int processed = 0;
-            // One POI per iteration: save + publish progress after each so the
-            // map page reloads incrementally and the header counter ticks up
-            // per-POI. Simpler than batching + parallel tabs, and the user
-            // sees motion immediately.
+
+            // Pull a batch of pending IDs, fan them out across
+            // `EnrichmentConcurrency` parallel Playwright tabs (all sharing
+            // the same BrowserContext), then loop until the queue drains.
+            // Each worker owns its own DbContext because EF Core contexts
+            // are not thread-safe.
             while (!ct.IsCancellationRequested)
             {
-                var poi = await db.Pois
-                    .Where(p => !p.IsEnriched)
-                    .OrderBy(p => p.Id)
-                    .FirstOrDefaultAsync(ct);
-
-                if (poi == null) break;
-
-                var page = await context.NewPageAsync();
-                try
+                List<int> batchIds;
+                await using (var loadDb = await _factory.CreateDbContextAsync(ct))
                 {
-                    // Pick entry point based on what the scraper captured:
-                    //   - if GoogleMapsUrl already contains /maps/place/, open it directly;
-                    //   - otherwise run a Google Maps name search (scraper left
-                    //     coords at 0,0 because the list card was anchor-less).
-                    // "enrichment" Polly pipeline: retry (3 attempts,
-                    // jittered exponential backoff) + 2-minute per-attempt
-                    // timeout. Previously there were no retries — transient
-                    // Playwright failures left IsEnriched=false and the POI
-                    // waited for the next idle poll cycle (up to 30s) before
-                    // being retried from scratch.
-                    var details = await _pipeline.ExecuteAsync(async innerCt =>
+                    batchIds = await loadDb.Pois
+                        .Where(p => !p.IsEnriched)
+                        .OrderBy(p => p.Id)
+                        .Take(BatchSize)
+                        .Select(p => p.Id)
+                        .ToListAsync(ct);
+                }
+
+                if (batchIds.Count == 0) break;
+
+                await Parallel.ForEachAsync(
+                    batchIds,
+                    new ParallelOptions
                     {
-                        if (!string.IsNullOrEmpty(poi.GoogleMapsUrl) && poi.GoogleMapsUrl.Contains("/maps/place/"))
-                        {
-                            return await PoiDetailEnricher.EnrichAsync(page, poi.GoogleMapsUrl!, innerCt);
-                        }
-                        // Use the category as a disambiguation hint; if the
-                        // card had no category, fall back to the first line
-                        // of the description.
-                        return await PoiDetailEnricher.EnrichByNameAsync(page, poi.Name, poi.Category, innerCt);
-                    }, ct);
-
-                    // Fill empty fields only — never overwrite user edits. A
-                    // manual edit on a previously enriched row wouldn't come
-                    // through here anyway (IsEnriched=true filters it out),
-                    // but this keeps the intent explicit.
-                    if (string.IsNullOrEmpty(poi.Address)) poi.Address = details.Address;
-                    if (string.IsNullOrEmpty(poi.Website)) poi.Website = details.Website;
-                    if (string.IsNullOrEmpty(poi.Phone)) poi.Phone = details.Phone;
-
-                    // If the scraper left placeholder (0,0) coords, fill real
-                    // ones from the enrichment result. Leave non-zero values
-                    // alone so KML/GPX imports that already had coords are
-                    // not overwritten.
-                    if (poi.Latitude == 0 && poi.Longitude == 0 && details.Latitude.HasValue && details.Longitude.HasValue)
+                        MaxDegreeOfParallelism = EnrichmentConcurrency,
+                        CancellationToken = ct
+                    },
+                    async (poiId, innerCt) =>
                     {
-                        poi.Latitude = details.Latitude.Value;
-                        poi.Longitude = details.Longitude.Value;
-                    }
+                        await EnrichOneAsync(context, poiId, innerCt);
+                    });
 
-                    if (string.IsNullOrEmpty(poi.GoogleMapsUrl) && !string.IsNullOrEmpty(details.GoogleMapsUrl))
-                        poi.GoogleMapsUrl = details.GoogleMapsUrl;
+                processed += batchIds.Count;
 
-                    poi.IsEnriched = true;
-
-                    _logger.LogInformation(
-                        "Enriched Poi {Id} '{Name}' (addr={Addr} web={Web} phone={Phone})",
-                        poi.Id, poi.Name,
-                        details.Address is null ? "-" : "y",
-                        details.Website is null ? "-" : "y",
-                        details.Phone is null ? "-" : "y");
-                }
-                catch (Exception ex)
+                // One progress refresh per batch is enough; the per-POI
+                // updates inside EnrichOneAsync already tick the counter
+                // down as workers complete.
+                await using (var progressDb = await _factory.CreateDbContextAsync(ct))
                 {
-                    // Leave IsEnriched=false — next poll cycle will retry.
-                    _logger.LogWarning(ex,
-                        "Enrichment failed for Poi {Id} '{Name}' — will retry next cycle",
-                        poi.Id, poi.Name);
+                    var newRemaining = await progressDb.Pois.CountAsync(p => !p.IsEnriched, ct);
+                    _progress.Set(newRemaining);
                 }
-                finally
-                {
-                    try { await page.CloseAsync(); } catch { }
-                }
-
-                // Persist this POI and publish progress before moving on.
-                await db.SaveChangesAsync(ct);
-                processed++;
-
-                var newRemaining = await db.Pois
-                    .CountAsync(p => !p.IsEnriched, ct);
-                _progress.Set(newRemaining);
             }
 
             return processed;
+        }
+
+        private async Task EnrichOneAsync(IBrowserContext context, int poiId, CancellationToken ct)
+        {
+            await using var db = await _factory.CreateDbContextAsync(ct);
+            var poi = await db.Pois.FirstOrDefaultAsync(p => p.Id == poiId, ct);
+            if (poi == null || poi.IsEnriched) return;
+
+            var page = await context.NewPageAsync();
+            try
+            {
+                // Pick entry point based on what the scraper captured:
+                //   - if GoogleMapsUrl already contains /maps/place/, open it directly;
+                //   - otherwise run a Google Maps name search (scraper left
+                //     coords at 0,0 because the list card was anchor-less).
+                // "enrichment" Polly pipeline: retry (3 attempts,
+                // jittered exponential backoff) + 2-minute per-attempt
+                // timeout. Transient Playwright failures are retried
+                // in-place; terminal failures leave IsEnriched=false so
+                // the next idle poll cycle re-picks the row.
+                var details = await _pipeline.ExecuteAsync(async innerCt =>
+                {
+                    if (!string.IsNullOrEmpty(poi.GoogleMapsUrl) && poi.GoogleMapsUrl.Contains("/maps/place/"))
+                    {
+                        return await PoiDetailEnricher.EnrichAsync(page, poi.GoogleMapsUrl!, innerCt);
+                    }
+                    return await PoiDetailEnricher.EnrichByNameAsync(page, poi.Name, poi.Category, innerCt);
+                }, ct);
+
+                // Fill empty fields only — never overwrite user edits.
+                if (string.IsNullOrEmpty(poi.Address)) poi.Address = details.Address;
+                if (string.IsNullOrEmpty(poi.Website)) poi.Website = details.Website;
+                if (string.IsNullOrEmpty(poi.Phone)) poi.Phone = details.Phone;
+
+                if (poi.Latitude == 0 && poi.Longitude == 0 && details.Latitude.HasValue && details.Longitude.HasValue)
+                {
+                    poi.Latitude = details.Latitude.Value;
+                    poi.Longitude = details.Longitude.Value;
+                }
+
+                if (string.IsNullOrEmpty(poi.GoogleMapsUrl) && !string.IsNullOrEmpty(details.GoogleMapsUrl))
+                    poi.GoogleMapsUrl = details.GoogleMapsUrl;
+
+                poi.IsEnriched = true;
+
+                _logger.LogInformation(
+                    "Enriched Poi {Id} '{Name}' (addr={Addr} web={Web} phone={Phone})",
+                    poi.Id, poi.Name,
+                    details.Address is null ? "-" : "y",
+                    details.Website is null ? "-" : "y",
+                    details.Phone is null ? "-" : "y");
+            }
+            catch (Exception ex)
+            {
+                // Leave IsEnriched=false — next poll cycle will retry.
+                _logger.LogWarning(ex,
+                    "Enrichment failed for Poi {Id} '{Name}' — will retry next cycle",
+                    poi.Id, poi.Name);
+                return;
+            }
+            finally
+            {
+                try { await page.CloseAsync(); } catch { }
+            }
+
+            try
+            {
+                await db.SaveChangesAsync(ct);
+
+                // Per-POI tick: re-read the counter so the map page
+                // header updates as each worker finishes.
+                var newRemaining = await db.Pois.CountAsync(p => !p.IsEnriched, ct);
+                _progress.Set(newRemaining);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Persisting enrichment for Poi {Id} '{Name}' failed — will retry next cycle",
+                    poi.Id, poi.Name);
+            }
         }
     }
 }

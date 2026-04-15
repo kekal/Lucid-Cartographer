@@ -47,7 +47,11 @@
     {
         <div class="mt-4 flex items-center gap-3 text-primary" aria-live="polite">
             <div class="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
-            <span>Importing @ImportingFileName...</span>
+            <span>
+                @(!string.IsNullOrWhiteSpace(StatusMessage)
+                    ? StatusMessage
+                    : $"Importing {ImportingFileName}...")
+            </span>
         </div>
     }
 
@@ -92,6 +96,12 @@
     [Parameter] public RenderFragment? ChildContent { get; set; }
     [Parameter] public bool IsImporting { get; set; }
     [Parameter] public string? ImportingFileName { get; set; }
+    /// <summary>
+    /// Optional status line shown next to the spinner while
+    /// <see cref="IsImporting"/> is true. Falls back to
+    /// "Importing {ImportingFileName}..." when null/empty.
+    /// </summary>
+    [Parameter] public string? StatusMessage { get; set; }
     [Parameter] public ImportResult? ImportResult { get; set; }
     [Parameter] public string? ImportError { get; set; }
     /// <summary>
