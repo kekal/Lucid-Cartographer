@@ -19,6 +19,10 @@
     <PackageReference Include="Microsoft.Playwright" Version="1.49.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="LucidCartographer.Tests" />
+  </ItemGroup>
+
   <!--
     Tailwind CSS compile step for local `dotnet run`.
     The Dockerfile already does this during image build; this target makes
