@@ -170,9 +170,22 @@ namespace LucidCartographer.Services.Import
             }
 
             // Tier 2: exact name + geographic proximity.
+            //
+            // Guard: proximity matching is meaningless when either side has
+            // placeholder (0,0) coordinates. Google list scrapes emit cards
+            // at (0,0) until enrichment fills in real coords, so distinct
+            // playgrounds, rail-bike stops, viewpoints, etc. that share a
+            // common name (e.g. "Plac zabaw") would all collapse into one
+            // row because the (0,0)↔(0,0) Haversine distance is 0m < 100m.
+            // Wait for enrichment to land real coords before trusting
+            // proximity as a dedup signal.
+            if (imported.Latitude == 0 && imported.Longitude == 0)
+                return null;
+
             var nameLower = imported.Name.ToLowerInvariant().Trim();
             return _existingByName.FirstOrDefault(c =>
                 c.Name.ToLowerInvariant() == nameLower &&
+                !(c.Latitude == 0 && c.Longitude == 0) &&
                 GeoUtils.HaversineDistance(c.Latitude, c.Longitude, imported.Latitude, imported.Longitude)
                     < ProximityThresholdMeters);
         }

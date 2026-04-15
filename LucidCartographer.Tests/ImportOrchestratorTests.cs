@@ -228,5 +228,50 @@ namespace LucidCartographer.Tests
             var signaled = await trigger.WaitAsync(TimeSpan.FromMilliseconds(200), CancellationToken.None);
             signaled.Should().BeFalse("EnrichmentTrigger.Signal() should NOT fire when the import added zero rows");
         }
+
+        [Fact]
+        public async Task ImportFromScrapedAsync_DistinctPoisSharingANameAtPlaceholderCoordsAreNotDeduped()
+        {
+            // Regression: a Google Maps list scrape emits cards without
+            // href coordinates at placeholder (0,0) until enrichment fills
+            // in the real values. Two distinct playgrounds both named
+            // "Plac zabaw" must NOT be collapsed into one row just because
+            // the (0,0)↔(0,0) Haversine distance trivially satisfies the
+            // 100 m proximity threshold of the name-based tier-2 dedup.
+            // Original symptom: a 230-item list imported as only 226 rows.
+            var factory = TestDbHelper.CreateFactory();
+            var orchestrator = CreateOrchestrator(factory);
+
+            var scraped = new List<ImportedPoi>
+            {
+                new("Plac zabaw",                       0, 0, null, null, "Playground"),
+                new("Plac zabaw",                       0, 0, null, null, "Playground"),
+                new("Plac zabaw",                       0, 0, null, null, "Playground"),
+                new("Bieszczadzkie Drezyny Rowerowe",   0, 0, null, null, "Tourist attraction"),
+                new("Bieszczadzkie Drezyny Rowerowe",   0, 0, null, null, "Tourist attraction"),
+                new("Unique Place",                     50.0, 20.0, null, null, "Attraction"),
+            };
+
+            var result = await orchestrator.ImportFromScrapedAsync(scraped, "Poland with kids");
+
+            result.TotalParsed.Should().Be(6);
+            result.AddedCount.Should().Be(6, "distinct POIs at placeholder (0,0) must survive dedup until enrichment lands real coords");
+            result.SkippedCount.Should().Be(0);
+
+            await using var db = factory.CreateDbContext();
+            var rows = await db.PoiCollectionItems
+                .Where(ci => ci.PoiCollectionId == result.CollectionId)
+                .CountAsync();
+            rows.Should().Be(6, "the collection should have one PoiCollectionItem per scraped card");
+
+            // And the three "Plac zabaw" rows should be distinct Poi.Id values,
+            // not three links to the same row.
+            var placZabawIds = await db.PoiCollectionItems
+                .Where(ci => ci.PoiCollectionId == result.CollectionId && ci.Poi.Name == "Plac zabaw")
+                .Select(ci => ci.PoiId)
+                .ToListAsync();
+            placZabawIds.Should().HaveCount(3);
+            placZabawIds.Distinct().Should().HaveCount(3, "three distinct playgrounds must map to three distinct Poi rows");
+        }
     }
 }
