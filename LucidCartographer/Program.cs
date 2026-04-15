@@ -228,8 +228,14 @@ app.Use(async (context, next) =>
     await next();
 });
 
-// ARCH-HIGH-06: Response compression placed AFTER security headers to avoid BREACH issues
-app.UseResponseCompression();
+// ARCH-HIGH-06: Response compression placed AFTER security headers to avoid BREACH issues.
+// Skipped in Development so `dotnet watch` browser-refresh and BrowserLink can inject
+// their hot-reload script into uncompressed HTML responses — compressed responses cause
+// "Unable to configure browser refresh script injection ... Content-Encoding: 'br'" warnings.
+if (!app.Environment.IsDevelopment())
+{
+    app.UseResponseCompression();
+}
 
 // ARCH-CRIT-03: Simple password + cookie authentication middleware (hardened).
 // LIMITATION: This is homebrew SHA256 cookie auth — no session tokens, no revocation,
