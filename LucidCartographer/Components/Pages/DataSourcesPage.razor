@@ -2,7 +2,8 @@
 @rendermode InteractiveServer
 @using LucidCartographer.Services.Import
 @using LucidCartographer.Data.Entities
-@inject IImportOrchestrator ImportOrchestrator
+@inject IImportJobQueue ImportJobQueue
+@inject ImportJobStatusService ImportJobStatus
 @inject IPoiService PoiService
 @inject IGoogleMapsListScraper Scraper
 @implements IAsyncDisposable
@@ -195,7 +196,9 @@
     private string _sharedListUrl = string.Empty;
     private bool _isScraping = false;
     private int _scrapeProgress = 0;
+    private string? _queuedMessage;
     private CancellationTokenSource _cts = new();
+    private IDisposable? _statusSubscription;
 
     private string _uploadTitle => _activeCard switch
     {
@@ -226,6 +229,43 @@
     protected override async Task OnInitializedAsync()
     {
         await LoadCollections();
+
+        // Subscribe to background-import lifecycle events. BehaviorSubject
+        // replays the latest value on subscribe, so we pick up a job that
+        // was enqueued on another circuit / by an earlier visit and is
+        // still running. This is the whole point of the Coravel refactor:
+        // the user can navigate away and come back and still see status.
+        _statusSubscription = ImportJobStatus.Changes.Subscribe(status =>
+        {
+            _ = InvokeAsync(async () =>
+            {
+                switch (status.State)
+                {
+                    case ImportJobState.Queued:
+                        _isImporting = true;
+                        _queuedMessage = status.Message;
+                        _importError = null;
+                        _importResult = null;
+                        break;
+                    case ImportJobState.Running:
+                        _isImporting = true;
+                        _queuedMessage = status.Message;
+                        break;
+                    case ImportJobState.Completed:
+                        _isImporting = false;
+                        _importResult = status.Result;
+                        _queuedMessage = null;
+                        await LoadCollections();
+                        break;
+                    case ImportJobState.Failed:
+                        _isImporting = false;
+                        _importError = status.Error ?? status.Message;
+                        _queuedMessage = null;
+                        break;
+                }
+                StateHasChanged();
+            });
+        });
     }
 
     private async Task LoadCollections()
@@ -265,21 +305,33 @@
         try
         {
             const long MaxUploadSizeBytes = 10 * 1024 * 1024; // 10MB max
-            using var stream = file.OpenReadStream(maxAllowedSize: MaxUploadSizeBytes);
-            using var ms = new MemoryStream();
-            await stream.CopyToAsync(ms);
-            ms.Position = 0;
 
-            _importResult = await ImportOrchestrator.ImportAsync(ms, file.Name, _collectionName, _selectedColor, _cts.Token);
-            await LoadCollections();
+            // The browser-side stream only lives for the duration of this
+            // SignalR invocation, so we drop the bytes onto disk before
+            // enqueuing. The invocable owns the temp file afterwards and
+            // deletes it once the job completes (success OR failure).
+            var tempPath = Path.Combine(Path.GetTempPath(),
+                $"lucid-import-{Guid.NewGuid():N}{Path.GetExtension(file.Name)}");
+            await using (var tempStream = File.Create(tempPath))
+            await using (var upload = file.OpenReadStream(maxAllowedSize: MaxUploadSizeBytes))
+            {
+                await upload.CopyToAsync(tempStream, _cts.Token);
+            }
+
+            ImportJobQueue.Enqueue(new ImportJobPayload
+            {
+                TempFilePath = tempPath,
+                FileName = file.Name,
+                CollectionName = _collectionName,
+                Color = _selectedColor
+            });
             _collectionName = string.Empty;
+            // _isImporting / _queuedMessage are driven by the status
+            // subscription from here on; leave them alone.
         }
         catch (Exception ex)
         {
             _importError = ex.Message;
-        }
-        finally
-        {
             _isImporting = false;
         }
     }
@@ -316,8 +368,12 @@
                 ? _collectionName
                 : result.ListName ?? $"Shared List ({result.Pois.Count} places)";
 
-            _importResult = await ImportOrchestrator.ImportFromScrapedAsync(result.Pois, name, _selectedColor);
-            await LoadCollections();
+            ImportJobQueue.Enqueue(new ImportJobPayload
+            {
+                ScrapedPois = result.Pois,
+                CollectionName = name,
+                Color = _selectedColor
+            });
             _collectionName = string.Empty;
             _sharedListUrl = string.Empty;
         }
@@ -352,6 +408,7 @@
 
     public ValueTask DisposeAsync()
     {
+        _statusSubscription?.Dispose();
         _cts.Cancel();
         _cts.Dispose();
         return ValueTask.CompletedTask;

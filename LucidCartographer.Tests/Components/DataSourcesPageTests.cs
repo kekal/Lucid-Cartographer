@@ -30,6 +30,11 @@ namespace LucidCartographer.Tests.Components
             Services.AddScoped<IFileImporter, CsvImporter>();
             Services.AddScoped<IImportOrchestrator, ImportOrchestrator>();
             Services.AddScoped<IGoogleMapsListScraper>(_ => Mock.Of<IGoogleMapsListScraper>());
+            // Background-import wiring: the page now enqueues via
+            // IImportJobQueue and subscribes to ImportJobStatusService
+            // instead of awaiting IImportOrchestrator directly.
+            Services.AddSingleton<ImportJobStatusService>();
+            Services.AddSingleton<IImportJobQueue>(_ => Mock.Of<IImportJobQueue>());
         }
 
         // ── Initial Render ──────────────────────────────────────────────────
