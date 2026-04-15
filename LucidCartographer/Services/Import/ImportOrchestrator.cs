@@ -1,6 +1,5 @@
 using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
-using LucidCartographer.Extensions;
 using LucidCartographer.Services.Enrichment;
 using LucidCartographer.Services.Operations;
 using Microsoft.EntityFrameworkCore;

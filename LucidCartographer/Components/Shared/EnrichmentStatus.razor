@@ -14,13 +14,13 @@
     private int _remaining;
     private int _total;
     private int _fetched;
+    private IDisposable? _subscription;
 
     protected override void OnInitialized()
     {
-        _remaining = Progress.Remaining;
-        _total = Progress.Total;
-        _fetched = Progress.Fetched;
-        Progress.Changed += OnChanged;
+        // BehaviorSubject replays the current value on subscribe, so this
+        // handles both the initial snapshot and subsequent updates.
+        _subscription = Progress.Changes.Subscribe(_ => OnChanged());
     }
 
     private void OnChanged()
@@ -33,6 +33,6 @@
 
     public void Dispose()
     {
-        Progress.Changed -= OnChanged;
+        _subscription?.Dispose();
     }
 }

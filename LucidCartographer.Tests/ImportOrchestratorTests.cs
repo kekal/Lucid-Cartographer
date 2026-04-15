@@ -1,6 +1,7 @@
 using FluentAssertions;
 using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
+using LucidCartographer.Services.Enrichment;
 using LucidCartographer.Services.Import;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -18,7 +19,7 @@ namespace LucidCartographer.Tests
         };
 
         private ImportOrchestrator CreateOrchestrator(IDbContextFactory<AppDbContext> factory) =>
-            new(factory, _importers, NullLogger<ImportOrchestrator>.Instance);
+            new(factory, _importers, new EnrichmentTrigger(), NullLogger<ImportOrchestrator>.Instance);
 
         [Fact]
         public async Task ImportAsync_CreatesCollectionWithCorrectMetadata()
