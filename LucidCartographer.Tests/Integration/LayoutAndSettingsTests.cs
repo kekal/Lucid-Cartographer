@@ -89,15 +89,24 @@ namespace LucidCartographer.Tests.Integration
 
             var mapTab = Page.Locator("nav a:has-text('Map')");
             var classes = await mapTab.GetAttributeAsync("class");
-
-            // Check if the active class or styling indicates it's active
-            // NavLink adds "active" class or border styling when active
             var ariaAttr = await mapTab.GetAttributeAsync("aria-current");
 
+            // Verify at least ONE active indicator: text-primary class OR aria-current="page"
+            var hasActiveClass = classes != null && classes.Contains("text-primary");
+            var hasAriaCurrent = ariaAttr == "page";
+
             Assert.True(
-                classes != null && classes.Contains("text-primary") ||
-                ariaAttr == "page",
-                "Map tab should be visually active with primary color or aria-current");
+                hasActiveClass || hasAriaCurrent,
+                $"Map tab should have active indicator. Classes: '{classes}', aria-current: '{ariaAttr}'");
+
+            // Also verify inactive tabs do NOT have active indicators
+            var dataSourcesTab = Page.Locator("nav a:has-text('Data Sources')");
+            var dsClasses = await dataSourcesTab.GetAttributeAsync("class");
+            var dsAria = await dataSourcesTab.GetAttributeAsync("aria-current");
+            var dsIsActive = dsClasses != null && dsClasses.Contains("text-primary") || dsAria == "page";
+
+            Assert.False(dsIsActive,
+                "Data Sources tab should NOT be active on Map page");
         }
 
         [Fact]
@@ -110,10 +119,22 @@ namespace LucidCartographer.Tests.Integration
             var classes = await dataSourcesTab.GetAttributeAsync("class");
             var ariaAttr = await dataSourcesTab.GetAttributeAsync("aria-current");
 
+            // Verify at least ONE active indicator
+            var hasActiveClass = classes != null && classes.Contains("text-primary");
+            var hasAriaCurrent = ariaAttr == "page";
+
             Assert.True(
-                classes != null && classes.Contains("text-primary") ||
-                ariaAttr == "page",
-                "Data Sources tab should be visually active");
+                hasActiveClass || hasAriaCurrent,
+                $"Data Sources tab should be visually active. Classes: '{classes}', aria-current: '{ariaAttr}'");
+
+            // Verify other tabs are NOT active
+            var mapTab = Page.Locator("nav a:has-text('Map')");
+            var mapClasses = await mapTab.GetAttributeAsync("class");
+            var mapAria = await mapTab.GetAttributeAsync("aria-current");
+            var mapIsActive = mapClasses != null && mapClasses.Contains("text-primary") || mapAria == "page";
+
+            Assert.False(mapIsActive,
+                "Map tab should NOT be active on DataSources page");
         }
 
         [Fact]
@@ -126,10 +147,22 @@ namespace LucidCartographer.Tests.Integration
             var classes = await operationsTab.GetAttributeAsync("class");
             var ariaAttr = await operationsTab.GetAttributeAsync("aria-current");
 
+            // Verify at least ONE active indicator
+            var hasActiveClass = classes != null && classes.Contains("text-primary");
+            var hasAriaCurrent = ariaAttr == "page";
+
             Assert.True(
-                classes != null && classes.Contains("text-primary") ||
-                ariaAttr == "page",
-                "Operations tab should be visually active");
+                hasActiveClass || hasAriaCurrent,
+                $"Operations tab should be visually active. Classes: '{classes}', aria-current: '{ariaAttr}'");
+
+            // Verify other tabs are NOT active
+            var mapTab = Page.Locator("nav a:has-text('Map')");
+            var mapClasses = await mapTab.GetAttributeAsync("class");
+            var mapAria = await mapTab.GetAttributeAsync("aria-current");
+            var mapIsActive = mapClasses != null && mapClasses.Contains("text-primary") || mapAria == "page";
+
+            Assert.False(mapIsActive,
+                "Map tab should NOT be active on Operations page");
         }
 
         [Fact]
@@ -143,12 +176,21 @@ namespace LucidCartographer.Tests.Integration
             var logoutLink = Page.Locator("a[aria-label='Logout']");
             var navLinks = Page.Locator("nav a");
 
-            Assert.True(await title.IsVisibleAsync(), "App title should be visible");
+            Assert.True(await title.IsVisibleAsync(), "App title 'Lucid Cartographer' should be visible");
             Assert.True(await searchInput.IsVisibleAsync(), "Search input should be visible");
             Assert.True(await logoutLink.IsVisibleAsync(), "Logout link should be visible");
 
             var navCount = await navLinks.CountAsync();
-            Assert.True(navCount >= 3, "Should have at least 3 navigation links");
+            Assert.True(navCount >= 3, $"Should have at least 3 navigation links, found {navCount}");
+
+            // Verify each tab is actually clickable and present
+            var mapTab = Page.Locator("nav a:has-text('Map')");
+            var dataSourcesTab = Page.Locator("nav a:has-text('Data Sources')");
+            var operationsTab = Page.Locator("nav a:has-text('Operations')");
+
+            Assert.True(await mapTab.IsVisibleAsync(), "Map tab should be present");
+            Assert.True(await dataSourcesTab.IsVisibleAsync(), "Data Sources tab should be present");
+            Assert.True(await operationsTab.IsVisibleAsync(), "Operations tab should be present");
         }
 
         [Fact]

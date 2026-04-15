@@ -12,7 +12,7 @@ namespace LucidCartographer.Tests.Integration
             // Do NOT seed any data
             await NavigateAndWaitAsync("/");
 
-            // Verify sidebar shows empty state message
+            // Verify sidebar shows empty state message (check for actual text)
             var emptyMessage = Page.Locator("text=No collections yet").Or(
                 Page.Locator("text=Import data to get started").Or(
                 Page.Locator("text=No collections")));
@@ -20,12 +20,15 @@ namespace LucidCartographer.Tests.Integration
             Assert.True(await emptyMessage.IsVisibleAsync(),
                 "Sidebar should show empty state message when no collections exist");
 
-            // Verify POI table shows empty state
-            var tableEmpty = Page.Locator("text=No POIs to display").Or(
-                Page.Locator("text=Select a collection"));
+            // Verify POI table shows empty state with actual message text
+            var tableEmptyMsg = Page.Locator("text=No POIs to display");
+            Assert.True(await tableEmptyMsg.IsVisibleAsync(),
+                "POI table should display 'No POIs to display' when no collection is selected");
 
-            Assert.True(await tableEmpty.IsVisibleAsync(),
-                "POI table should show empty state message");
+            // Verify table body is empty (no rows)
+            var tableRows = Page.Locator("tbody tr");
+            var rowCount = await tableRows.CountAsync();
+            Assert.Equal(0, rowCount);
         }
 
         [Fact]
@@ -45,7 +48,16 @@ namespace LucidCartographer.Tests.Integration
             Assert.True(firstOptionText.Contains("Select collection") || firstOptionText.Contains("Select"),
                 "First option should be a placeholder");
 
-            // Verify dropdown B only contains "Select collection..." option
+            // Verify operations page shows empty state message
+            var emptyStateMsg = Page.Locator("text=No data available").Or(
+                Page.Locator("text=Import data")).Or(
+                Page.Locator("text=Select collections to begin"));
+
+            var showsEmptyMsg = await emptyStateMsg.IsVisibleAsync();
+            Assert.True(showsEmptyMsg || options.Count == 1,
+                "Operations page should show empty state message or only placeholder option when no data seeded");
+
+            // Verify dropdown B has same structure as dropdown A
             var dropdownB = Page.Locator("select").Last;
             var optionsB = await dropdownB.Locator("option").AllAsync();
             Assert.Equal(options.Count, optionsB.Count);

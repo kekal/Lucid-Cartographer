@@ -158,5 +158,52 @@ namespace LucidCartographer.Tests.Integration
             Assert.True(string.IsNullOrEmpty(searchValue),
                 $"Search input should be empty after navigation, got: '{searchValue}'");
         }
+
+        /// <summary>
+        /// Test: Import status persists across page navigation (BehaviorSubject replay)
+        /// Start file import → navigate to Map → return to DataSources → assert import status is still visible
+        /// Verifies that ImportJobStatusService's BehaviorSubject correctly replays state on resubscribe.
+        /// </summary>
+        [Fact]
+        public async Task ImportJobStatus_PersistsAfterNavigationAwayAndBack()
+        {
+            await NavigateToDataSourcesAsync();
+
+            // Open file upload card
+            await Page.Locator("h3:has-text('KML/GPX Upload')").ClickAsync();
+            await Page.WaitForSelectorAsync("h3:has-text('Import File')", new() { Timeout = 5000 });
+
+            // Fill collection name
+            await Page.Locator("input[placeholder*='Poland']").FillAsync("Status Test Collection");
+            await Page.Locator("input[placeholder*='Poland']").PressAsync("Tab");
+
+            // Upload file (triggers import)
+            var filePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestData", "sample.gpx");
+            await Page.Locator("input[type='file']").SetInputFilesAsync(filePath);
+
+            // Wait for import to START (not complete) — we want to catch it in progress
+            // Look for a "Processing" or "In Progress" indicator
+            await Page.WaitForSelectorAsync(
+                "span:has-text('Processing') , span:has-text('Importing') , span:has-text('Import in progress')",
+                new() { State = WaitForSelectorState.Attached, Timeout = 10000 });
+
+            // Navigate away to Map BEFORE import completes
+            await ClickMapTabAsync();
+
+            // Verify Map loaded and no import indicators are shown there
+            await Page.WaitForSelectorAsync("div[id^='leaflet-map-']", new() { State = WaitForSelectorState.Attached, Timeout = 10000 });
+
+            // Navigate back to DataSources
+            await ClickDataSourcesTabAsync();
+
+            // Verify the import status is STILL visible on DataSources page after returning
+            // The BehaviorSubject should have replayed the current state
+            var statusVisible = await Page.Locator(
+                "span:has-text('Processing') , span:has-text('Importing') , span:has-text('Import complete') , span:has-text('In progress')"
+            ).IsVisibleAsync();
+
+            Assert.True(statusVisible,
+                "Import job status should still be visible after navigating away and returning (BehaviorSubject replay)");
+        }
     }
 }
