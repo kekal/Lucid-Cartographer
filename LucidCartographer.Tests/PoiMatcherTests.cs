@@ -155,5 +155,52 @@ namespace LucidCartographer.Tests
 
             _matcher.IsMatch(a, b).Should().BeTrue();
         }
+
+        [Fact]
+        public void IsMatch_OneHasUrlOtherDoesNot_UsesProximityMatching()
+        {
+            // When only one has a URL, it should fall back to proximity + name matching
+            var a = CreatePoi(1, "Coffee Shop", 52.22970, 21.01220, "https://maps.google.com/place/abc");
+            var b = CreatePoi(2, "Coffee Shop", 52.22975, 21.01225); // No URL
+
+            _matcher.IsMatch(a, b).Should().BeTrue();
+        }
+
+        [Fact]
+        public void IsMatch_DifferentUrlsDenyMatch_ReturnsFalseImmediately()
+        {
+            // If both have URLs but they differ, it's an immediate false (OPS-H05)
+            var a = CreatePoi(1, "Coffee Shop", 52.22970, 21.01220, "https://maps.google.com/place/abc");
+            var b = CreatePoi(2, "Coffee Shop", 52.22970, 21.01220, "https://maps.google.com/place/xyz");
+
+            _matcher.IsMatch(a, b).Should().BeFalse();
+        }
+
+        [Fact]
+        public void FindMatch_MultipleMatches_ReturnsBestByDistance()
+        {
+            var poi = CreatePoi(1, "Coffee Shop", 52.22970, 21.01220);
+            var candidates = new[]
+            {
+                CreatePoi(2, "Coffee Shop", 52.22980, 21.01230), // Further away
+                CreatePoi(3, "Coffee Shop", 52.22972, 21.01222), // Closest
+                CreatePoi(4, "Coffee Shop", 52.22975, 21.01225)  // Medium distance
+            };
+
+            var result = _matcher.FindMatch(poi, candidates);
+
+            result.Should().NotBeNull();
+            result!.Id.Should().Be(3); // Closest match
+        }
+
+        [Fact]
+        public void NameSimilarity_EmptyName_ReturnsZero()
+        {
+            // Empty names should have zero similarity
+            var a = CreatePoi(1, "", 52.22970, 21.01220);
+            var b = CreatePoi(2, "Coffee Shop", 52.22975, 21.01225);
+
+            _matcher.IsMatch(a, b).Should().BeFalse();
+        }
     }
 }
