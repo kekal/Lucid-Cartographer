@@ -1,6 +1,5 @@
 using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
-using LucidCartographer.Extensions;
 using LucidCartographer.Services.Operations;
 using Microsoft.EntityFrameworkCore;
 
@@ -140,6 +139,7 @@ namespace LucidCartographer.Services.Import
             return await _db.PoiCollectionItems
                 .Where(ci => ci.PoiCollectionId == _collection.Id)
                 .Select(ci => ci.PoiId)
+                .AsAsyncEnumerable()
                 .ToHashSetAsync(_ct);
         }
 
