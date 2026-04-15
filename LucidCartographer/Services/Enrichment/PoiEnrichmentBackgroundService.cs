@@ -2,6 +2,8 @@ using LucidCartographer.Data;
 using LucidCartographer.Services.Import;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Playwright;
+using Polly;
+using Polly.Registry;
 
 namespace LucidCartographer.Services.Enrichment
 {
@@ -27,17 +29,20 @@ namespace LucidCartographer.Services.Enrichment
         private readonly EnrichmentProgressService _progress;
         private readonly EnrichmentTrigger _trigger;
         private readonly ILogger<PoiEnrichmentBackgroundService> _logger;
+        private readonly ResiliencePipeline _pipeline;
 
         public PoiEnrichmentBackgroundService(
             IDbContextFactory<AppDbContext> factory,
             EnrichmentProgressService progress,
             EnrichmentTrigger trigger,
+            ResiliencePipelineProvider<string> pipelineProvider,
             ILogger<PoiEnrichmentBackgroundService> logger)
         {
             _factory = factory;
             _progress = progress;
             _trigger = trigger;
             _logger = logger;
+            _pipeline = pipelineProvider.GetPipeline("enrichment");
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -132,18 +137,23 @@ namespace LucidCartographer.Services.Enrichment
                     //   - if GoogleMapsUrl already contains /maps/place/, open it directly;
                     //   - otherwise run a Google Maps name search (scraper left
                     //     coords at 0,0 because the list card was anchor-less).
-                    EnrichedDetails details;
-                    if (!string.IsNullOrEmpty(poi.GoogleMapsUrl) && poi.GoogleMapsUrl.Contains("/maps/place/"))
+                    // "enrichment" Polly pipeline: retry (3 attempts,
+                    // jittered exponential backoff) + 2-minute per-attempt
+                    // timeout. Previously there were no retries — transient
+                    // Playwright failures left IsEnriched=false and the POI
+                    // waited for the next idle poll cycle (up to 30s) before
+                    // being retried from scratch.
+                    var details = await _pipeline.ExecuteAsync(async innerCt =>
                     {
-                        details = await PoiDetailEnricher.EnrichAsync(page, poi.GoogleMapsUrl!, ct);
-                    }
-                    else
-                    {
+                        if (!string.IsNullOrEmpty(poi.GoogleMapsUrl) && poi.GoogleMapsUrl.Contains("/maps/place/"))
+                        {
+                            return await PoiDetailEnricher.EnrichAsync(page, poi.GoogleMapsUrl!, innerCt);
+                        }
                         // Use the category as a disambiguation hint; if the
                         // card had no category, fall back to the first line
                         // of the description.
-                        details = await PoiDetailEnricher.EnrichByNameAsync(page, poi.Name, poi.Category, ct);
-                    }
+                        return await PoiDetailEnricher.EnrichByNameAsync(page, poi.Name, poi.Category, innerCt);
+                    }, ct);
 
                     // Fill empty fields only — never overwrite user edits. A
                     // manual edit on a previously enriched row wouldn't come
