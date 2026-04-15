@@ -187,7 +187,8 @@ namespace LucidCartographer.Tests.Integration
                     Longitude = 19.95,
                     GoogleRating = 4.5,
                     ReviewCount = 128,
-                    AddedDate = DateTime.UtcNow
+                    AddedDate = DateTime.UtcNow,
+                    IsEnriched = true
                 };
                 db.Pois.Add(poi);
                 await db.SaveChangesAsync();

@@ -28,6 +28,8 @@ namespace LucidCartographer.Tests.Integration
 
             await Page.Locator("a:has-text('Data Sources')").ClickAsync();
             await Page.WaitForURLAsync("**/datasources");
+            // Verify the Data Sources page content is actually rendered
+            await Page.WaitForSelectorAsync("h2:has-text('Data & Imports')", new() { Timeout = 10000 });
 
             Assert.Contains("/datasources", Page.Url);
         }
@@ -39,6 +41,8 @@ namespace LucidCartographer.Tests.Integration
 
             await Page.Locator("a:has-text('Operations')").ClickAsync();
             await Page.WaitForURLAsync("**/operations");
+            // Verify the Operations page content is actually rendered
+            await Page.WaitForSelectorAsync("h3:has-text('Source Selection')", new() { Timeout = 10000 });
 
             Assert.Contains("/operations", Page.Url);
         }
