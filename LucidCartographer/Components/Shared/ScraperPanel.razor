@@ -1,3 +1,5 @@
+@using LucidCartographer.Services.Import
+
 <div class="mb-4 p-4 rounded-lg bg-primary/5">
     <h4 class="font-bold text-sm mb-2 flex items-center gap-2">
         <span class="material-symbols-outlined text-primary text-base">link</span>
@@ -33,12 +35,129 @@
     }
 </div>
 
+@* ── Google Profile + Fetch My Lists ── *@
+<div class="mb-4 p-4 rounded-lg bg-secondary/5">
+    <h4 class="font-bold text-sm mb-2 flex items-center gap-2">
+        <span class="material-symbols-outlined text-secondary text-base">bookmark</span>
+        @UiStrings.FetchMyLists
+    </h4>
+
+    @* Profile status card *@
+    <div class="flex items-center gap-2 mb-3">
+        @if (HasGoogleProfile)
+        {
+            <span class="material-symbols-outlined text-secondary text-base">person</span>
+            <span class="text-sm text-on-surface">@UiStrings.GoogleProfileActive</span>
+            <button class="ml-2 text-xs text-tertiary hover:text-on-surface underline"
+                    @onclick="HandleResetProfile"
+                    disabled="@IsFetchingLists">
+                @UiStrings.ResetProfile
+            </button>
+        }
+        else
+        {
+            <span class="material-symbols-outlined text-outline text-base">person_off</span>
+            <span class="text-sm text-on-surface-variant">@UiStrings.NoGoogleProfile</span>
+        }
+    </div>
+
+    @* Fetch button *@
+    @if (SavedLists == null && !IsFetchingLists)
+    {
+        <button class="px-4 py-2 rounded-lg bg-secondary text-white text-sm font-medium hover:shadow-lg transition-all flex items-center gap-2"
+                @onclick="HandleFetchLists"
+                disabled="@IsScraping">
+            <span class="material-symbols-outlined text-base">cloud_sync</span>
+            <span>@UiStrings.FetchMyLists</span>
+        </button>
+    }
+
+    @* Fetching spinner *@
+    @if (IsFetchingLists)
+    {
+        <div class="flex items-center gap-3 text-secondary" aria-live="polite">
+            <div class="w-5 h-5 border-2 border-secondary border-t-transparent rounded-full animate-spin"></div>
+            <span class="text-sm">@UiStrings.FetchingLists</span>
+        </div>
+    }
+
+    @* Error message *@
+    @if (FetchListsError != null)
+    {
+        <div class="mt-2 p-3 rounded-lg bg-tertiary/10 text-tertiary text-sm">
+            <span class="material-symbols-outlined text-sm align-middle">error</span>
+            @FetchListsError
+        </div>
+    }
+
+    @* List selection *@
+    @if (SavedLists != null && !IsFetchingLists)
+    {
+        @if (SavedLists.Count == 0)
+        {
+            <p class="text-sm text-on-surface-variant mt-2">@UiStrings.NoSavedListsFound</p>
+        }
+        else
+        {
+            <div class="mt-2">
+                <div class="flex items-center justify-between mb-2">
+                    <p class="text-sm font-medium text-on-surface">@UiStrings.SelectListsToImport</p>
+                    <div class="flex gap-2 text-xs">
+                        <button class="text-primary underline" @onclick="SelectAll">Select all</button>
+                        <button class="text-on-surface-variant underline" @onclick="DeselectAll">None</button>
+                    </div>
+                </div>
+                <div class="space-y-1 max-h-64 overflow-y-auto">
+                    @foreach (var list in SavedLists)
+                    {
+                        <label class="flex items-center gap-3 p-2 rounded-lg hover:bg-surface-container cursor-pointer transition-colors">
+                            <input type="checkbox"
+                                   checked="@_selectedUrls.Contains(list.Url)"
+                                   @onchange="() => ToggleSelection(list.Url)"
+                                   class="w-4 h-4 rounded border-outline text-primary focus:ring-primary" />
+                            <span class="text-sm text-on-surface flex-1">@list.Name</span>
+                            @if (list.PlaceCount.HasValue)
+                            {
+                                <span class="text-xs text-on-surface-variant">@list.PlaceCount places</span>
+                            }
+                        </label>
+                    }
+                </div>
+                <div class="flex gap-2 mt-3">
+                    <button class="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:shadow-lg transition-all flex items-center gap-2"
+                            @onclick="ImportSelected"
+                            disabled="@(_selectedUrls.Count == 0)">
+                        <span class="material-symbols-outlined text-base">download</span>
+                        <span>@UiStrings.ImportSelectedLists (@_selectedUrls.Count)</span>
+                    </button>
+                    <button class="px-3 py-2 rounded-lg text-sm text-on-surface-variant hover:bg-surface-container transition-colors"
+                            @onclick="HandleFetchLists">
+                        Refresh
+                    </button>
+                </div>
+            </div>
+        }
+    }
+</div>
+
 @code {
+    // Existing URL-based scrape parameters
     [Parameter] public string Url { get; set; } = string.Empty;
     [Parameter] public EventCallback<string> UrlChanged { get; set; }
     [Parameter] public bool IsScraping { get; set; }
     [Parameter] public int ScrapeProgress { get; set; }
     [Parameter] public EventCallback OnScrape { get; set; }
+
+    // Fetch My Lists parameters
+    [Parameter] public bool IsFetchingLists { get; set; }
+    [Parameter] public IReadOnlyList<SavedListInfo>? SavedLists { get; set; }
+    [Parameter] public string? FetchListsError { get; set; }
+    [Parameter] public bool HasGoogleProfile { get; set; }
+    [Parameter] public EventCallback OnFetchLists { get; set; }
+    [Parameter] public EventCallback<IReadOnlyList<SavedListInfo>> OnImportSelected { get; set; }
+    [Parameter] public EventCallback OnResetProfile { get; set; }
+
+    private HashSet<string> _selectedUrls = new();
 
     private async Task HandleScrape()
     {
@@ -49,5 +168,45 @@
     {
         Url = e.Value?.ToString() ?? string.Empty;
         await UrlChanged.InvokeAsync(Url);
+    }
+
+    private async Task HandleFetchLists()
+    {
+        _selectedUrls.Clear();
+        await OnFetchLists.InvokeAsync();
+    }
+
+    private async Task HandleResetProfile()
+    {
+        _selectedUrls.Clear();
+        await OnResetProfile.InvokeAsync();
+    }
+
+    private void ToggleSelection(string url)
+    {
+        if (!_selectedUrls.Remove(url))
+            _selectedUrls.Add(url);
+    }
+
+    private void SelectAll()
+    {
+        if (SavedLists != null)
+        {
+            foreach (var list in SavedLists)
+                _selectedUrls.Add(list.Url);
+        }
+    }
+
+    private void DeselectAll()
+    {
+        _selectedUrls.Clear();
+    }
+
+    private async Task ImportSelected()
+    {
+        if (SavedLists == null) return;
+        var selected = SavedLists.Where(l => _selectedUrls.Contains(l.Url)).ToList();
+        if (selected.Count > 0)
+            await OnImportSelected.InvokeAsync(selected);
     }
 }

@@ -5,6 +5,7 @@
 @inject IImportJobQueue ImportJobQueue
 @inject ImportJobStatusService ImportJobStatus
 @inject IPoiService PoiService
+@inject IGoogleMapsListScraper Scraper
 @implements IAsyncDisposable
 
 <PageTitle>@UiStrings.DataSourcesPageTitle</PageTitle>
@@ -97,7 +98,14 @@
                               UrlChanged="(val) => _sharedListUrl = val"
                               IsScraping="_isImporting"
                               ScrapeProgress="0"
-                              OnScrape="ScrapeSharedList" />
+                              OnScrape="ScrapeSharedList"
+                              IsFetchingLists="_isFetchingLists"
+                              SavedLists="_savedLists"
+                              FetchListsError="@_fetchListsError"
+                              HasGoogleProfile="Scraper.HasBrowserProfile"
+                              OnFetchLists="HandleFetchMyLists"
+                              OnImportSelected="HandleImportSelectedLists"
+                              OnResetProfile="HandleResetProfile" />
             }
             else if (_activeCard == "file")
             {
@@ -195,6 +203,9 @@
     private string? _importError;
     private string _sharedListUrl = string.Empty;
     private string? _queuedMessage;
+    private bool _isFetchingLists = false;
+    private IReadOnlyList<SavedListInfo>? _savedLists;
+    private string? _fetchListsError;
     private CancellationTokenSource _cts = new();
     private IDisposable? _statusSubscription;
 
@@ -360,6 +371,57 @@
         catch (Exception ex)
         {
             _importError = $"Failed to queue scrape: {ex.Message}";
+        }
+    }
+
+    private async Task HandleFetchMyLists()
+    {
+        _isFetchingLists = true;
+        _fetchListsError = null;
+        _savedLists = null;
+        StateHasChanged();
+
+        try
+        {
+            _savedLists = await Scraper.FetchSavedListsAsync(_cts.Token);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            _fetchListsError = ex.Message;
+        }
+        finally
+        {
+            _isFetchingLists = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void HandleImportSelectedLists(IReadOnlyList<SavedListInfo> selected)
+    {
+        foreach (var list in selected)
+        {
+            ImportJobQueue.Enqueue(new ImportJobPayload
+            {
+                SharedListUrl = list.Url,
+                CollectionName = list.Name,
+                Color = _selectedColor
+            });
+        }
+        _savedLists = null;
+    }
+
+    private void HandleResetProfile()
+    {
+        try
+        {
+            Scraper.ResetBrowserProfile();
+            _savedLists = null;
+            _fetchListsError = null;
+        }
+        catch (Exception ex)
+        {
+            _fetchListsError = $"Failed to reset profile: {ex.Message}";
         }
     }
 

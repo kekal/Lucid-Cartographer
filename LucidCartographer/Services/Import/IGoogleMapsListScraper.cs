@@ -12,5 +12,17 @@ namespace LucidCartographer.Services.Import
         /// <param name="onProgress">Optional callback invoked with the current count of places found.</param>
         /// <param name="cancellationToken">Cancellation token.</param>
         Task<ScrapeResult> ScrapeAsync(string listUrl, Action<int>? onProgress = null, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Opens a persistent (non-headless) browser to google.com/maps/lists,
+        /// waits for the user to log in if needed, then scrapes list cards.
+        /// </summary>
+        Task<IReadOnlyList<SavedListInfo>> FetchSavedListsAsync(CancellationToken cancellationToken = default);
+
+        /// <summary>True if a persistent browser profile directory exists with content.</summary>
+        bool HasBrowserProfile { get; }
+
+        /// <summary>Deletes the persistent browser profile so the user can log in with a different account.</summary>
+        void ResetBrowserProfile();
     }
 }

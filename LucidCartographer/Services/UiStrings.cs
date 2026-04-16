@@ -61,6 +61,14 @@ namespace LucidCartographer.Services
         public const string ImportFile = "Import File";
         public const string ImportFromTakeout = "Import from Google Takeout";
         public const string ImportSharedList = "Import Shared Google Maps List";
+        public const string FetchMyLists = "Fetch My Lists";
+        public const string FetchingLists = "A browser window has opened. Sign in to Google if prompted, then return here.";
+        public const string ImportSelectedLists = "Import Selected";
+        public const string NoSavedListsFound = "No saved lists found in this Google account.";
+        public const string SelectListsToImport = "Select lists to import:";
+        public const string GoogleProfileActive = "Google profile active";
+        public const string ResetProfile = "Reset";
+        public const string NoGoogleProfile = "No Google profile. You'll be prompted to sign in.";
 
         // Operations Page
         public const string OperationsPageTitle = "Operations - Lucid Cartographer";

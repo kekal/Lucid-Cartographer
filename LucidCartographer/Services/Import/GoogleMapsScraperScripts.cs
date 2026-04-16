@@ -225,5 +225,45 @@ namespace LucidCartographer.Services.Import
                     return { idx, name, href, rating, reviewCount, category, description, imageSrc };
                 });
             })()";
+
+        /// <summary>
+        /// Extracts saved list cards from the Google Maps "Saved → Lists" panel.
+        /// Uses stable DOM structure: each list card is a <c>button</c> whose
+        /// inner <c>div > div:nth-child(2) > div:first-child</c> holds the name
+        /// and <c>div > div:nth-child(2) > div:nth-child(3)</c> holds the count text.
+        /// Tags each card with <c>data-savedlist-idx</c> for click-through.
+        /// Returns a JSON array of { idx, name, count }.
+        /// </summary>
+        public const string DiscoverSavedLists = @"
+            (() => {
+                const results = [];
+                const placeRx = /(\d+)/;
+
+                // List card buttons have class 'CsEnBe' in current Google Maps DOM.
+                // Each contains: div > div:nth-child(2) > div:first-child (name)
+                //                div > div:nth-child(2) > div:nth-child(3) (count text)
+                const buttons = document.querySelectorAll('button.CsEnBe');
+                let idx = 0;
+
+                for (const btn of buttons) {
+                    const nameEl = btn.querySelector('div > div:nth-child(2) > div:first-child');
+                    const countEl = btn.querySelector('div > div:nth-child(2) > div:nth-child(3)');
+
+                    const name = nameEl ? nameEl.innerText.trim() : '';
+                    if (!name) continue;
+
+                    let count = null;
+                    if (countEl) {
+                        const m = countEl.innerText.match(placeRx);
+                        if (m) count = parseInt(m[1]);
+                    }
+
+                    btn.setAttribute('data-savedlist-idx', String(idx));
+                    results.push({ idx, name, count });
+                    idx++;
+                }
+
+                return results;
+            })()";
     }
 }

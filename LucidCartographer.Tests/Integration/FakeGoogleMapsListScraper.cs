@@ -28,6 +28,21 @@ namespace LucidCartographer.Tests.Integration
             };
         }
 
+        public bool HasBrowserProfile => false;
+
+        public void ResetBrowserProfile() { }
+
+        public Task<IReadOnlyList<SavedListInfo>> FetchSavedListsAsync(CancellationToken cancellationToken = default)
+        {
+            IReadOnlyList<SavedListInfo> result = new List<SavedListInfo>
+            {
+                new("Favorites", "https://www.google.com/maps/list/1", 12),
+                new("Want to go", "https://www.google.com/maps/list/2", 5),
+                new("Custom List", "https://www.google.com/maps/list/3", 23),
+            };
+            return Task.FromResult(result);
+        }
+
         public async Task<ScrapeResult> ScrapeAsync(string listUrl, Action<int>? onProgress = null, CancellationToken cancellationToken = default)
         {
             LastUrl = listUrl;
