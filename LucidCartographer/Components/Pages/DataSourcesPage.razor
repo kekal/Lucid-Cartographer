@@ -10,6 +10,7 @@
 @inject IGoogleMapsListScraper Scraper
 @inject IEnumerable<IFileExporter> Exporters
 @inject IJSRuntime JS
+@inject LucidCartographer.Services.Enrichment.EnrichmentTrigger EnrichmentTrigger
 @implements IAsyncDisposable
 
 <PageTitle>@UiStrings.DataSourcesPageTitle</PageTitle>
@@ -180,6 +181,12 @@
                                     else
                                     {
                                         <button class="text-primary hover:bg-primary/10 p-1 rounded-lg transition-colors"
+                                                aria-label="@($"Add POI to {col.Name}")"
+                                                title="Add POI"
+                                                @onclick="() => OpenAddPoi(col.Id)">
+                                            <span class="material-symbols-outlined text-sm" aria-hidden="true">add_location</span>
+                                        </button>
+                                        <button class="text-primary hover:bg-primary/10 p-1 rounded-lg transition-colors"
                                                 aria-label="@($"Export {col.Name} to Google My Maps")"
                                                 title="Export to Google My Maps"
                                                 disabled="@(_exportingId == col.Id)"
@@ -200,6 +207,51 @@
                     </tbody>
                 </table>
             </div>
+
+            @* Add POI inline form *@
+            @if (_addPoiCollectionId != null)
+            {
+                var targetCol = _collections.FirstOrDefault(c => c.Id == _addPoiCollectionId);
+                <div class="mt-4 bg-surface-container rounded-xl p-5">
+                    <div class="flex items-center justify-between mb-3">
+                        <h4 class="font-bold font-headline text-sm flex items-center gap-2">
+                            <span class="material-symbols-outlined text-primary text-base">add_location</span>
+                            Add POI to @(targetCol?.Name ?? "collection")
+                        </h4>
+                        <button class="p-1 rounded hover:bg-surface-container-high transition-colors"
+                                aria-label="Cancel"
+                                @onclick="CloseAddPoi">
+                            <span class="material-symbols-outlined text-sm">close</span>
+                        </button>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(_addPoiError))
+                    {
+                        <div class="mb-3 p-2 rounded-lg bg-tertiary/10 text-tertiary text-sm">@_addPoiError</div>
+                    }
+                    @if (_addPoiSuccess)
+                    {
+                        <div class="mb-3 p-2 rounded-lg bg-secondary/10 text-secondary text-sm flex items-center gap-1.5">
+                            <span class="material-symbols-outlined text-sm">check_circle</span>
+                            POI added — details will be filled by enrichment.
+                        </div>
+                    }
+
+                    <div class="flex gap-2">
+                        <input type="text" @bind="_addPoiUrl" @bind:event="oninput"
+                               placeholder="Paste Google Maps link (e.g. https://maps.app.goo.gl/... or https://www.google.com/maps/place/...)"
+                               class="flex-1 rounded-lg border border-outline-variant bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
+                        <button class="px-4 py-2 text-sm rounded-lg bg-primary text-on-primary hover:bg-primary/90 transition-colors font-medium disabled:opacity-50 whitespace-nowrap"
+                                disabled="@(_addPoiSaving || string.IsNullOrWhiteSpace(_addPoiUrl))"
+                                @onclick="SaveNewPoi">
+                            @(_addPoiSaving ? "Adding…" : "Add")
+                        </button>
+                    </div>
+                    <p class="text-xs text-on-surface-variant mt-2">
+                        Name, address, coordinates and other details will be auto-filled by the enrichment service.
+                    </p>
+                </div>
+            }
         }
     </div>
 </div>
@@ -435,6 +487,99 @@
         catch (Exception ex)
         {
             _fetchListsError = $"Failed to reset profile: {ex.Message}";
+        }
+    }
+
+    // --- Add POI by URL ---
+    private int? _addPoiCollectionId;
+    private string _addPoiUrl = string.Empty;
+    private string? _addPoiError;
+    private bool _addPoiSuccess;
+    private bool _addPoiSaving;
+
+    private void OpenAddPoi(int collectionId)
+    {
+        _addPoiCollectionId = collectionId;
+        _addPoiUrl = string.Empty;
+        _addPoiError = null;
+        _addPoiSuccess = false;
+    }
+
+    private void CloseAddPoi()
+    {
+        _addPoiCollectionId = null;
+        _addPoiError = null;
+        _addPoiSuccess = false;
+    }
+
+    private async Task SaveNewPoi()
+    {
+        _addPoiError = null;
+        _addPoiSuccess = false;
+
+        var url = _addPoiUrl.Trim();
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            _addPoiError = "Paste a Google Maps link.";
+            return;
+        }
+
+        // Basic URL validation
+        if (!url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        {
+            _addPoiError = "Please paste a valid URL starting with http.";
+            return;
+        }
+
+        _addPoiSaving = true;
+        StateHasChanged();
+
+        try
+        {
+            // Try to extract coordinates from the URL if available
+            var coords = PoiUrlHelper.ExtractCoordinatesFromUrl(url);
+
+            // Derive a placeholder name from the URL
+            var placeholderName = "Pending enrichment";
+            if (url.Contains("/maps/place/"))
+            {
+                // Try to extract place name from URL: /maps/place/Place+Name/@...
+                var placeStart = url.IndexOf("/maps/place/", StringComparison.Ordinal) + "/maps/place/".Length;
+                var placeEnd = url.IndexOf('/', placeStart);
+                if (placeEnd < 0) placeEnd = url.IndexOf('?', placeStart);
+                if (placeEnd < 0) placeEnd = url.Length;
+                var rawName = url[placeStart..placeEnd];
+                rawName = Uri.UnescapeDataString(rawName).Replace('+', ' ');
+                if (!string.IsNullOrWhiteSpace(rawName))
+                    placeholderName = rawName;
+            }
+
+            var poi = new Poi
+            {
+                Name = placeholderName,
+                Latitude = coords?.lat ?? 0,
+                Longitude = coords?.lon ?? 0,
+                GoogleMapsUrl = url,
+                Status = PoiStatus.WantToGo,
+                IsEnriched = false  // enrichment service will fill details
+            };
+
+            await PoiService.CreatePoiAsync(poi, _addPoiCollectionId!.Value);
+
+            // Wake the enrichment service so it picks up the new POI immediately
+            EnrichmentTrigger.Signal();
+
+            _addPoiSuccess = true;
+            _addPoiUrl = string.Empty;
+            await LoadCollections();
+        }
+        catch (Exception ex)
+        {
+            _addPoiError = ex.Message;
+        }
+        finally
+        {
+            _addPoiSaving = false;
         }
     }
 
