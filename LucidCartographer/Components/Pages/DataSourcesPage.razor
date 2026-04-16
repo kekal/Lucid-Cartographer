@@ -11,6 +11,7 @@
 @inject IEnumerable<IFileExporter> Exporters
 @inject IJSRuntime JS
 @inject LucidCartographer.Services.Enrichment.EnrichmentTrigger EnrichmentTrigger
+@inject IHttpClientFactory HttpClientFactory
 @implements IAsyncDisposable
 
 <PageTitle>@UiStrings.DataSourcesPageTitle</PageTitle>
@@ -536,6 +537,26 @@
 
         try
         {
+            // Resolve short URLs (maps.app.goo.gl/...) to full Google Maps URLs
+            // so we can extract place name and coordinates immediately.
+            if (url.Contains("goo.gl/", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    using var http = HttpClientFactory.CreateClient();
+                    http.Timeout = TimeSpan.FromSeconds(10);
+                    // Don't follow redirects — just read the Location header
+                    using var req = new HttpRequestMessage(HttpMethod.Head, url);
+                    using var handler = new HttpClientHandler { AllowAutoRedirect = true };
+                    using var resolveClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
+                    var resp = await resolveClient.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, _cts.Token);
+                    var resolvedUrl = resp.RequestMessage?.RequestUri?.ToString();
+                    if (!string.IsNullOrEmpty(resolvedUrl) && resolvedUrl.Contains("google.com/maps"))
+                        url = resolvedUrl;
+                }
+                catch { /* best effort — fall back to original short URL */ }
+            }
+
             // Try to extract coordinates from the URL if available
             var coords = PoiUrlHelper.ExtractCoordinatesFromUrl(url);
 

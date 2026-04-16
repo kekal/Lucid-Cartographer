@@ -94,6 +94,7 @@ builder.Services.AddSingleton<IGoogleMapsListScraper, GoogleMapsListScraper>();
 // subscribes to for its "N pending" counter.
 builder.Services.AddSingleton<EnrichmentProgressService>();
 builder.Services.AddSingleton<EnrichmentTrigger>();
+builder.Services.AddHttpClient();
 // Tunable via the "Enrichment" section of appsettings.json — Concurrency,
 // BatchSize, IdlePollSeconds. Defaults match the hard-coded values the
 // service used before extraction, so an upgrade without config changes
