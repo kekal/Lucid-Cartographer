@@ -96,7 +96,7 @@
 @* Move modal *@
 @if (_movePoiId != null)
 {
-    <div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center" @onclick="CloseMoveModal">
+    <div class="fixed inset-0 bg-black/40 flex items-center justify-center" style="z-index: 10000;" @onclick="CloseMoveModal">
         <div class="bg-white rounded-xl shadow-2xl w-80 max-h-[60vh] flex flex-col" @onclick:stopPropagation="true">
             <div class="px-4 py-3 border-b border-surface-container-high flex items-center justify-between">
                 <span class="font-headline font-bold text-sm">Move to collection</span>
@@ -116,6 +116,26 @@
                         </button>
                     }
                 }
+                <div class="border-t border-surface-container-high mt-1 pt-1">
+                    @if (!_showNewCollectionInput)
+                    {
+                        <button class="w-full text-left px-3 py-2 rounded-lg hover:bg-surface-container-low transition-colors text-sm flex items-center gap-2 text-primary"
+                                @onclick="() => { _showNewCollectionInput = true; }">
+                            <span class="material-symbols-outlined text-base">add</span>
+                            New collection
+                        </button>
+                    }
+                    else
+                    {
+                        <form class="flex items-center gap-2 px-3 py-2" @onsubmit="HandleCreateAndMove" @onsubmit:preventDefault>
+                            <input @bind="_newCollectionName" placeholder="Collection name"
+                                   class="flex-1 text-sm px-2 py-1 border border-surface-container-high rounded-lg focus:ring-2 focus:ring-primary focus:outline-none" />
+                            <button type="submit" class="text-primary hover:text-primary-container p-1" aria-label="Create and move">
+                                <span class="material-symbols-outlined text-base">check</span>
+                            </button>
+                        </form>
+                    }
+                </div>
             </div>
         </div>
     </div>
@@ -132,8 +152,11 @@
     [Parameter] public EventCallback<int> OnFocusClicked { get; set; }
     [Parameter] public EventCallback<int> OnDeleteClicked { get; set; }
     [Parameter] public EventCallback<(int PoiId, int TargetCollectionId)> OnMoveClicked { get; set; }
+    [Parameter] public EventCallback<(int PoiId, string NewCollectionName)> OnMoveToNewClicked { get; set; }
 
     private int? _movePoiId;
+    private bool _showNewCollectionInput;
+    private string _newCollectionName = "";
 
     private string? GetCollectionName(int poiId)
     {
@@ -148,8 +171,8 @@
         return -1;
     }
 
-    private void OpenMoveModal(int poiId) => _movePoiId = poiId;
-    private void CloseMoveModal() => _movePoiId = null;
+    private void OpenMoveModal(int poiId) { _movePoiId = poiId; _showNewCollectionInput = false; _newCollectionName = ""; }
+    private void CloseMoveModal() { _movePoiId = null; _showNewCollectionInput = false; _newCollectionName = ""; }
 
     private async Task HandlePoiClick(int poiId)
     {
@@ -174,5 +197,15 @@
         _movePoiId = null;
         try { await OnMoveClicked.InvokeAsync((poiId, targetCollectionId)); }
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Error moving POI {poiId}: {ex.Message}"); }
+    }
+
+    private async Task HandleCreateAndMove()
+    {
+        if (_movePoiId == null || string.IsNullOrWhiteSpace(_newCollectionName)) return;
+        var poiId = _movePoiId.Value;
+        var name = _newCollectionName.Trim();
+        CloseMoveModal();
+        try { await OnMoveToNewClicked.InvokeAsync((poiId, name)); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Error creating collection and moving POI {poiId}: {ex.Message}"); }
     }
 }

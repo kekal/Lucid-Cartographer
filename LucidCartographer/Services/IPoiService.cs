@@ -20,6 +20,7 @@ namespace LucidCartographer.Services
         Task<Dictionary<int, List<Poi>>> GetVisiblePoisGroupedAsync(CancellationToken cancellationToken = default);
         Task<Poi?> GetPoiAsync(int poiId, CancellationToken cancellationToken = default);
         Task<IReadOnlyList<Poi>> SearchAsync(string query, CancellationToken cancellationToken = default);
+        Task<Dictionary<int, int>> GetPoiCollectionIdsAsync(IEnumerable<int> poiIds, CancellationToken cancellationToken = default);
 
         // --- Mutation methods (throw on not-found / invalid input) ---
 
@@ -30,5 +31,6 @@ namespace LucidCartographer.Services
         Task UpdatePoiAsync(Poi poi, CancellationToken cancellationToken = default);
         Task DeleteCollectionAsync(int collectionId, CancellationToken cancellationToken = default);
         Task UpdateCollectionColorAsync(int collectionId, string color, CancellationToken cancellationToken = default);
+        Task<PoiCollection> CreateCollectionAsync(string name, CancellationToken cancellationToken = default);
     }
 }

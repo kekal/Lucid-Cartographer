@@ -83,7 +83,7 @@ namespace LucidCartographer.Services.Export
             return pois.Select(poi =>
                 new XElement(Kml + "Placemark",
                     new XElement(Kml + "name", poi.Name),
-                    new XElement(Kml + "description", BuildDescription(poi)),
+                    new XElement(Kml + "description", new XCData(BuildDescription(poi))),
                     new XElement(Kml + "Point",
                         new XElement(Kml + "coordinates", $"{poi.Longitude.ToString(System.Globalization.CultureInfo.InvariantCulture)},{poi.Latitude.ToString(System.Globalization.CultureInfo.InvariantCulture)},0")
                     )
@@ -94,17 +94,44 @@ namespace LucidCartographer.Services.Export
         private static string BuildDescription(Poi poi)
         {
             var sb = new StringBuilder();
+
+            if (!string.IsNullOrEmpty(poi.ImageUrl))
+                sb.Append($"<img src=\"{Escape(poi.ImageUrl)}\" style=\"max-width:300px;margin-bottom:8px\" /><br/>");
+
             if (!string.IsNullOrEmpty(poi.Address))
-                sb.AppendLine($"Address: {poi.Address}");
+                sb.Append($"<b>Address:</b> {Escape(poi.Address)}<br/>");
             if (!string.IsNullOrEmpty(poi.Category))
-                sb.AppendLine($"Category: {poi.Category}");
+                sb.Append($"<b>Category:</b> {Escape(poi.Category)}<br/>");
             if (!string.IsNullOrEmpty(poi.Status))
-                sb.AppendLine($"Status: {poi.Status}");
+                sb.Append($"<b>Status:</b> {Escape(poi.Status)}<br/>");
+            if (!string.IsNullOrEmpty(poi.Country))
+                sb.Append($"<b>Country:</b> {Escape(poi.Country)}<br/>");
+            if (!string.IsNullOrEmpty(poi.Region))
+                sb.Append($"<b>Region:</b> {Escape(poi.Region)}<br/>");
+            if (poi.Rating.HasValue)
+                sb.Append($"<b>My Rating:</b> {poi.Rating}/5<br/>");
+            if (poi.GoogleRating.HasValue)
+                sb.Append($"<b>Google Rating:</b> {poi.GoogleRating:F1}");
+            if (poi.ReviewCount.HasValue)
+                sb.Append($" ({poi.ReviewCount:N0} reviews)");
+            if (poi.GoogleRating.HasValue)
+                sb.Append("<br/>");
+            if (!string.IsNullOrEmpty(poi.Phone))
+                sb.Append($"<b>Phone:</b> {Escape(poi.Phone)}<br/>");
+            if (!string.IsNullOrEmpty(poi.Website))
+                sb.Append($"<b>Website:</b> <a href=\"{Escape(poi.Website)}\">{Escape(poi.Website)}</a><br/>");
             if (!string.IsNullOrEmpty(poi.Notes))
-                sb.AppendLine($"Notes: {poi.Notes}");
+                sb.Append($"<b>Notes:</b> {Escape(poi.Notes)}<br/>");
+            if (poi.VisitedDate.HasValue)
+                sb.Append($"<b>Visited:</b> {poi.VisitedDate.Value:MMM dd, yyyy}<br/>");
             if (!string.IsNullOrEmpty(poi.GoogleMapsUrl))
-                sb.AppendLine($"Google Maps: {poi.GoogleMapsUrl}");
+                sb.Append($"<a href=\"{Escape(poi.GoogleMapsUrl)}\">Open in Google Maps</a><br/>");
+
             return sb.ToString();
         }
+
+        private static string Escape(string value)
+            => System.Security.SecurityElement.Escape(value);
+
     }
 }

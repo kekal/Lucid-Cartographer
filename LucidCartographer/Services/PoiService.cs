@@ -273,6 +273,21 @@ namespace LucidCartographer.Services
             await transaction.CommitAsync(cancellationToken);
         }
 
+        public async Task<Dictionary<int, int>> GetPoiCollectionIdsAsync(IEnumerable<int> poiIds, CancellationToken cancellationToken = default)
+        {
+            var ids = poiIds.ToList();
+            if (ids.Count == 0) return new();
+
+            await using var db = await _factory.CreateDbContextAsync(cancellationToken);
+            // Return first collection ID per POI (a POI can be in multiple collections)
+            var items = await db.PoiCollectionItems
+                .Where(ci => ids.Contains(ci.PoiId))
+                .GroupBy(ci => ci.PoiId)
+                .Select(g => new { PoiId = g.Key, CollectionId = g.Min(ci => ci.PoiCollectionId) })
+                .ToDictionaryAsync(x => x.PoiId, x => x.CollectionId, cancellationToken);
+            return items;
+        }
+
         public async Task<IReadOnlyList<Poi>> SearchAsync(string query, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(query))
@@ -332,6 +347,23 @@ namespace LucidCartographer.Services
 
             collection.Color = color;
             await db.SaveChangesAsync(cancellationToken);
+        }
+
+        public async Task<PoiCollection> CreateCollectionAsync(string name, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                throw new ArgumentException("Collection name cannot be empty.", nameof(name));
+
+            await using var db = await _factory.CreateDbContextAsync(cancellationToken);
+            var collection = new PoiCollection
+            {
+                Name = name.Trim(),
+                Color = "#005bbf",
+                CreatedDate = DateTime.UtcNow
+            };
+            db.PoiCollections.Add(collection);
+            await db.SaveChangesAsync(cancellationToken);
+            return collection;
         }
 
         /// <summary>

@@ -696,15 +696,49 @@ namespace LucidCartographer.Services.Import
                     coords = ExtractCoordinates(href);
                 }
 
-                // No click-through here. When href has no coords (common on
-                // personal / shared lists whose cards are anchor-less
-                // `<button jsaction>` elements), we leave coords null and
-                // persist the POI with a (0,0) placeholder. The background
-                // enrichment service then runs a name-based Google Maps
-                // search per POI to fill real coords + address/website/phone.
+                // Click-through fallback: when the card has no place anchor
+                // (common on personal / shared lists whose cards are anchor-less
+                // `<button jsaction>` elements), click the card to navigate to
+                // the place page, read the URL (which contains coords + place ID),
+                // then go back to the list.
                 if (coords == null)
                 {
-                    _logger.LogInformation("[{Idx}/{Total}] '{Name}' — no href coords, deferred to enrichment", i + 1, totalItems, name);
+                    _logger.LogInformation("[{Idx}/{Total}] '{Name}' — no href, trying click-through", i + 1, totalItems, name);
+                    try
+                    {
+                        var cardSelector = $"[data-scraper-idx=\"{idx}\"]";
+                        var cardEl = page.Locator(cardSelector).First;
+                        if (await cardEl.IsVisibleAsync())
+                        {
+                            await cardEl.ClickAsync();
+                            // Wait for URL to transition to /maps/place/
+                            for (int w = 0; w < 40; w++)
+                            {
+                                var u = page.Url;
+                                if (u.Contains("/maps/place/") && u.Contains("/@"))
+                                {
+                                    href = u;
+                                    coords = ExtractCoordinates(href);
+                                    _logger.LogInformation("[{Idx}/{Total}] '{Name}' — click-through resolved: {Url}", i + 1, totalItems, name, href);
+                                    break;
+                                }
+                                await page.WaitForTimeoutAsync(300);
+                            }
+                            // Navigate back to the list
+                            await page.GoBackAsync(new PageGoBackOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 15000 });
+                            // Wait for the list to re-render
+                            await page.WaitForTimeoutAsync(1000);
+                        }
+                    }
+                    catch (Exception clickEx)
+                    {
+                        _logger.LogWarning(clickEx, "[{Idx}/{Total}] '{Name}' — click-through failed, deferred to enrichment", i + 1, totalItems, name);
+                    }
+                }
+
+                if (coords == null && string.IsNullOrEmpty(href))
+                {
+                    _logger.LogInformation("[{Idx}/{Total}] '{Name}' — no coords after click-through, deferred to enrichment", i + 1, totalItems, name);
                 }
 
                 // Rating (text → double)

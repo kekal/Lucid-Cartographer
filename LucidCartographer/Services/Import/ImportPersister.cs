@@ -199,6 +199,7 @@ namespace LucidCartographer.Services.Import
             }
 
             LinkToCollectionIfMissing(existing);
+            BackfillGoogleMapsUrl(existing, imported);
             await BackfillImageIfAllowedAsync(existing, imported);
             _skipped++;
         }
@@ -213,6 +214,19 @@ namespace LucidCartographer.Services.Import
                 PoiCollectionId = _collection.Id
             });
             _existingLinks.Add(existing.Id);
+        }
+
+        /// <summary>
+        /// Upgrades the existing POI's GoogleMapsUrl to a proper /maps/place/ URL
+        /// when the new import has one and the existing row does not.
+        /// </summary>
+        private static void BackfillGoogleMapsUrl(Poi existing, ImportedPoi imported)
+        {
+            if (string.IsNullOrEmpty(imported.GoogleMapsUrl)) return;
+            if (!imported.GoogleMapsUrl.Contains("/maps/place/")) return;
+            // Only upgrade if existing URL is missing or not a proper place URL
+            if (!string.IsNullOrEmpty(existing.GoogleMapsUrl) && existing.GoogleMapsUrl.Contains("/maps/place/")) return;
+            existing.GoogleMapsUrl = imported.GoogleMapsUrl;
         }
 
         private async Task BackfillImageIfAllowedAsync(Poi existing, ImportedPoi imported)

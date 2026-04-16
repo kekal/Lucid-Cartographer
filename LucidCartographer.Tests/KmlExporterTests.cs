@@ -108,9 +108,9 @@ namespace LucidCartographer.Tests
 
             var doc = ParseResult(result);
             var desc = doc.Descendants(Kml + "description").Single().Value;
-            desc.Should().Contain("Address: 1 Castle Rd");
-            desc.Should().Contain("Category: Tourism");
-            desc.Should().Contain("Google Maps: https://maps.google.com/castle");
+            desc.Should().Contain("1 Castle Rd");
+            desc.Should().Contain("Tourism");
+            desc.Should().Contain("https://maps.google.com/castle");
         }
 
         [Fact]
@@ -167,9 +167,9 @@ namespace LucidCartographer.Tests
             placemark.Element(Kml + "name")!.Value.Should().Be("Minimal");
 
             var desc = placemark.Element(Kml + "description")!.Value;
-            desc.Should().NotContain("Address:");
-            desc.Should().NotContain("Category:");
-            desc.Should().NotContain("Google Maps:");
+            desc.Should().NotContain("Address");
+            desc.Should().NotContain("Category");
+            desc.Should().NotContain("Google Maps");
         }
 
         [Fact]

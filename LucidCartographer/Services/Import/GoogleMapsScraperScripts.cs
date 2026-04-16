@@ -171,7 +171,8 @@ namespace LucidCartographer.Services.Import
                     // screen-reader mandated so it's the most stable source.
                     let name = null;
                     let href = null;
-                    const a = card.querySelector(""a[href*='/maps/place/']"");
+                    let a = card.querySelector(""a[href*='/maps/place/']"");
+                    if (!a) a = card.querySelector(""a[href*='google.com/maps']"");
                     if (a) {
                         href = a.href || null;
                         const al = a.getAttribute('aria-label');

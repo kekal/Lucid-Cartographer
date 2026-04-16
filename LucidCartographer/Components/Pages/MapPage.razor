@@ -80,7 +80,7 @@ else
         @* Bottom Table *@
         <div @ref="_tableContainer"
              style="height: @(_tableHeight)px; min-height: 80px; max-height: 70vh;"
-             class="flex-shrink-0 bg-white shadow-inner overflow-hidden">
+             class="flex-shrink-0 bg-white shadow-inner overflow-hidden flex flex-col">
             <PoiTable Pois="_filteredPois"
                      SelectedPoiId="_selectedPoiId"
                      CollectionName="@_selectedCollectionName"
@@ -90,7 +90,8 @@ else
                      OnPoiSelected="HandlePoiSelected"
                      OnFocusClicked="HandleFocusPoi"
                      OnDeleteClicked="HandleDeletePoi"
-                     OnMoveClicked="HandleMovePoi" />
+                     OnMoveClicked="HandleMovePoi"
+                     OnMoveToNewClicked="HandleMoveToNewCollection" />
         </div>
     </div>
 
@@ -121,7 +122,6 @@ else
 
     // Viewport filtering
     private MapBounds? _currentBounds;
-    private bool _showAllPois; // true after Fit All — shows full list
 
     // Resizable splitter
     private int _tableHeight = 256;
@@ -248,7 +248,16 @@ else
         var searchPois = _visiblePois.ToList();
         await _leafletMap.ShowCollectionAsync(SearchLayerId, searchPois, SearchMarkerColor);
 
-        _showAllPois = true;
+        // Populate collection IDs/names for search results so move/delete work
+        _poiCollectionIds = await PoiService.GetPoiCollectionIdsAsync(searchPois.Select(p => p.Id));
+        var nameMap = new Dictionary<int, string>();
+        foreach (var kvp in _poiCollectionIds)
+        {
+            var vm = _collectionVMs.FirstOrDefault(c => c.Id == kvp.Value);
+            if (vm != null) nameMap.TryAdd(kvp.Key, vm.Name);
+        }
+        _poiCollectionNames = nameMap;
+
         _filteredPois = _visiblePois;
         await _leafletMap.FitBoundsAsync();
     }
@@ -360,8 +369,11 @@ else
     {
         if (_leafletMap != null)
         {
-            _showAllPois = true;
+            // Show all immediately; the moveend after fitBounds will
+            // re-apply the viewport filter with the new (fitted) bounds,
+            // which will naturally include every visible POI.
             _filteredPois = _visiblePois;
+            StateHasChanged();
             await _leafletMap.FitBoundsAsync();
         }
     }
@@ -369,19 +381,12 @@ else
     private void HandleBoundsChanged(MapBounds bounds)
     {
         _currentBounds = bounds;
-        // After Fit All, the first moveend resets back to viewport filtering
-        if (_showAllPois)
-        {
-            _showAllPois = false;
-            // Keep showing all during the fit animation
-            return;
-        }
         ApplyViewportFilter();
     }
 
     private void ApplyViewportFilter()
     {
-        if (_showAllPois || _currentBounds == null)
+        if (_currentBounds == null)
         {
             _filteredPois = _visiblePois;
         }
@@ -401,10 +406,9 @@ else
         {
             await PoiService.RemovePoiFromCollectionAsync(poiId, collectionId);
         }
-        // Close detail pane if this POI was selected
         if (_selectedPoiId == poiId)
             CloseDetailPane();
-        await LoadVisibleCollections();
+        await RefreshAfterMutation();
     }
 
     private async Task HandleMovePoi((int PoiId, int TargetCollectionId) args)
@@ -413,6 +417,31 @@ else
         {
             await PoiService.AddPoiToCollectionAsync(args.PoiId, args.TargetCollectionId);
             await PoiService.RemovePoiFromCollectionAsync(args.PoiId, sourceCollectionId);
+        }
+        await RefreshAfterMutation();
+    }
+
+    private async Task HandleMoveToNewCollection((int PoiId, string NewCollectionName) args)
+    {
+        var newCol = await PoiService.CreateCollectionAsync(args.NewCollectionName);
+        if (_poiCollectionIds.TryGetValue(args.PoiId, out var sourceCollectionId))
+        {
+            await PoiService.AddPoiToCollectionAsync(args.PoiId, newCol.Id);
+            await PoiService.RemovePoiFromCollectionAsync(args.PoiId, sourceCollectionId);
+        }
+        // Add the new collection to the VM list
+        _collectionVMs.Insert(0, new CollectionViewModel(newCol));
+        await RefreshAfterMutation();
+    }
+
+    private async Task RefreshAfterMutation()
+    {
+        // Refresh sidebar counts
+        _collections = await PoiService.GetCollectionsAsync();
+        foreach (var col in _collections)
+        {
+            var vm = _collectionVMs.FirstOrDefault(c => c.Id == col.Id);
+            if (vm != null) vm.Collection.PoiCount = col.PoiCount;
         }
         await LoadVisibleCollections();
     }

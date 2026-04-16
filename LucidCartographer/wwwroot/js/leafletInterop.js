@@ -90,6 +90,7 @@
             }
             state.layerGroups = {};
             state.markers = {};
+            state._boundsHandler = null;
         },
 
         addCollectionMarkers: function (collectionId, pois, color) {

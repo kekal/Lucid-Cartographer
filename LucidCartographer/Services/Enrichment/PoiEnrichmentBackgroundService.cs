@@ -214,7 +214,11 @@ namespace LucidCartographer.Services.Enrichment
                     poi.Longitude = details.Longitude.Value;
                 }
 
-                if (string.IsNullOrEmpty(poi.GoogleMapsUrl) && !string.IsNullOrEmpty(details.GoogleMapsUrl))
+                // Upgrade to a proper /maps/place/ URL when the enricher found one.
+                // The scraper may have stored null (anchor-less card) or a non-place
+                // URL; always prefer the canonical place URL from enrichment.
+                if (!string.IsNullOrEmpty(details.GoogleMapsUrl)
+                    && (string.IsNullOrEmpty(poi.GoogleMapsUrl) || !poi.GoogleMapsUrl.Contains("/maps/place/")))
                     poi.GoogleMapsUrl = details.GoogleMapsUrl;
 
                 poi.IsEnriched = true;

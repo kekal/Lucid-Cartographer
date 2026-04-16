@@ -1,11 +1,15 @@
 @page "/datasources"
 @rendermode InteractiveServer
 @using LucidCartographer.Services.Import
+@using LucidCartographer.Services.Export
 @using LucidCartographer.Data.Entities
+@using Microsoft.JSInterop
 @inject IImportJobQueue ImportJobQueue
 @inject ImportJobStatusService ImportJobStatus
 @inject IPoiService PoiService
 @inject IGoogleMapsListScraper Scraper
+@inject IEnumerable<IFileExporter> Exporters
+@inject IJSRuntime JS
 @implements IAsyncDisposable
 
 <PageTitle>@UiStrings.DataSourcesPageTitle</PageTitle>
@@ -175,6 +179,15 @@
                                     }
                                     else
                                     {
+                                        <button class="text-primary hover:bg-primary/10 p-1 rounded-lg transition-colors"
+                                                aria-label="@($"Export {col.Name} to Google My Maps")"
+                                                title="Export to Google My Maps"
+                                                disabled="@(_exportingId == col.Id)"
+                                                @onclick="() => HandleExportToMyMaps(col.Id)">
+                                            <span class="material-symbols-outlined text-sm" aria-hidden="true">
+                                                @(_exportingId == col.Id ? "hourglass_empty" : "map")
+                                            </span>
+                                        </button>
                                         <button class="text-tertiary hover:bg-tertiary/10 p-1 rounded-lg transition-colors"
                                                 aria-label="@($"Delete {col.Name}")"
                                                 @onclick="() => RequestDelete(col.Id)">
@@ -422,6 +435,43 @@
         catch (Exception ex)
         {
             _fetchListsError = $"Failed to reset profile: {ex.Message}";
+        }
+    }
+
+    private int? _exportingId;
+
+    private async Task HandleExportToMyMaps(int collectionId)
+    {
+        var col = _collections.FirstOrDefault(c => c.Id == collectionId);
+        if (col == null) return;
+
+        _exportingId = collectionId;
+        StateHasChanged();
+
+        try
+        {
+            var pois = await PoiService.GetPoisByCollectionAsync(collectionId);
+            if (!pois.Any()) return;
+
+            var kmlExporter = Exporters.First(e => e.FormatName == "KML");
+            var bytes = kmlExporter.Export(pois, col.Name);
+
+            var exportDir = Path.Combine(AppContext.BaseDirectory, "data", "exports");
+            Directory.CreateDirectory(exportDir);
+            var filePath = Path.Combine(exportDir, $"{col.Name}.kml");
+            await File.WriteAllBytesAsync(filePath, bytes);
+
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", filePath);
+            await JS.InvokeVoidAsync("window.open", "https://www.google.com/maps/d/", "_blank");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error exporting collection {collectionId}: {ex.Message}");
+        }
+        finally
+        {
+            _exportingId = null;
+            StateHasChanged();
         }
     }
 
