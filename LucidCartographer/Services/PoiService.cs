@@ -23,6 +23,7 @@ namespace LucidCartographer.Services
         {
             await using var db = await _factory.CreateDbContextAsync(cancellationToken);
             var collections = await db.PoiCollections
+                .AsNoTracking()
                 .OrderByDescending(c => c.CreatedDate)
                 .ToListAsync(cancellationToken);
 
@@ -45,6 +46,7 @@ namespace LucidCartographer.Services
         {
             await using var db = await _factory.CreateDbContextAsync(cancellationToken);
             return await db.PoiCollectionItems
+                .AsNoTracking()
                 .Where(ci => ci.PoiCollectionId == collectionId)
                 .Select(ci => ci.Poi)
                 .ToListAsync(cancellationToken);
@@ -65,6 +67,7 @@ namespace LucidCartographer.Services
             // on the map before enrichment would put every pending pin at
             // null island off the coast of Africa.
             var items = await db.PoiCollectionItems
+                .AsNoTracking()
                 .Where(ci => ci.PoiCollection.IsVisible && ci.Poi.IsEnriched)
                 .Select(ci => new { ci.PoiCollectionId, ci.Poi })
                 .ToListAsync(cancellationToken);
@@ -281,6 +284,7 @@ namespace LucidCartographer.Services
             await using var db = await _factory.CreateDbContextAsync(cancellationToken);
             // Return first collection ID per POI (a POI can be in multiple collections)
             var items = await db.PoiCollectionItems
+                .AsNoTracking()
                 .Where(ci => ids.Contains(ci.PoiId))
                 .GroupBy(ci => ci.PoiId)
                 .Select(g => new { PoiId = g.Key, CollectionId = g.Min(ci => ci.PoiCollectionId) })
@@ -305,14 +309,18 @@ namespace LucidCartographer.Services
 
             // Search across Name, Address, Notes, and Tags (via join table)
             var byFields = await db.Pois
+                .AsNoTracking()
                 .Where(p => EF.Functions.Like(p.Name, $"%{escaped}%", "\\")
                     || (p.Address != null && EF.Functions.Like(p.Address, $"%{escaped}%", "\\"))
                     || (p.Notes != null && EF.Functions.Like(p.Notes, $"%{escaped}%", "\\")))
                 .Take(100)
                 .ToListAsync(cancellationToken);
 
-            // Search tags via many-to-many join
+            // Search tags via many-to-many join.
+            // Include PoiTags so downstream components (PoiDetailPane) don't
+            // trigger N+1 lazy loads when rendering tag badges.
             var byTags = await db.PoiTags
+                .AsNoTracking()
                 .Where(pt => EF.Functions.Like(pt.Tag.Name, $"%{escaped}%", "\\"))
                 .Select(pt => pt.Poi)
                 .Distinct()

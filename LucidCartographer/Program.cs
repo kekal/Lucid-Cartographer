@@ -230,8 +230,6 @@ TaskScheduler.UnobservedTaskException += (_, e) =>
 }
 
 // ARCH-CRIT-01: Use MigrateAsync instead of EnsureCreatedAsync to support schema evolution.
-// TODO: Generate initial migration with: dotnet ef migrations add InitialCreate
-// If no migrations exist yet, MigrateAsync will create the DB using the model snapshot.
 using (var scope = app.Services.CreateScope())
 {
     var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
@@ -251,7 +249,6 @@ if (!app.Environment.IsDevelopment())
 // ARCH-CRIT-04: Tightened CSP — removed 'unsafe-eval', specified CDN domains explicitly.
 // 'unsafe-inline' for script-src is required by Blazor Server — its SignalR bootstrapper
 // injects inline scripts that cannot use nonces/hashes with the current Blazor runtime.
-// TODO: Replace 'unsafe-inline' with nonce-based CSP once Blazor Server supports it.
 app.Use(async (context, next) =>
 {
     context.Response.Headers.Append("Content-Security-Policy",

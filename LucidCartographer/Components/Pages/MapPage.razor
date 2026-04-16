@@ -7,6 +7,7 @@
 @inject NavigationManager Navigation
 @inject LucidCartographer.Services.Enrichment.EnrichmentProgressService EnrichmentProgress
 @inject IJSRuntime JS
+@inject ILogger<MapPage> Logger
 @implements IAsyncDisposable
 
 <PageTitle>@UiStrings.MapPageTitle</PageTitle>
@@ -153,7 +154,7 @@ else
         _ = InvokeAsync(async () =>
         {
             try { await LoadVisibleCollections(); }
-            catch { /* best effort — don't crash the progress callback */ }
+            catch (Exception ex) { Logger.LogDebug(ex, "Enrichment refresh failed"); }
         });
     }
 
@@ -263,10 +264,10 @@ else
     }
 
     [JSInvokable]
-    public void OnSplitterResizedJs(int height)
+    public async Task OnSplitterResizedJs(int height)
     {
         _tableHeight = height;
-        InvokeAsync(StateHasChanged);
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task LoadVisibleCollections()

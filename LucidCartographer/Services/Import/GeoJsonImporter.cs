@@ -61,6 +61,9 @@ namespace LucidCartographer.Services.Import
             if (geoType.GetString() != "Point")
                 return null; // Not a Point geometry (LineString, Polygon, etc.)
 
+            if (coords[0].ValueKind != JsonValueKind.Number || coords[1].ValueKind != JsonValueKind.Number)
+                return null;
+
             var lon = coords[0].GetDouble();
             var lat = coords[1].GetDouble();
 

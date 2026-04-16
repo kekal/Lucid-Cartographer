@@ -95,9 +95,10 @@ namespace LucidCartographer.Services.Enrichment
             // has focused on the place.
             for (int i = 0; i < 30; i++)
             {
+                ct.ThrowIfCancellationRequested();
                 var u = page.Url;
                 if (u.Contains("/maps/place/") && u.Contains("/@")) break;
-                await page.WaitForTimeoutAsync(300);
+                await Task.Delay(300, ct);
             }
 
             // Wait for the detail panel to hydrate enough to expose data-item-id
