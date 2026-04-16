@@ -2,9 +2,11 @@
 @rendermode InteractiveServer
 @using LucidCartographer.Data.Entities
 @using Microsoft.AspNetCore.WebUtilities
+@using Microsoft.JSInterop
 @inject IPoiService PoiService
 @inject NavigationManager Navigation
 @inject LucidCartographer.Services.Enrichment.EnrichmentProgressService EnrichmentProgress
+@inject IJSRuntime JS
 @implements IAsyncDisposable
 
 <PageTitle>@UiStrings.MapPageTitle</PageTitle>
@@ -44,6 +46,17 @@ else
                     </button>
                 </span>
             }
+            @if (_previousSearchQuery != null)
+            {
+                <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium text-white"
+                      style="background-color: @SearchMarkerColor">
+                    Search: @_previousSearchQuery
+                    <button @onclick="ResetSearch" class="hover:opacity-80"
+                            aria-label="Reset search">
+                        <span class="material-symbols-outlined text-xs" aria-hidden="true">close</span>
+                    </button>
+                </span>
+            }
             @if (_collectionVMs.Any(c => c.IsVisible))
             {
                 <button class="text-xs text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1"
@@ -56,17 +69,28 @@ else
         </div>
 
         @* Map *@
-        <div class="flex-1 relative min-h-0">
-            <LeafletMap @ref="_leafletMap" OnMarkerSelected="HandleMarkerSelected" />
+        <div style="flex: 1 1 0; min-height: 120px;" class="relative min-h-0">
+            <LeafletMap @ref="_leafletMap" OnMarkerSelected="HandleMarkerSelected" OnBoundsChanged="HandleBoundsChanged" />
         </div>
 
+        @* Drag handle *@
+        <div @ref="_splitterHandle"
+             class="flex-shrink-0 h-1.5 bg-surface-container-high hover:bg-primary/30 cursor-row-resize select-none transition-colors"></div>
+
         @* Bottom Table *@
-        <div class="h-64 flex-shrink-0 bg-white shadow-inner overflow-hidden border-t border-surface-container-high">
-            <PoiTable Pois="_visiblePois"
+        <div @ref="_tableContainer"
+             style="height: @(_tableHeight)px; min-height: 80px; max-height: 70vh;"
+             class="flex-shrink-0 bg-white shadow-inner overflow-hidden">
+            <PoiTable Pois="_filteredPois"
                      SelectedPoiId="_selectedPoiId"
                      CollectionName="@_selectedCollectionName"
+                     PoiCollectionNames="_poiCollectionNames"
+                     PoiCollectionIds="_poiCollectionIds"
+                     Collections="_collectionVMs"
                      OnPoiSelected="HandlePoiSelected"
-                     OnFocusClicked="HandleFocusPoi" />
+                     OnFocusClicked="HandleFocusPoi"
+                     OnDeleteClicked="HandleDeletePoi"
+                     OnMoveClicked="HandleMovePoi" />
         </div>
     </div>
 
@@ -85,12 +109,25 @@ else
     private IReadOnlyList<PoiCollection> _collections = Array.Empty<PoiCollection>();
     private List<CollectionViewModel> _collectionVMs = new();
     private IReadOnlyList<Poi> _visiblePois = Array.Empty<Poi>();
+    private IReadOnlyList<Poi> _filteredPois = Array.Empty<Poi>();
+    private Dictionary<int, string> _poiCollectionNames = new();
+    private Dictionary<int, int> _poiCollectionIds = new();
     private int? _selectedCollectionId;
     private int? _selectedPoiId;
     private string? _selectedCollectionName;
     private Poi? _selectedPoi;
     private bool _isLoading = true;
     private string? _previousSearchQuery;
+
+    // Viewport filtering
+    private MapBounds? _currentBounds;
+    private bool _showAllPois; // true after Fit All — shows full list
+
+    // Resizable splitter
+    private int _tableHeight = 256;
+    private ElementReference _splitterHandle;
+    private ElementReference _tableContainer;
+    private DotNetObjectReference<MapPage>? _selfRef;
 
     protected override async Task OnInitializedAsync()
     {
@@ -120,6 +157,9 @@ else
         });
     }
 
+    private const int SearchLayerId = -1;
+    private const string SearchMarkerColor = "#7B61FF";
+
     // HIGH-01: Cache previous search term; skip if unchanged
     protected override async Task OnParametersSetAsync()
     {
@@ -132,28 +172,100 @@ else
                 if (search == _previousSearchQuery) return; // skip duplicate search
                 _previousSearchQuery = search;
                 _visiblePois = await PoiService.SearchAsync(search);
+                _filteredPois = _visiblePois;
                 _selectedCollectionName = $"Search: {search}";
+                _pendingSearchMapUpdate = true;
                 return;
             }
         }
-        _previousSearchQuery = null;
+
+        // Search cleared — remove search markers if they were shown
+        if (_previousSearchQuery != null)
+        {
+            _previousSearchQuery = null;
+            _pendingSearchMapUpdate = true;
+        }
     }
+
+    private bool _pendingSearchMapUpdate;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender && _leafletMap != null)
         {
             await _leafletMap.WaitForInitAsync();
-            if (_previousSearchQuery == null)
+
+            // Init resizable splitter via JS (smooth pointer capture)
+            _selfRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("leafletInterop.initSplitter", _splitterHandle, _tableContainer, _selfRef);
+
+            if (_previousSearchQuery != null)
             {
+                await ShowSearchResultsOnMap();
+            }
+            else
+            {
+                await LoadVisibleCollections();
+            }
+            _pendingSearchMapUpdate = false;
+        }
+        else if (_pendingSearchMapUpdate && _leafletMap is { IsInitialized: true })
+        {
+            _pendingSearchMapUpdate = false;
+            if (_previousSearchQuery != null)
+            {
+                await ShowSearchResultsOnMap();
+            }
+            else
+            {
+                // Search cleared — restore collection view
+                await _leafletMap.HideCollectionAsync(SearchLayerId);
                 await LoadVisibleCollections();
             }
         }
     }
 
+    private async Task ResetSearch()
+    {
+        _previousSearchQuery = null;
+        _selectedCollectionName = null;
+        if (_leafletMap is { IsInitialized: true })
+        {
+            await _leafletMap.HideCollectionAsync(SearchLayerId);
+            await LoadVisibleCollections();
+        }
+        Navigation.NavigateTo("/", replace: true);
+    }
+
+    private async Task ShowSearchResultsOnMap()
+    {
+        if (_leafletMap == null) return;
+
+        // Hide collection layers, show search results layer
+        foreach (var vm in _collectionVMs)
+            await _leafletMap.HideCollectionAsync(vm.Id);
+
+        var searchPois = _visiblePois.ToList();
+        await _leafletMap.ShowCollectionAsync(SearchLayerId, searchPois, SearchMarkerColor);
+
+        _showAllPois = true;
+        _filteredPois = _visiblePois;
+        await _leafletMap.FitBoundsAsync();
+    }
+
+    [JSInvokable]
+    public void OnSplitterResizedJs(int height)
+    {
+        _tableHeight = height;
+        InvokeAsync(StateHasChanged);
+    }
+
     private async Task LoadVisibleCollections()
     {
         if (_leafletMap == null || !_leafletMap.IsInitialized) return;
+
+        // Clear any leftover search results layer
+        await _leafletMap.HideCollectionAsync(SearchLayerId);
 
         var grouped = await PoiService.GetVisiblePoisGroupedAsync();
         // A POI can belong to multiple collections (import "links" existing POIs
@@ -163,6 +275,8 @@ else
         // key value". Dedup by Id while flattening.
         var seen = new HashSet<int>();
         var newPois = new List<Poi>();
+        var nameMap = new Dictionary<int, string>();
+        var idMap = new Dictionary<int, int>();
 
         foreach (var vm in _collectionVMs)
         {
@@ -173,6 +287,8 @@ else
                 {
                     if (seen.Add(poi.Id))
                         newPois.Add(poi);
+                    nameMap.TryAdd(poi.Id, vm.Name);
+                    idMap.TryAdd(poi.Id, vm.Id);
                 }
             }
             else
@@ -181,7 +297,9 @@ else
             }
         }
         _visiblePois = newPois;
-        StateHasChanged();
+        _poiCollectionNames = nameMap;
+        _poiCollectionIds = idMap;
+        ApplyViewportFilter();
     }
 
     // HIGH-05: Toggle visibility on the ViewModel, then persist to DB
@@ -200,6 +318,7 @@ else
         var vm = _collectionVMs.FirstOrDefault(c => c.Id == collectionId);
         _selectedCollectionName = vm?.Name;
         _visiblePois = await PoiService.GetPoisByCollectionAsync(collectionId);
+        ApplyViewportFilter();
     }
 
     private async Task HandleMarkerSelected(int poiId)
@@ -241,13 +360,67 @@ else
     {
         if (_leafletMap != null)
         {
+            _showAllPois = true;
+            _filteredPois = _visiblePois;
             await _leafletMap.FitBoundsAsync();
         }
+    }
+
+    private void HandleBoundsChanged(MapBounds bounds)
+    {
+        _currentBounds = bounds;
+        // After Fit All, the first moveend resets back to viewport filtering
+        if (_showAllPois)
+        {
+            _showAllPois = false;
+            // Keep showing all during the fit animation
+            return;
+        }
+        ApplyViewportFilter();
+    }
+
+    private void ApplyViewportFilter()
+    {
+        if (_showAllPois || _currentBounds == null)
+        {
+            _filteredPois = _visiblePois;
+        }
+        else
+        {
+            _filteredPois = _visiblePois
+                .Where(p => _currentBounds.Contains(p.Latitude, p.Longitude))
+                .ToList();
+        }
+        StateHasChanged();
+    }
+
+
+    private async Task HandleDeletePoi(int poiId)
+    {
+        if (_poiCollectionIds.TryGetValue(poiId, out var collectionId))
+        {
+            await PoiService.RemovePoiFromCollectionAsync(poiId, collectionId);
+        }
+        // Close detail pane if this POI was selected
+        if (_selectedPoiId == poiId)
+            CloseDetailPane();
+        await LoadVisibleCollections();
+    }
+
+    private async Task HandleMovePoi((int PoiId, int TargetCollectionId) args)
+    {
+        if (_poiCollectionIds.TryGetValue(args.PoiId, out var sourceCollectionId))
+        {
+            await PoiService.AddPoiToCollectionAsync(args.PoiId, args.TargetCollectionId);
+            await PoiService.RemovePoiFromCollectionAsync(args.PoiId, sourceCollectionId);
+        }
+        await LoadVisibleCollections();
     }
 
     public async ValueTask DisposeAsync()
     {
         _enrichmentSubscription?.Dispose();
+        _selfRef?.Dispose();
         if (_leafletMap != null)
         {
             await _leafletMap.DisposeAsync();

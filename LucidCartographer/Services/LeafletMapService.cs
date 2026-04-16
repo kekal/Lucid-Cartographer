@@ -23,6 +23,7 @@ namespace LucidCartographer.Services
         private int _initialized;
 
         public Func<int, Task>? OnMarkerClicked { get; set; }
+        public Func<MapBounds, Task>? OnBoundsChanged { get; set; }
 
         public LeafletMapService(IJSRuntime js)
         {
@@ -75,12 +76,25 @@ namespace LucidCartographer.Services
             await InvokeJsVoidAsync("leafletInterop.destroyMap");
         }
 
+        public async Task EnableBoundsTrackingAsync()
+        {
+            await InvokeJsVoidAsync("leafletInterop.enableBoundsTracking");
+        }
+
         /// <summary>Internal: called from JavaScript only.</summary>
         [JSInvokable]
         public async Task OnMarkerClickedJs(int poiId)
         {
             if (OnMarkerClicked != null)
                 await OnMarkerClicked(poiId);
+        }
+
+        /// <summary>Internal: called from JavaScript on moveend.</summary>
+        [JSInvokable]
+        public async Task OnBoundsChangedJs(MapBounds bounds)
+        {
+            if (OnBoundsChanged != null)
+                await OnBoundsChanged(bounds);
         }
 
         public async ValueTask DisposeAsync()

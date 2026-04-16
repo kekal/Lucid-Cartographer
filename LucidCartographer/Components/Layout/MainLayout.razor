@@ -68,31 +68,7 @@
     </main>
 </div>
 
-@* Search debounce: intercepts form submission and delays by 300ms to avoid
-   rapid full-page reloads on fast typing. Because this is a static SSR GET form,
-   the debounce must be client-side JS. *@
-<script>
-    (function () {
-        var timer = null;
-        var form = document.getElementById('search-form');
-        var input = document.getElementById('search-input');
-        if (!form || !input) return;
-
-        // On explicit submit (Enter key / button), debounce the submission by 300ms
-        // to coalesce with any pending keyup-triggered submit.
-        form.addEventListener('submit', function (e) {
-            if (timer) { clearTimeout(timer); timer = null; }
-            e.preventDefault();
-            setTimeout(function () { form.submit(); }, 300);
-        });
-
-        input.addEventListener('keyup', function (e) {
-            if (e.key === 'Enter') return; // let form submit handle Enter
-            if (timer) clearTimeout(timer);
-            timer = setTimeout(function () { form.submit(); }, 300);
-        });
-    })();
-</script>
+@* Search: submits on Enter only (GET form default behavior). *@
 
 @code {
     private ErrorBoundary? _errorBoundary;

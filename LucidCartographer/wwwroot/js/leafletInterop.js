@@ -170,7 +170,62 @@
             if (marker) {
                 marker.openPopup();
             }
+        },
+
+        getBounds: function () {
+            if (!state.map) return null;
+            var b = state.map.getBounds();
+            return {
+                south: b.getSouth(),
+                west: b.getWest(),
+                north: b.getNorth(),
+                east: b.getEast()
+            };
+        },
+
+        enableBoundsTracking: function () {
+            if (!state.map || state._boundsHandler) return;
+            state._boundsHandler = function () {
+                if (!state.dotnetRef) return;
+                var b = state.map.getBounds();
+                state.dotnetRef.invokeMethodAsync('OnBoundsChangedJs', {
+                    south: b.getSouth(),
+                    west: b.getWest(),
+                    north: b.getNorth(),
+                    east: b.getEast()
+                });
+            };
+            state.map.on('moveend', state._boundsHandler);
+            // Fire immediately so the initial viewport is known
+            state._boundsHandler();
         }
+    };
+
+    // Resizable splitter between map and POI table
+    window.leafletInterop.initSplitter = function (handleEl, tableEl, dotnetRef) {
+        if (!handleEl || !tableEl) return;
+        var startY, startH;
+        function onPointerMove(e) {
+            var delta = startY - e.clientY;
+            var newH = Math.max(80, Math.min(window.innerHeight * 0.7, startH + delta));
+            tableEl.style.height = newH + 'px';
+            if (state.map) state.map.invalidateSize();
+        }
+        function onPointerUp(e) {
+            document.removeEventListener('pointermove', onPointerMove);
+            document.removeEventListener('pointerup', onPointerUp);
+            handleEl.releasePointerCapture(e.pointerId);
+            var h = parseInt(tableEl.style.height, 10) || 256;
+            if (dotnetRef) dotnetRef.invokeMethodAsync('OnSplitterResizedJs', h);
+        }
+        handleEl.addEventListener('pointerdown', function (e) {
+            e.preventDefault();
+            startY = e.clientY;
+            startH = tableEl.offsetHeight;
+            handleEl.setPointerCapture(e.pointerId);
+            document.addEventListener('pointermove', onPointerMove);
+            document.addEventListener('pointerup', onPointerUp);
+        });
     };
 
     // MED-08: downloadFile moved from inline script in App.razor to this module.

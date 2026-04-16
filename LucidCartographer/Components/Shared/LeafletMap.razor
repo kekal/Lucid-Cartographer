@@ -7,6 +7,7 @@
 
 @code {
     [Parameter] public EventCallback<int> OnMarkerSelected { get; set; }
+    [Parameter] public EventCallback<MapBounds> OnBoundsChanged { get; set; }
 
     // LOW-08: GUID ensures uniqueness across multiple LeafletMap instances on the same page
     // or across rapid mount/unmount cycles where a simple counter could collide.
@@ -28,9 +29,11 @@
         {
             // REVIEW-12: Set callback via Func instead of subscribing to event
             MapService.OnMarkerClicked = HandleMarkerClickedAsync;
+            MapService.OnBoundsChanged = HandleBoundsChangedAsync;
             try
             {
                 await MapService.InitMapAsync(_mapElementId);
+                await MapService.EnableBoundsTrackingAsync();
                 _initialized = true;
                 _initTcs.TrySetResult();
             }
@@ -91,9 +94,22 @@
         }
     }
 
+    private async Task HandleBoundsChangedAsync(MapBounds bounds)
+    {
+        try
+        {
+            await InvokeAsync(async () => await OnBoundsChanged.InvokeAsync(bounds));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error handling bounds change");
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         MapService.OnMarkerClicked = null;
+        MapService.OnBoundsChanged = null;
         _initTcs.TrySetCanceled();
 
         // Tear down the JS-side map but DO NOT dispose the service itself.
