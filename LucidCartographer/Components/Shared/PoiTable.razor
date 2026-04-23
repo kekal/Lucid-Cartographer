@@ -48,7 +48,7 @@
                                 </div>
                             </td>
                             <td class="px-4 py-2.5 text-xs text-on-surface-variant font-mono">
-                                @poi.Latitude.ToString("F4"), @poi.Longitude.ToString("F4")
+                                @(poi.Latitude.HasValue && poi.Longitude.HasValue ? $"{poi.Latitude.Value.ToString("F4")}, {poi.Longitude.Value.ToString("F4")}" : "—")
                             </td>
                             <td class="px-4 py-2.5">
                                 @{ var cn = GetCollectionName(poi.Id); }
@@ -63,23 +63,34 @@
                                    target="_blank" rel="noopener"
                                    class="text-primary hover:text-primary-container transition-colors p-1 inline-block"
                                    aria-label="@($"Open {poi.Name} in Google Maps")"
+                                   title="Open in Google Maps"
                                    @onclick:stopPropagation="true">
                                     <span class="material-symbols-outlined text-base" aria-hidden="true">open_in_new</span>
                                 </a>
                                 <button class="text-on-surface-variant hover:text-primary transition-colors p-1"
                                         aria-label="@($"Focus map on {poi.Name}")"
+                                        title="Focus on map"
                                         @onclick:stopPropagation="true"
                                         @onclick="() => HandleFocusClick(poi.Id)">
                                     <span class="material-symbols-outlined text-base" aria-hidden="true">my_location</span>
                                 </button>
                                 <button class="text-on-surface-variant hover:text-primary transition-colors p-1"
                                         aria-label="@($"Move {poi.Name} to another collection")"
+                                        title="Move to collection"
                                         @onclick:stopPropagation="true"
                                         @onclick="() => OpenMoveModal(poi.Id)">
                                     <span class="material-symbols-outlined text-base" aria-hidden="true">drive_file_move</span>
                                 </button>
+                                <button class="text-on-surface-variant hover:text-primary transition-colors p-1"
+                                        aria-label="@($"Copy {poi.Name} to another collection")"
+                                        title="Copy to collection"
+                                        @onclick:stopPropagation="true"
+                                        @onclick="() => OpenCopyModal(poi.Id)">
+                                    <span class="material-symbols-outlined text-base" aria-hidden="true">content_copy</span>
+                                </button>
                                 <button class="text-on-surface-variant hover:text-error transition-colors p-1"
                                         aria-label="@($"Delete {poi.Name}")"
+                                        title="Delete"
                                         @onclick:stopPropagation="true"
                                         @onclick="() => HandleDelete(poi.Id)">
                                     <span class="material-symbols-outlined text-base" aria-hidden="true">delete</span>
@@ -93,24 +104,24 @@
     </div>
 </div>
 
-@* Move modal *@
-@if (_movePoiId != null)
+@* Move / Copy modal *@
+@if (_modalPoiId != null)
 {
-    <div class="fixed inset-0 bg-black/40 flex items-center justify-center" style="z-index: 10000;" @onclick="CloseMoveModal">
+    <div class="fixed inset-0 bg-black/40 flex items-center justify-center" style="z-index: 10000;" @onclick="CloseModal">
         <div class="bg-white rounded-xl shadow-2xl w-80 max-h-[60vh] flex flex-col" @onclick:stopPropagation="true">
             <div class="px-4 py-3 border-b border-surface-container-high flex items-center justify-between">
-                <span class="font-headline font-bold text-sm">Move to collection</span>
-                <button class="p-1 hover:bg-surface-container-low rounded-full" @onclick="CloseMoveModal">
+                <span class="font-headline font-bold text-sm">@(_isCopy ? "Copy to collection" : "Move to collection")</span>
+                <button class="p-1 hover:bg-surface-container-low rounded-full" @onclick="CloseModal">
                     <span class="material-symbols-outlined text-base">close</span>
                 </button>
             </div>
             <div class="flex-1 overflow-y-auto p-2">
                 @if (Collections != null)
                 {
-                    @foreach (var col in Collections.Where(c => c.Id != GetCollectionId(_movePoiId.Value)))
+                    @foreach (var col in Collections.Where(c => c.Id != GetCollectionId(_modalPoiId.Value)))
                     {
                         <button class="w-full text-left px-3 py-2 rounded-lg hover:bg-surface-container-low transition-colors text-sm flex items-center gap-2"
-                                @onclick="() => HandleMove(_movePoiId.Value, col.Id)">
+                                @onclick="() => HandleTargetSelected(_modalPoiId.Value, col.Id)">
                             <span class="w-3 h-3 rounded-full flex-shrink-0" style="background-color: @col.Color"></span>
                             @col.Name
                         </button>
@@ -127,10 +138,10 @@
                     }
                     else
                     {
-                        <form class="flex items-center gap-2 px-3 py-2" @onsubmit="HandleCreateAndMove" @onsubmit:preventDefault>
+                        <form class="flex items-center gap-2 px-3 py-2" @onsubmit="HandleCreateAndTarget" @onsubmit:preventDefault>
                             <input @bind="_newCollectionName" placeholder="Collection name"
                                    class="flex-1 text-sm px-2 py-1 border border-surface-container-high rounded-lg focus:ring-2 focus:ring-primary focus:outline-none" />
-                            <button type="submit" class="text-primary hover:text-primary-container p-1" aria-label="Create and move">
+                            <button type="submit" class="text-primary hover:text-primary-container p-1" aria-label="@(_isCopy ? "Create and copy" : "Create and move")">
                                 <span class="material-symbols-outlined text-base">check</span>
                             </button>
                         </form>
@@ -153,8 +164,11 @@
     [Parameter] public EventCallback<int> OnDeleteClicked { get; set; }
     [Parameter] public EventCallback<(int PoiId, int TargetCollectionId)> OnMoveClicked { get; set; }
     [Parameter] public EventCallback<(int PoiId, string NewCollectionName)> OnMoveToNewClicked { get; set; }
+    [Parameter] public EventCallback<(int PoiId, int TargetCollectionId)> OnCopyClicked { get; set; }
+    [Parameter] public EventCallback<(int PoiId, string NewCollectionName)> OnCopyToNewClicked { get; set; }
 
-    private int? _movePoiId;
+    private int? _modalPoiId;
+    private bool _isCopy;
     private bool _showNewCollectionInput;
     private string _newCollectionName = "";
 
@@ -171,8 +185,9 @@
         return -1;
     }
 
-    private void OpenMoveModal(int poiId) { _movePoiId = poiId; _showNewCollectionInput = false; _newCollectionName = ""; }
-    private void CloseMoveModal() { _movePoiId = null; _showNewCollectionInput = false; _newCollectionName = ""; }
+    private void OpenMoveModal(int poiId) { _modalPoiId = poiId; _isCopy = false; _showNewCollectionInput = false; _newCollectionName = ""; }
+    private void OpenCopyModal(int poiId) { _modalPoiId = poiId; _isCopy = true; _showNewCollectionInput = false; _newCollectionName = ""; }
+    private void CloseModal() { _modalPoiId = null; _showNewCollectionInput = false; _newCollectionName = ""; }
 
     private async Task HandlePoiClick(int poiId)
     {
@@ -192,20 +207,30 @@
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Error deleting POI {poiId}: {ex.Message}"); }
     }
 
-    private async Task HandleMove(int poiId, int targetCollectionId)
+    private async Task HandleTargetSelected(int poiId, int targetCollectionId)
     {
-        _movePoiId = null;
-        try { await OnMoveClicked.InvokeAsync((poiId, targetCollectionId)); }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Error moving POI {poiId}: {ex.Message}"); }
+        var isCopy = _isCopy;
+        _modalPoiId = null;
+        try
+        {
+            if (isCopy) await OnCopyClicked.InvokeAsync((poiId, targetCollectionId));
+            else await OnMoveClicked.InvokeAsync((poiId, targetCollectionId));
+        }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Error {(isCopy ? "copying" : "moving")} POI {poiId}: {ex.Message}"); }
     }
 
-    private async Task HandleCreateAndMove()
+    private async Task HandleCreateAndTarget()
     {
-        if (_movePoiId == null || string.IsNullOrWhiteSpace(_newCollectionName)) return;
-        var poiId = _movePoiId.Value;
+        if (_modalPoiId == null || string.IsNullOrWhiteSpace(_newCollectionName)) return;
+        var poiId = _modalPoiId.Value;
         var name = _newCollectionName.Trim();
-        CloseMoveModal();
-        try { await OnMoveToNewClicked.InvokeAsync((poiId, name)); }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Error creating collection and moving POI {poiId}: {ex.Message}"); }
+        var isCopy = _isCopy;
+        CloseModal();
+        try
+        {
+            if (isCopy) await OnCopyToNewClicked.InvokeAsync((poiId, name));
+            else await OnMoveToNewClicked.InvokeAsync((poiId, name));
+        }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Error creating collection and {(isCopy ? "copying" : "moving")} POI {poiId}: {ex.Message}"); }
     }
 }

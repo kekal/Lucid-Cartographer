@@ -52,7 +52,11 @@ namespace LucidCartographer.Services.Operations
                 if (!PoiIdentity.AreSamePlace(poi, c, toleranceMeters, nameSimilarityThreshold))
                     continue;
 
-                var dist = GeoUtils.HaversineDistance(poi.Latitude, poi.Longitude, c.Latitude, c.Longitude);
+                // AreSamePlace already requires non-null coords on both sides,
+                // so the .Value dereferences here are safe.
+                var dist = GeoUtils.HaversineDistance(
+                    poi.Latitude!.Value, poi.Longitude!.Value,
+                    c.Latitude!.Value, c.Longitude!.Value);
                 if (dist < bestDistance)
                 {
                     bestDistance = dist;
@@ -67,6 +71,10 @@ namespace LucidCartographer.Services.Operations
         public List<List<Poi>> FindDuplicateGroups(List<Poi> pois, double toleranceMeters = DefaultToleranceMeters, double nameSimilarityThreshold = DefaultNameSimilarityThreshold, CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(pois);
+
+            // Filter out unlocated POIs up front — PoiIdentity excludes them
+            // anyway, and the latitude pre-filter below needs .Value.
+            pois = pois.Where(p => p.Latitude.HasValue && p.Longitude.HasValue).ToList();
 
             int n = pois.Count;
             var parent = new int[n];
@@ -103,8 +111,9 @@ namespace LucidCartographer.Services.Operations
 
                 for (int j = i + 1; j < n; j++)
                 {
-                    // Fast latitude pre-filter.
-                    if (Math.Abs(pois[i].Latitude - pois[j].Latitude) > latThresholdDegrees)
+                    // Fast latitude pre-filter. Coords are guaranteed non-null
+                    // by the Where() pass at the top of the method.
+                    if (Math.Abs(pois[i].Latitude!.Value - pois[j].Latitude!.Value) > latThresholdDegrees)
                         continue;
 
                     if (PoiIdentity.AreSamePlace(pois[i], pois[j], toleranceMeters, nameSimilarityThreshold))

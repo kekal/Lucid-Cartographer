@@ -110,9 +110,14 @@ namespace LucidCartographer.Services.Import
 
         private static List<ImportedPoi> FilterValidCoordinates(IReadOnlyList<ImportedPoi> parsed)
         {
+            // NULL coords are allowed through — enrichment will fill them in
+            // later. A half-null pair (one set, the other missing) is
+            // rejected. Non-null coords must be in range.
             return parsed
-                .Where(p => p.Latitude >= -90 && p.Latitude <= 90
-                         && p.Longitude >= -180 && p.Longitude <= 180)
+                .Where(p => (p.Latitude == null && p.Longitude == null)
+                         || (p.Latitude.HasValue && p.Longitude.HasValue
+                             && p.Latitude.Value >= -90 && p.Latitude.Value <= 90
+                             && p.Longitude.Value >= -180 && p.Longitude.Value <= 180))
                 .ToList();
         }
 

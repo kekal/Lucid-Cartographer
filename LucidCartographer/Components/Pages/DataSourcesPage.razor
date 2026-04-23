@@ -128,8 +128,20 @@
     <div>
         <div class="flex items-center justify-between mb-4">
             <h3 class="text-lg font-bold font-headline">@UiStrings.ManagedSources</h3>
-            <span class="text-sm text-on-surface-variant">@_collections.Count dataset(s)</span>
+            <div class="flex items-center gap-3">
+                <span class="text-sm text-on-surface-variant">@_collections.Count dataset(s)</span>
+                <button class="text-xs px-2.5 py-1.5 rounded-lg border border-outline-variant hover:bg-surface-container transition-colors disabled:opacity-50"
+                        disabled="@(_failedEnrichmentCount == 0)"
+                        @onclick="HandleResetFailedEnrichment">
+                    @UiStrings.ResetFailedEnrichment (@_failedEnrichmentCount)
+                </button>
+            </div>
         </div>
+
+        @if (!string.IsNullOrWhiteSpace(_maintenanceMessage))
+        {
+            <div class="mb-4 p-2 rounded-lg bg-primary/10 text-primary text-sm">@_maintenanceMessage</div>
+        }
 
         @if (_collections.Count == 0)
         {
@@ -274,6 +286,8 @@
     private string? _fetchListsError;
     private CancellationTokenSource _cts = new();
     private IDisposable? _statusSubscription;
+    private int _failedEnrichmentCount;
+    private string? _maintenanceMessage;
 
     private string _uploadTitle => _activeCard switch
     {
@@ -346,6 +360,15 @@
     private async Task LoadCollections()
     {
         _collections = await PoiService.GetCollectionsAsync();
+        _failedEnrichmentCount = await PoiService.GetFailedEnrichmentCountAsync();
+    }
+
+    private async Task HandleResetFailedEnrichment()
+    {
+        var reset = await PoiService.ResetFailedEnrichmentAsync(_cts.Token);
+        _maintenanceMessage = string.Format(UiStrings.FailedEnrichmentReset, reset);
+        await LoadCollections();
+        EnrichmentTrigger.Signal();
     }
 
     private void ShowUpload(string card)
@@ -557,8 +580,12 @@
                 catch { /* best effort — fall back to original short URL */ }
             }
 
-            // Try to extract coordinates from the URL if available
-            var coords = PoiUrlHelper.ExtractCoordinatesFromUrl(url);
+            // Only accept the place marker (!3d!4d) — never trust the
+            // `/@lat,lon` viewport-center fallback for Add-POI, otherwise
+            // a map that was panned elsewhere would bind the wrong coords
+            // to the new row. Enrichment will fill coords from the detail
+            // page if the URL has no place marker.
+            var coords = PoiUrlHelper.ExtractPlaceCoordinatesFromUrl(url);
 
             // Derive a placeholder name from the URL
             var placeholderName = "Pending enrichment";
@@ -578,8 +605,8 @@
             var poi = new Poi
             {
                 Name = placeholderName,
-                Latitude = coords?.lat ?? 0,
-                Longitude = coords?.lon ?? 0,
+                Latitude = coords?.lat,
+                Longitude = coords?.lon,
                 GoogleMapsUrl = url,
                 Status = PoiStatus.WantToGo,
                 IsEnriched = false  // enrichment service will fill details

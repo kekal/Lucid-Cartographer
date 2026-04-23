@@ -1,5 +1,6 @@
 using Microsoft.Playwright;
 using LucidCartographer.Services;
+using Microsoft.Extensions.Logging;
 
 namespace LucidCartographer.Services.Enrichment
 {
@@ -28,20 +29,20 @@ namespace LucidCartographer.Services.Enrichment
     /// </summary>
     public static class PoiDetailEnricher
     {
-        public static Task<EnrichedDetails> EnrichAsync(IPage page, string placeUrl, CancellationToken ct)
-            => EnrichCoreAsync(page, placeUrl, ct);
+        public static Task<EnrichedDetails> EnrichAsync(IPage page, string placeUrl, CancellationToken ct, ILogger? logger = null)
+            => EnrichCoreAsync(page, placeUrl, ct, logger);
 
-        public static Task<EnrichedDetails> EnrichByNameAsync(IPage page, string name, string? hint, CancellationToken ct)
+        public static Task<EnrichedDetails> EnrichByNameAsync(IPage page, string name, string? hint, CancellationToken ct, ILogger? logger = null)
         {
             // Appending the hint (category or description first line) helps
             // disambiguate common names. Example: "Zebra" + "Zabrze, Poland"
             // lands on the specific place rather than the generic feature.
             var query = string.IsNullOrWhiteSpace(hint) ? name : $"{name} {hint}";
             var url = "https://www.google.com/maps/search/?api=1&query=" + Uri.EscapeDataString(query);
-            return EnrichCoreAsync(page, url, ct);
+            return EnrichCoreAsync(page, url, ct, logger);
         }
 
-        private static async Task<EnrichedDetails> EnrichCoreAsync(IPage page, string navUrl, CancellationToken ct)
+        private static async Task<EnrichedDetails> EnrichCoreAsync(IPage page, string navUrl, CancellationToken ct, ILogger? logger)
         {
             ct.ThrowIfCancellationRequested();
 
@@ -85,7 +86,11 @@ namespace LucidCartographer.Services.Enrichment
                             break;
                         }
                     }
-                    catch { /* try next selector */ }
+                    catch (Exception ex)
+                    {
+                        logger?.LogWarning(ex, "Consent selector miss for '{Selector}'", sel);
+                        EnrichmentMetrics.RecordSelectorMiss();
+                    }
                 }
             }
 
@@ -112,8 +117,10 @@ namespace LucidCartographer.Services.Enrichment
             var finalUrl = page.Url;
             var coords = PoiUrlHelper.ExtractCoordinatesFromUrl(finalUrl);
 
-            var address = await TryInnerTextAsync(page, "button[data-item-id='address'] .fontBodyMedium, div[data-item-id='address']");
-            var phone = await TryInnerTextAsync(page, "button[data-item-id*='phone'] .fontBodyMedium");
+            var address = await TryInnerTextAsync(page, "button[data-item-id='address'] .fontBodyMedium, div[data-item-id='address']", "address", logger);
+            var phone = await TryInnerTextAsync(page, "button[data-item-id*='phone'] .fontBodyMedium", "phone", logger);
+            if (!string.IsNullOrWhiteSpace(address)) EnrichmentMetrics.RecordAddressFound();
+            if (!string.IsNullOrWhiteSpace(phone)) EnrichmentMetrics.RecordPhoneFound();
 
             string? website = null;
             try
@@ -124,9 +131,14 @@ namespace LucidCartographer.Services.Enrichment
                     website = await webEl.GetAttributeAsync("href");
                     if (string.IsNullOrWhiteSpace(website))
                         website = (await webEl.InnerTextAsync()).Trim();
+                    if (!string.IsNullOrWhiteSpace(website)) EnrichmentMetrics.RecordWebsiteFound();
                 }
             }
-            catch { /* leave null */ }
+            catch (Exception ex)
+            {
+                logger?.LogWarning(ex, "Website selector miss for Google Maps details panel");
+                EnrichmentMetrics.RecordSelectorMiss();
+            }
 
             return new EnrichedDetails(
                 Address: address,
@@ -137,7 +149,7 @@ namespace LucidCartographer.Services.Enrichment
                 GoogleMapsUrl: finalUrl.Contains("/maps/place/") ? finalUrl : null);
         }
 
-        private static async Task<string?> TryInnerTextAsync(IPage page, string selector)
+        private static async Task<string?> TryInnerTextAsync(IPage page, string selector, string field, ILogger? logger)
         {
             try
             {
@@ -145,7 +157,11 @@ namespace LucidCartographer.Services.Enrichment
                 if (await el.IsVisibleAsync())
                     return (await el.InnerTextAsync()).Trim();
             }
-            catch { /* swallow */ }
+            catch (Exception ex)
+            {
+                logger?.LogWarning(ex, "Selector miss while extracting enrichment field '{Field}'", field);
+                EnrichmentMetrics.RecordSelectorMiss();
+            }
             return null;
         }
     }

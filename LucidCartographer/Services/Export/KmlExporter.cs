@@ -80,15 +80,18 @@ namespace LucidCartographer.Services.Export
 
         private static IEnumerable<XElement> GeneratePlacemarks(IReadOnlyList<Poi> pois)
         {
-            return pois.Select(poi =>
-                new XElement(Kml + "Placemark",
-                    new XElement(Kml + "name", poi.Name),
-                    new XElement(Kml + "description", new XCData(BuildDescription(poi))),
-                    new XElement(Kml + "Point",
-                        new XElement(Kml + "coordinates", $"{poi.Longitude.ToString(System.Globalization.CultureInfo.InvariantCulture)},{poi.Latitude.ToString(System.Globalization.CultureInfo.InvariantCulture)},0")
+            // Skip unlocated POIs — KML Points require coordinates.
+            return pois
+                .Where(poi => poi.Latitude.HasValue && poi.Longitude.HasValue)
+                .Select(poi =>
+                    new XElement(Kml + "Placemark",
+                        new XElement(Kml + "name", poi.Name),
+                        new XElement(Kml + "description", new XCData(BuildDescription(poi))),
+                        new XElement(Kml + "Point",
+                            new XElement(Kml + "coordinates", $"{poi.Longitude!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)},{poi.Latitude!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)},0")
+                        )
                     )
-                )
-            );
+                );
         }
 
         private static string BuildDescription(Poi poi)

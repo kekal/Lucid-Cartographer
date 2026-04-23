@@ -18,10 +18,10 @@ namespace LucidCartographer.Services.Enrichment
     /// holding the larger-Id row acts; the worker holding the smaller-Id
     /// row finds no candidate and is a no-op. No lock, no race.
     ///
-    /// Unenriched rows are never touched — they carry placeholder (0,0)
-    /// coordinates which <see cref="PoiIdentity"/> explicitly excludes from
-    /// identity decisions. They'll be re-checked when they themselves
-    /// finish enrichment.
+    /// Unenriched rows are never touched — they carry NULL coordinates
+    /// which <see cref="PoiIdentity"/> explicitly excludes from identity
+    /// decisions. They'll be re-checked when they themselves finish
+    /// enrichment.
     /// </summary>
     internal static class PoiPostEnrichmentDedup
     {
@@ -32,7 +32,8 @@ namespace LucidCartographer.Services.Enrichment
         public static async Task<bool> MergeIfDuplicateAsync(
             AppDbContext db,
             Poi justEnriched,
-            CancellationToken ct)
+            CancellationToken ct,
+            SemaphoreSlim? writeLock = null)
         {
             if (!justEnriched.IsEnriched)
                 return false;
@@ -44,7 +45,23 @@ namespace LucidCartographer.Services.Enrichment
             await RewriteCollectionLinksAsync(db, justEnriched, canonical, ct);
             await ReassignOrDropDuplicateImageAsync(db, justEnriched, canonical, ct);
             db.Pois.Remove(justEnriched);
-            await db.SaveChangesAsync(ct);
+            if (writeLock is null)
+            {
+                await db.SaveChangesAsync(ct);
+            }
+            else
+            {
+                await writeLock.WaitAsync(ct);
+                try
+                {
+                    await db.SaveChangesAsync(ct);
+                }
+                finally
+                {
+                    writeLock.Release();
+                }
+            }
+
             return true;
         }
 
@@ -53,9 +70,9 @@ namespace LucidCartographer.Services.Enrichment
         private static async Task<Poi?> FindCanonicalAsync(
             AppDbContext db, Poi justEnriched, CancellationToken ct)
         {
-            // PoiIdentity excludes (0,0) — nothing to find if the enricher
-            // didn't return real coords.
-            if (justEnriched.Latitude == 0 && justEnriched.Longitude == 0)
+            // PoiIdentity excludes NULL coords — nothing to find if the
+            // enricher didn't return real coords.
+            if (justEnriched.Latitude == null || justEnriched.Longitude == null)
                 return null;
 
             // SQL-side pre-filter: a coordinate bounding box around the
@@ -71,14 +88,16 @@ namespace LucidCartographer.Services.Enrichment
             // AreSamePlace check still has the final say without missing
             // candidates sitting right on the edge.
             const double BoundingBoxDegrees = 0.002;
-            double latLo = justEnriched.Latitude - BoundingBoxDegrees;
-            double latHi = justEnriched.Latitude + BoundingBoxDegrees;
-            double lonLo = justEnriched.Longitude - BoundingBoxDegrees;
-            double lonHi = justEnriched.Longitude + BoundingBoxDegrees;
+            double latLo = justEnriched.Latitude.Value - BoundingBoxDegrees;
+            double latHi = justEnriched.Latitude.Value + BoundingBoxDegrees;
+            double lonLo = justEnriched.Longitude.Value - BoundingBoxDegrees;
+            double lonHi = justEnriched.Longitude.Value + BoundingBoxDegrees;
 
             var candidates = await db.Pois
                 .Where(p => p.Id < justEnriched.Id
                          && p.IsEnriched
+                         && p.Latitude != null
+                         && p.Longitude != null
                          && p.Latitude >= latLo
                          && p.Latitude <= latHi
                          && p.Longitude >= lonLo

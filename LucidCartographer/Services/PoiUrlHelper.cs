@@ -15,11 +15,14 @@ namespace LucidCartographer.Services
             if (!string.IsNullOrEmpty(poi.GoogleMapsUrl))
                 return poi.GoogleMapsUrl;
 
-            if (double.IsNaN(poi.Latitude) || double.IsNaN(poi.Longitude)
-                || double.IsInfinity(poi.Latitude) || double.IsInfinity(poi.Longitude))
+            if (!poi.Latitude.HasValue || !poi.Longitude.HasValue)
                 return "#";
 
-            return $"https://www.google.com/maps/search/?api=1&query={poi.Latitude.ToString(CultureInfo.InvariantCulture)},{poi.Longitude.ToString(CultureInfo.InvariantCulture)}";
+            if (double.IsNaN(poi.Latitude.Value) || double.IsNaN(poi.Longitude.Value)
+                || double.IsInfinity(poi.Latitude.Value) || double.IsInfinity(poi.Longitude.Value))
+                return "#";
+
+            return $"https://www.google.com/maps/search/?api=1&query={poi.Latitude.Value.ToString(CultureInfo.InvariantCulture)},{poi.Longitude.Value.ToString(CultureInfo.InvariantCulture)}";
         }
 
         /// <summary>
@@ -49,6 +52,23 @@ namespace LucidCartographer.Services
                 }
             }
 
+            return null;
+        }
+
+        /// <summary>
+        /// Strict variant of <see cref="ExtractCoordinatesFromUrl"/> that only
+        /// accepts the place marker (!3d/!4d) and never falls back to the
+        /// `/@lat,lon` viewport-center form. Use this when the caller needs
+        /// the actual place coordinates, not the current map view — e.g.
+        /// the Add-POI flow on the Data Sources page, where a `/@` pan
+        /// from some other place would bind the wrong coords to the new row.
+        /// </summary>
+        public static (double lat, double lon)? ExtractPlaceCoordinatesFromUrl(string url)
+        {
+            var lat3d = ExtractBangParam(url, "!3d");
+            var lon4d = ExtractBangParam(url, "!4d");
+            if (lat3d.HasValue && lon4d.HasValue)
+                return (lat3d.Value, lon4d.Value);
             return null;
         }
 

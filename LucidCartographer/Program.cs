@@ -1,14 +1,17 @@
-using System.Security.Cryptography;
+using System.Security.Claims;
 using System.Text;
 using System.Threading.RateLimiting;
 using Coravel;
 using LucidCartographer.Components;
 using LucidCartographer.Data;
+using LucidCartographer.Services.Auth;
 using LucidCartographer.Services;
 using LucidCartographer.Services.Enrichment;
 using LucidCartographer.Services.Export;
 using LucidCartographer.Services.Import;
 using LucidCartographer.Services.Operations;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
@@ -102,6 +105,42 @@ builder.Services.AddHttpClient();
 builder.Services.Configure<EnrichmentOptions>(builder.Configuration.GetSection("Enrichment"));
 builder.Services.AddHostedService<PoiEnrichmentBackgroundService>();
 builder.Services.AddScoped<IMapService, LeafletMapService>();
+builder.Services.AddSingleton<SessionStore>();
+
+builder.Services
+    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.LoginPath = "/login";
+        options.AccessDeniedPath = "/login";
+        options.Cookie.Name = "cartographer_auth";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Strict;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        options.SlidingExpiration = true;
+        options.ExpireTimeSpan = TimeSpan.FromDays(30);
+        options.Events = new CookieAuthenticationEvents
+        {
+            OnValidatePrincipal = async context =>
+            {
+                var sessionToken = context.Principal?.FindFirstValue("session_token");
+                if (string.IsNullOrWhiteSpace(sessionToken))
+                {
+                    context.RejectPrincipal();
+                    await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                    return;
+                }
+
+                var store = context.HttpContext.RequestServices.GetRequiredService<SessionStore>();
+                if (!await store.IsActiveAsync(sessionToken, context.HttpContext.RequestAborted))
+                {
+                    context.RejectPrincipal();
+                    await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                }
+            }
+        };
+    });
+builder.Services.AddAuthorization();
 
 // Polly v8 resilience pipelines.
 // Replaces hand-rolled SemaphoreSlim in GoogleMapsListScraper and adds
@@ -172,10 +211,12 @@ builder.Services.AddHealthChecks();
 
 // ARCH-CRIT-03: Refuse to start with default insecure password
 var configuredPassword = builder.Configuration["Auth:Password"];
-if (string.Equals(configuredPassword, "changeme", StringComparison.Ordinal))
+var configuredPasswordHash = builder.Configuration["Auth:PasswordHash"];
+if (string.Equals(configuredPassword, "changeme", StringComparison.Ordinal)
+    || string.Equals(configuredPasswordHash, "changeme", StringComparison.Ordinal))
 {
     throw new InvalidOperationException(
-        "AUTH__PASSWORD is still set to 'changeme'. Set a strong password before starting the application.");
+        "Auth:Password/Auth:PasswordHash is still set to 'changeme'. Set a strong secret before starting the application.");
 }
 
 var app = builder.Build();
@@ -223,11 +264,11 @@ TaskScheduler.UnobservedTaskException += (_, e) =>
     }
 }
 
-// NEW-02: Warn when Auth:Password is empty — authentication is silently disabled
+// NEW-02: Warn when auth secret is empty — authentication is silently disabled
 {
     var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger<Program>();
-    if (string.IsNullOrEmpty(app.Configuration["Auth:Password"]))
-        logger.LogWarning("Auth:Password not set — authentication is DISABLED");
+    if (string.IsNullOrEmpty(GetConfiguredAuthSecret(app.Configuration)))
+        logger.LogWarning("Auth:Password/Auth:PasswordHash not set — authentication is DISABLED");
 }
 
 // ARCH-CRIT-01: Use MigrateAsync instead of EnsureCreatedAsync to support schema evolution.
@@ -275,11 +316,10 @@ if (!app.Environment.IsDevelopment())
     app.UseResponseCompression();
 }
 
-// ARCH-CRIT-03: Simple password + cookie authentication middleware (hardened).
-// LIMITATION: This is homebrew SHA256 cookie auth — no session tokens, no revocation,
-// no salting, and no ASP.NET Core Identity. Acceptable for a single-user personal NAS
-// tool behind Cloudflare. If this ever becomes multi-user, replace with
-// Microsoft.AspNetCore.Authentication.Cookies or ASP.NET Core Identity.
+app.UseAuthentication();
+app.UseAuthorization();
+
+// Guard routes behind authenticated principal when auth is configured.
 app.Use(async (context, next) =>
 {
     var path = context.Request.Path.Value ?? "";
@@ -297,21 +337,13 @@ app.Use(async (context, next) =>
         return;
     }
 
-    // Check auth cookie (skip auth entirely if no password configured)
-    var expectedPassword = context.RequestServices.GetRequiredService<IConfiguration>()["Auth:Password"];
-    if (!string.IsNullOrEmpty(expectedPassword))
+    // Enforce auth only when a password secret is configured.
+    var configuredSecret = GetConfiguredAuthSecret(context.RequestServices.GetRequiredService<IConfiguration>());
+    if (!string.IsNullOrEmpty(configuredSecret)
+        && !(context.User.Identity?.IsAuthenticated ?? false))
     {
-        var cookieValue = context.Request.Cookies["cartographer_auth"];
-        var expectedHash = ComputeHash(expectedPassword);
-        // ARCH-CRIT-03: Use constant-time comparison to prevent timing attacks
-        var cookieBytes = Encoding.UTF8.GetBytes(cookieValue ?? "");
-        var expectedBytes = Encoding.UTF8.GetBytes(expectedHash);
-        if (cookieBytes.Length != expectedBytes.Length ||
-            !CryptographicOperations.FixedTimeEquals(cookieBytes, expectedBytes))
-        {
-            context.Response.Redirect("/login");
-            return;
-        }
+        context.Response.Redirect("/login");
+        return;
     }
 
     await next();
@@ -326,11 +358,7 @@ app.UseStaticFiles();
 // Health check endpoint (MED-01)
 app.MapHealthChecks("/health");
 
-// ARCH-CRIT-03: Login endpoint with rate limiting (BCL Microsoft.AspNetCore.RateLimiting),
-// CSRF validation, constant-time comparison, Secure cookie.
-// Rate limit: 5 attempts/min/IP via the "login" policy registered above.
-// Counts ALL attempts (successful + failed) — acceptable semantic drift for
-// a single-user app; brute-force protection still holds.
+// Login endpoint with rate limiting + CSRF validation.
 app.MapPost("/login", async (HttpContext context) =>
 {
     // ARCH-CRIT-03: Validate antiforgery token on login POST
@@ -347,25 +375,31 @@ app.MapPost("/login", async (HttpContext context) =>
 
     var form = await context.Request.ReadFormAsync();
     var password = form["password"].ToString();
-    var expectedPassword = context.RequestServices.GetRequiredService<IConfiguration>()["Auth:Password"];
-
-    // ARCH-CRIT-03: Constant-time password comparison
-    var passwordBytes = Encoding.UTF8.GetBytes(password);
-    var expectedBytes = Encoding.UTF8.GetBytes(expectedPassword ?? "");
-    var passwordMatch = !string.IsNullOrEmpty(expectedPassword)
-        && passwordBytes.Length == expectedBytes.Length
-        && CryptographicOperations.FixedTimeEquals(passwordBytes, expectedBytes);
+    var configuredSecret = GetConfiguredAuthSecret(context.RequestServices.GetRequiredService<IConfiguration>());
+    var passwordMatch = !string.IsNullOrEmpty(configuredSecret)
+        && PasswordHasher.VerifyConfiguredSecret(password, configuredSecret);
 
     if (passwordMatch)
     {
-        context.Response.Cookies.Append("cartographer_auth", ComputeHash(password), new CookieOptions
+        var store = context.RequestServices.GetRequiredService<SessionStore>();
+        var sessionToken = await store.CreateAsync(context.RequestAborted);
+
+        var claims = new List<Claim>
         {
-            HttpOnly = true,
-            SameSite = SameSiteMode.Strict,
-            MaxAge = TimeSpan.FromDays(30),
-            IsEssential = true,
-            Secure = true // ARCH-CRIT-03/HIGH-05: Secure flag — works behind TLS-terminating proxy (Cloudflare)
-        });
+            new(ClaimTypes.Name, "lucid-user"),
+            new("session_token", sessionToken)
+        };
+        var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+        var principal = new ClaimsPrincipal(identity);
+
+        await context.SignInAsync(
+            CookieAuthenticationDefaults.AuthenticationScheme,
+            principal,
+            new AuthenticationProperties
+            {
+                IsPersistent = true,
+                ExpiresUtc = DateTimeOffset.UtcNow.AddDays(30)
+            });
         context.Response.Redirect("/");
     }
     else
@@ -374,10 +408,17 @@ app.MapPost("/login", async (HttpContext context) =>
     }
 }).RequireRateLimiting("login");
 
-// CRIT-03: Logout endpoint
-app.MapGet("/logout", (HttpContext context) =>
+// Logout endpoint
+app.MapGet("/logout", async (HttpContext context) =>
 {
-    context.Response.Cookies.Delete("cartographer_auth");
+    var sessionToken = context.User.FindFirstValue("session_token");
+    if (!string.IsNullOrWhiteSpace(sessionToken))
+    {
+        var store = context.RequestServices.GetRequiredService<SessionStore>();
+        await store.RevokeAsync(sessionToken, context.RequestAborted);
+    }
+
+    await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     context.Response.Redirect("/login");
 });
 
@@ -402,11 +443,13 @@ app.MapRazorComponents<App>()
 
 app.Run();
 
-// CRIT-03: Hash helper for password cookie
-static string ComputeHash(string input)
+static string? GetConfiguredAuthSecret(IConfiguration configuration)
 {
-    var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(input));
-    return Convert.ToHexString(bytes).ToLowerInvariant();
+    var hash = configuration["Auth:PasswordHash"];
+    if (!string.IsNullOrWhiteSpace(hash))
+        return hash;
+
+    return configuration["Auth:Password"];
 }
 
 // Make Program accessible for WebApplicationFactory in integration tests

@@ -37,6 +37,9 @@ namespace LucidCartographer.Services.Enrichment
         private readonly ResiliencePipeline _pipeline;
         private readonly EnrichmentOptions _options;
         private readonly TimeSpan _idlePollInterval;
+        private readonly TimeSpan _baseRetryDelay;
+        private readonly SemaphoreSlim _sqliteWriteLock = new(1, 1);
+        private readonly SemaphoreSlim _pageConcurrencyLock;
 
         public PoiEnrichmentBackgroundService(
             IDbContextFactory<AppDbContext> factory,
@@ -53,6 +56,16 @@ namespace LucidCartographer.Services.Enrichment
             _pipeline = pipelineProvider.GetPipeline("enrichment");
             _options = options.Value;
             _idlePollInterval = TimeSpan.FromSeconds(Math.Max(1, _options.IdlePollSeconds));
+            _baseRetryDelay = TimeSpan.FromSeconds(Math.Max(1, _options.BackoffBaseSeconds));
+            var maxPages = Math.Max(1, _options.MaxConcurrentPages);
+            _pageConcurrencyLock = new SemaphoreSlim(maxPages, maxPages);
+        }
+
+        public override void Dispose()
+        {
+            _sqliteWriteLock.Dispose();
+            _pageConcurrencyLock.Dispose();
+            base.Dispose();
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -119,7 +132,9 @@ namespace LucidCartographer.Services.Enrichment
             int remaining;
             await using (var db = await _factory.CreateDbContextAsync(ct))
             {
-                remaining = await db.Pois.CountAsync(p => !p.IsEnriched, ct);
+                remaining = await db.Pois.CountAsync(
+                    p => !p.IsEnriched && p.EnrichmentFailureCount < _options.MaxRetries,
+                    ct);
             }
             _progress.Set(remaining);
 
@@ -139,15 +154,24 @@ namespace LucidCartographer.Services.Enrichment
                 List<int> batchIds;
                 await using (var loadDb = await _factory.CreateDbContextAsync(ct))
                 {
-                    batchIds = await loadDb.Pois
-                        .Where(p => !p.IsEnriched)
+                    var now = DateTime.UtcNow;
+                    var candidates = await loadDb.Pois
+                        .Where(p => !p.IsEnriched && p.EnrichmentFailureCount < _options.MaxRetries)
                         .OrderBy(p => p.Id)
-                        .Take(_options.BatchSize)
-                        .Select(p => p.Id)
+                        .Take(_options.BatchSize * 4)
+                        .Select(p => new { p.Id, p.EnrichmentFailureCount, p.LastEnrichmentAttemptAt })
                         .ToListAsync(ct);
+
+                    batchIds = candidates
+                        .Where(p => IsRetryDue(p.EnrichmentFailureCount, p.LastEnrichmentAttemptAt, now))
+                        .Select(p => p.Id)
+                        .Take(_options.BatchSize)
+                        .ToList();
                 }
 
                 if (batchIds.Count == 0) break;
+
+                var metricsBefore = EnrichmentMetrics.Snapshot();
 
                 await Parallel.ForEachAsync(
                     batchIds,
@@ -158,8 +182,17 @@ namespace LucidCartographer.Services.Enrichment
                     },
                     async (poiId, innerCt) =>
                     {
-                        await EnrichOneAsync(context, poiId, innerCt);
+                        await EnrichOneAsync(context, poiId, innerCt, ct);
                     });
+
+                var metricsAfter = EnrichmentMetrics.Snapshot();
+                var batchMetrics = EnrichmentMetrics.Diff(metricsBefore, metricsAfter);
+                _logger.LogInformation(
+                    "Enrichment batch metrics: address_found={AddressFound}, phone_found={PhoneFound}, website_found={WebsiteFound}, selector_miss={SelectorMisses}",
+                    batchMetrics.AddressFound,
+                    batchMetrics.PhoneFound,
+                    batchMetrics.WebsiteFound,
+                    batchMetrics.SelectorMisses);
 
                 processed += batchIds.Count;
 
@@ -168,7 +201,9 @@ namespace LucidCartographer.Services.Enrichment
                 // down as workers complete.
                 await using (var progressDb = await _factory.CreateDbContextAsync(ct))
                 {
-                    var newRemaining = await progressDb.Pois.CountAsync(p => !p.IsEnriched, ct);
+                    var newRemaining = await progressDb.Pois.CountAsync(
+                        p => !p.IsEnriched && p.EnrichmentFailureCount < _options.MaxRetries,
+                        ct);
                     _progress.Set(newRemaining);
                 }
             }
@@ -176,19 +211,25 @@ namespace LucidCartographer.Services.Enrichment
             return processed;
         }
 
-        private async Task EnrichOneAsync(IBrowserContext context, int poiId, CancellationToken ct)
+        private async Task EnrichOneAsync(IBrowserContext context, int poiId, CancellationToken workerCt, CancellationToken serviceCt)
         {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(workerCt, serviceCt);
+            var ct = linked.Token;
+
             await using var db = await _factory.CreateDbContextAsync(ct);
             var poi = await db.Pois.FirstOrDefaultAsync(p => p.Id == poiId, ct);
-            if (poi == null || poi.IsEnriched) return;
+            if (poi == null || poi.IsEnriched || poi.EnrichmentFailureCount >= _options.MaxRetries) return;
 
-            var page = await context.NewPageAsync();
+            await _pageConcurrencyLock.WaitAsync(ct);
+            IPage? page = null;
             try
             {
+                page = await context.NewPageAsync();
+
                 // Pick entry point based on what the scraper captured:
                 //   - if GoogleMapsUrl already contains /maps/place/, open it directly;
                 //   - otherwise run a Google Maps name search (scraper left
-                //     coords at 0,0 because the list card was anchor-less).
+                //     coords NULL because the list card was anchor-less).
                 // "enrichment" Polly pipeline: retry (3 attempts,
                 // jittered exponential backoff) + 2-minute per-attempt
                 // timeout. Transient Playwright failures are retried
@@ -198,9 +239,9 @@ namespace LucidCartographer.Services.Enrichment
                 {
                     if (!string.IsNullOrEmpty(poi.GoogleMapsUrl) && poi.GoogleMapsUrl.Contains("/maps/place/"))
                     {
-                        return await PoiDetailEnricher.EnrichAsync(page, poi.GoogleMapsUrl!, innerCt);
+                        return await PoiDetailEnricher.EnrichAsync(page, poi.GoogleMapsUrl!, innerCt, _logger);
                     }
-                    return await PoiDetailEnricher.EnrichByNameAsync(page, poi.Name, poi.Category, innerCt);
+                    return await PoiDetailEnricher.EnrichByNameAsync(page, poi.Name, poi.Category, innerCt, _logger);
                 }, ct);
 
                 // Fill empty fields only — never overwrite user edits.
@@ -208,7 +249,11 @@ namespace LucidCartographer.Services.Enrichment
                 if (string.IsNullOrEmpty(poi.Website)) poi.Website = details.Website;
                 if (string.IsNullOrEmpty(poi.Phone)) poi.Phone = details.Phone;
 
-                if (poi.Latitude == 0 && poi.Longitude == 0 && details.Latitude.HasValue && details.Longitude.HasValue)
+                // Enrichment's !3d!4d coords are always more authoritative
+                // than whatever we had (user input, viewport-center fallback,
+                // or nothing at all). Overwrite unconditionally when the
+                // enricher produced coords.
+                if (details.Latitude.HasValue && details.Longitude.HasValue)
                 {
                     poi.Latitude = details.Latitude.Value;
                     poi.Longitude = details.Longitude.Value;
@@ -221,7 +266,17 @@ namespace LucidCartographer.Services.Enrichment
                     && (string.IsNullOrEmpty(poi.GoogleMapsUrl) || !poi.GoogleMapsUrl.Contains("/maps/place/")))
                     poi.GoogleMapsUrl = details.GoogleMapsUrl;
 
-                poi.IsEnriched = true;
+                var hasCoordinates = poi.Latitude.HasValue && poi.Longitude.HasValue;
+                poi.IsEnriched = hasCoordinates;
+                poi.LastEnrichmentAttemptAt = DateTime.UtcNow;
+                if (hasCoordinates)
+                {
+                    poi.EnrichmentFailureCount = 0;
+                }
+                else
+                {
+                    poi.EnrichmentFailureCount++;
+                }
 
                 _logger.LogInformation(
                     "Enriched Poi {Id} '{Name}' (addr={Addr} web={Web} phone={Phone})",
@@ -229,23 +284,70 @@ namespace LucidCartographer.Services.Enrichment
                     details.Address is null ? "-" : "y",
                     details.Website is null ? "-" : "y",
                     details.Phone is null ? "-" : "y");
+
+                if (!hasCoordinates)
+                {
+                    var retryDelay = GetRetryDelay(poi.EnrichmentFailureCount);
+                    _logger.LogWarning(
+                        "Enrichment fetched metadata for Poi {Id} '{Name}' but no coordinates were resolved (attempt {Attempt}/{MaxRetries}); retry after {RetryDelay}",
+                        poi.Id,
+                        poi.Name,
+                        poi.EnrichmentFailureCount,
+                        _options.MaxRetries,
+                        retryDelay);
+                }
             }
             catch (Exception ex)
             {
-                // Leave IsEnriched=false — next poll cycle will retry.
-                _logger.LogWarning(ex,
-                    "Enrichment failed for Poi {Id} '{Name}' — will retry next cycle",
-                    poi.Id, poi.Name);
+                poi.EnrichmentFailureCount++;
+                poi.LastEnrichmentAttemptAt = DateTime.UtcNow;
+                var retryDelay = GetRetryDelay(poi.EnrichmentFailureCount);
+                try
+                {
+                    await SaveChangesWithWriteLockAsync(db, ct);
+                }
+                catch (Exception saveEx)
+                {
+                    _logger.LogError(saveEx,
+                        "Failed to persist enrichment failure tracking for Poi {Id} '{Name}'",
+                        poi.Id, poi.Name);
+                    return;
+                }
+
+                if (poi.EnrichmentFailureCount >= _options.MaxRetries)
+                {
+                    _logger.LogError(ex,
+                        "Enrichment failed for Poi {Id} '{Name}' and reached retry cap {MaxRetries}",
+                        poi.Id, poi.Name, _options.MaxRetries);
+                }
+                else
+                {
+                    _logger.LogWarning(ex,
+                        "Enrichment failed for Poi {Id} '{Name}' (attempt {Attempt}/{MaxRetries}); retry after {RetryDelay}",
+                        poi.Id, poi.Name, poi.EnrichmentFailureCount, _options.MaxRetries, retryDelay);
+                }
                 return;
             }
             finally
             {
-                try { await page.CloseAsync(); } catch { }
+                if (page != null)
+                {
+                    try
+                    {
+                        await page.CloseAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Failed to close Playwright page for Poi {PoiId}", poiId);
+                    }
+                }
+
+                _pageConcurrencyLock.Release();
             }
 
             try
             {
-                await db.SaveChangesAsync(ct);
+                await SaveChangesWithWriteLockAsync(db, ct);
 
                 // Post-enrichment dedup against the enriched cohort.
                 // The just-enriched row now has real coords + (usually)
@@ -253,7 +355,7 @@ namespace LucidCartographer.Services.Enrichment
                 // If an older enriched row already represents this place,
                 // fold collection links onto it and delete this row.
                 // "Smaller Id wins" so parallel workers can't race.
-                var merged = await PoiPostEnrichmentDedup.MergeIfDuplicateAsync(db, poi, ct);
+                var merged = await PoiPostEnrichmentDedup.MergeIfDuplicateAsync(db, poi, ct, _sqliteWriteLock);
                 if (merged)
                 {
                     _logger.LogInformation(
@@ -263,7 +365,9 @@ namespace LucidCartographer.Services.Enrichment
 
                 // Per-POI tick: re-read the counter so the map page
                 // header updates as each worker finishes.
-                var newRemaining = await db.Pois.CountAsync(p => !p.IsEnriched, ct);
+                var newRemaining = await db.Pois.CountAsync(
+                    p => !p.IsEnriched && p.EnrichmentFailureCount < _options.MaxRetries,
+                    ct);
                 _progress.Set(newRemaining);
             }
             catch (Exception ex)
@@ -272,6 +376,35 @@ namespace LucidCartographer.Services.Enrichment
                     "Persisting enrichment for Poi {Id} '{Name}' failed — will retry next cycle",
                     poi.Id, poi.Name);
             }
+        }
+
+        private async Task SaveChangesWithWriteLockAsync(AppDbContext db, CancellationToken ct)
+        {
+            await _sqliteWriteLock.WaitAsync(ct);
+            try
+            {
+                await db.SaveChangesAsync(ct);
+            }
+            finally
+            {
+                _sqliteWriteLock.Release();
+            }
+        }
+
+        private bool IsRetryDue(int failureCount, DateTime? lastAttemptAt, DateTime nowUtc)
+        {
+            if (failureCount <= 0 || !lastAttemptAt.HasValue) return true;
+            return nowUtc - lastAttemptAt.Value >= GetRetryDelay(failureCount);
+        }
+
+        private TimeSpan GetRetryDelay(int failureCount)
+        {
+            if (failureCount <= 0) return TimeSpan.Zero;
+
+            var exponent = Math.Max(0, failureCount - 1);
+            var factor = Math.Pow(2, exponent);
+            var seconds = _baseRetryDelay.TotalSeconds * factor;
+            return TimeSpan.FromSeconds(Math.Min(seconds, TimeSpan.FromHours(12).TotalSeconds));
         }
     }
 }

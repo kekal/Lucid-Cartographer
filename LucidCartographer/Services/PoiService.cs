@@ -47,7 +47,8 @@ namespace LucidCartographer.Services
             await using var db = await _factory.CreateDbContextAsync(cancellationToken);
             return await db.PoiCollectionItems
                 .AsNoTracking()
-                .Where(ci => ci.PoiCollectionId == collectionId)
+                .Where(ci => ci.PoiCollectionId == collectionId
+                    && ci.Poi.Latitude != null && ci.Poi.Longitude != null)
                 .Select(ci => ci.Poi)
                 .ToListAsync(cancellationToken);
         }
@@ -61,14 +62,14 @@ namespace LucidCartographer.Services
         {
             await using var db = await _factory.CreateDbContextAsync(cancellationToken);
             // Hide Pois that are still waiting for background enrichment.
-            // Scraped rows are created with IsEnriched=false + placeholder
-            // (0,0) coords; the background service flips the flag once it
-            // has pulled real coords + address/website/phone. Showing them
-            // on the map before enrichment would put every pending pin at
-            // null island off the coast of Africa.
+            // Scraped rows are created with IsEnriched=false and NULL
+            // coords; the background service flips the flag once it has
+            // pulled real coords + address/website/phone. Showing them
+            // on the map before enrichment has nowhere to place them.
             var items = await db.PoiCollectionItems
                 .AsNoTracking()
-                .Where(ci => ci.PoiCollection.IsVisible && ci.Poi.IsEnriched)
+                .Where(ci => ci.PoiCollection.IsVisible && ci.Poi.IsEnriched
+                    && ci.Poi.Latitude != null && ci.Poi.Longitude != null)
                 .Select(ci => new { ci.PoiCollectionId, ci.Poi })
                 .ToListAsync(cancellationToken);
 
@@ -292,6 +293,15 @@ namespace LucidCartographer.Services
             return items;
         }
 
+        /// <summary>
+        /// Counts POIs that failed enrichment and are awaiting manual reset.
+        /// </summary>
+        public async Task<int> GetFailedEnrichmentCountAsync(CancellationToken cancellationToken = default)
+        {
+            await using var db = await _factory.CreateDbContextAsync(cancellationToken);
+            return await db.Pois.CountAsync(p => !p.IsEnriched && p.EnrichmentFailureCount > 0, cancellationToken);
+        }
+
         public async Task<IReadOnlyList<Poi>> SearchAsync(string query, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(query))
@@ -310,9 +320,10 @@ namespace LucidCartographer.Services
             // Search across Name, Address, Notes, and Tags (via join table)
             var byFields = await db.Pois
                 .AsNoTracking()
-                .Where(p => EF.Functions.Like(p.Name, $"%{escaped}%", "\\")
-                    || (p.Address != null && EF.Functions.Like(p.Address, $"%{escaped}%", "\\"))
-                    || (p.Notes != null && EF.Functions.Like(p.Notes, $"%{escaped}%", "\\")))
+                .Where(p => p.Latitude != null && p.Longitude != null
+                    && (EF.Functions.Like(p.Name, $"%{escaped}%", "\\")
+                        || (p.Address != null && EF.Functions.Like(p.Address, $"%{escaped}%", "\\"))
+                        || (p.Notes != null && EF.Functions.Like(p.Notes, $"%{escaped}%", "\\"))))
                 .Take(100)
                 .ToListAsync(cancellationToken);
 
@@ -321,7 +332,8 @@ namespace LucidCartographer.Services
             // trigger N+1 lazy loads when rendering tag badges.
             var byTags = await db.PoiTags
                 .AsNoTracking()
-                .Where(pt => EF.Functions.Like(pt.Tag.Name, $"%{escaped}%", "\\"))
+                .Where(pt => pt.Poi.Latitude != null && pt.Poi.Longitude != null
+                    && EF.Functions.Like(pt.Tag.Name, $"%{escaped}%", "\\"))
                 .Select(pt => pt.Poi)
                 .Distinct()
                 .Take(100)
@@ -375,6 +387,29 @@ namespace LucidCartographer.Services
         }
 
         /// <summary>
+        /// Clears enrichment failure counters for non-enriched POIs so they can be retried.
+        /// </summary>
+        public async Task<int> ResetFailedEnrichmentAsync(CancellationToken cancellationToken = default)
+        {
+            await using var db = await _factory.CreateDbContextAsync(cancellationToken);
+            var failed = await db.Pois
+                .Where(p => !p.IsEnriched && p.EnrichmentFailureCount > 0)
+                .ToListAsync(cancellationToken);
+
+            if (failed.Count == 0)
+                return 0;
+
+            foreach (var poi in failed)
+            {
+                poi.EnrichmentFailureCount = 0;
+                poi.LastEnrichmentAttemptAt = null;
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+            return failed.Count;
+        }
+
+        /// <summary>
         /// Validates a POI entity before persistence.
         /// [REVIEW-3] Validates Status against PoiStatus.IsValid and Category against PoiCategory.All.
         /// [REVIEW-4] Validates coordinates, name, and numeric ranges.
@@ -387,11 +422,11 @@ namespace LucidCartographer.Services
             if (poi.Name.Length > 500)
                 throw new ArgumentException("POI name cannot exceed 500 characters.", nameof(poi));
 
-            if (poi.Latitude < -90.0 || poi.Latitude > 90.0)
-                throw new ArgumentOutOfRangeException(nameof(poi), $"Latitude {poi.Latitude} is outside the valid range [-90, 90].");
+            if (poi.Latitude.HasValue && (poi.Latitude.Value < -90.0 || poi.Latitude.Value > 90.0))
+                throw new ArgumentOutOfRangeException(nameof(poi), $"Latitude {poi.Latitude.Value} is outside the valid range [-90, 90].");
 
-            if (poi.Longitude < -180.0 || poi.Longitude > 180.0)
-                throw new ArgumentOutOfRangeException(nameof(poi), $"Longitude {poi.Longitude} is outside the valid range [-180, 180].");
+            if (poi.Longitude.HasValue && (poi.Longitude.Value < -180.0 || poi.Longitude.Value > 180.0))
+                throw new ArgumentOutOfRangeException(nameof(poi), $"Longitude {poi.Longitude.Value} is outside the valid range [-180, 180].");
 
             if (poi.ReviewCount.HasValue && poi.ReviewCount.Value < 0)
                 throw new ArgumentOutOfRangeException(nameof(poi), "ReviewCount cannot be negative.");

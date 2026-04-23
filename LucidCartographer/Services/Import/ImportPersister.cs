@@ -34,11 +34,6 @@ namespace LucidCartographer.Services.Import
 
         // State built up during RunAsync.
         private PoiCollection _collection = null!;
-        // Candidate pool scanned by PoiIdentity.AreSamePlace for each
-        // incoming row. Seeded with existing DB rows that share a name,
-        // then augmented in-place as we add new rows so later items in
-        // the same batch dedup against items queued earlier.
-        private List<Poi> _candidatePool = new();
         private HashSet<int> _existingLinks = new();
 
         private readonly List<NewPoiEntry> _newPois = new();
@@ -71,7 +66,7 @@ namespace LucidCartographer.Services.Import
         public async Task<ImportResult> RunAsync()
         {
             await CreateCollectionAsync();
-            await LoadDedupLookupsAsync();
+            _existingLinks = await LoadExistingLinksAsync();
             await ProcessItemsAsync();
             await SaveNewPoisAsync();
             AttachImagesToNewPois();
@@ -99,40 +94,6 @@ namespace LucidCartographer.Services.Import
 
         // ---- Phase 2: dedup lookups ----------------------------------------------
 
-        private async Task LoadDedupLookupsAsync()
-        {
-            _candidatePool = await LoadCandidatePoolAsync();
-            _existingLinks = await LoadExistingLinksAsync();
-        }
-
-        private async Task<List<Poi>> LoadCandidatePoolAsync()
-        {
-            // Pull every existing row whose lowercased name matches any
-            // name being imported. PoiIdentity.AreSamePlace does the real
-            // matching work in memory — we only need the DB to narrow the
-            // candidate pool from "all POIs" to "POIs with a plausibly
-            // similar name", which SQLite can do cheaply on an indexed
-            // LOWER(Name) comparison.
-            //
-            // Note: this is an exact-lowercase pre-filter. Candidates that
-            // pass the PoiMatcher.NameSimilarity threshold but have
-            // different lowercased names (e.g., "Cafe Rio" vs "Café Rio"
-            // after Unicode normalisation) would be missed here. The
-            // existing behaviour already had this limitation; strengthening
-            // the pre-filter is a separate concern.
-            var importedNames = _validParsed
-                .Select(p => p.Name.ToLowerInvariant().Trim())
-                .Distinct()
-                .ToList();
-
-            if (importedNames.Count == 0)
-                return new List<Poi>();
-
-            return await _db.Pois
-                .Where(p => importedNames.Contains(p.Name.ToLower()))
-                .ToListAsync(_ct);
-        }
-
         private async Task<HashSet<int>> LoadExistingLinksAsync()
         {
             // The collection was just created in phase 1, so this will always
@@ -153,7 +114,7 @@ namespace LucidCartographer.Services.Import
             {
                 _ct.ThrowIfCancellationRequested();
 
-                var existing = FindExistingMatch(imported);
+                var existing = await FindExistingMatchAsync(imported);
                 if (existing != null)
                     await HandleDuplicateAsync(existing, imported);
                 else
@@ -161,13 +122,8 @@ namespace LucidCartographer.Services.Import
             }
         }
 
-        private Poi? FindExistingMatch(ImportedPoi imported)
+        private async Task<Poi?> FindExistingMatchAsync(ImportedPoi imported)
         {
-            // Delegate identity to the single PoiIdentity rule: name
-            // similarity + geographic proximity, real coords required.
-            // Construct a transient Poi shell for the incoming row so the
-            // rule can use the typed overload — no allocation outside the
-            // match path, and the shell is discarded immediately.
             var shell = new Poi
             {
                 Name = imported.Name,
@@ -175,10 +131,21 @@ namespace LucidCartographer.Services.Import
                 Longitude = imported.Longitude
             };
 
-            foreach (var candidate in _candidatePool)
+            var normalizedName = imported.Name.ToLowerInvariant().Trim();
+            var existingCandidates = await _db.Pois
+                .Where(p => p.Name.ToLower() == normalizedName)
+                .ToListAsync(_ct);
+
+            foreach (var candidate in existingCandidates)
             {
                 if (PoiIdentity.AreSamePlace(candidate, shell))
                     return candidate;
+            }
+
+            foreach (var inBatch in _newPois.Select(x => x.Poi))
+            {
+                if (PoiIdentity.AreSamePlace(inBatch, shell))
+                    return inBatch;
             }
 
             return null;
@@ -279,12 +246,6 @@ namespace LucidCartographer.Services.Import
             var poi = BuildPoi(imported);
             _db.Pois.Add(poi);
             _newPois.Add(new NewPoiEntry(poi, imported.ImageData, imported.ImageContentType));
-
-            // Extend the candidate pool so subsequent items in this same
-            // batch can dedup against rows we just queued. The row still
-            // has Id=0 until SaveChangesAsync — HandleDuplicateAsync has
-            // an explicit in-batch branch for that case.
-            _candidatePool.Add(poi);
 
             _added++;
         }

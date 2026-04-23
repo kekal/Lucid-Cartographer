@@ -21,6 +21,10 @@ namespace LucidCartographer.Services
         Task<Poi?> GetPoiAsync(int poiId, CancellationToken cancellationToken = default);
         Task<IReadOnlyList<Poi>> SearchAsync(string query, CancellationToken cancellationToken = default);
         Task<Dictionary<int, int>> GetPoiCollectionIdsAsync(IEnumerable<int> poiIds, CancellationToken cancellationToken = default);
+        /// <summary>
+        /// Returns the number of POIs with enrichment failures pending manual reset.
+        /// </summary>
+        Task<int> GetFailedEnrichmentCountAsync(CancellationToken cancellationToken = default);
 
         // --- Mutation methods (throw on not-found / invalid input) ---
 
@@ -32,5 +36,9 @@ namespace LucidCartographer.Services
         Task DeleteCollectionAsync(int collectionId, CancellationToken cancellationToken = default);
         Task UpdateCollectionColorAsync(int collectionId, string color, CancellationToken cancellationToken = default);
         Task<PoiCollection> CreateCollectionAsync(string name, CancellationToken cancellationToken = default);
+        /// <summary>
+        /// Resets enrichment failure tracking for non-enriched POIs so they can be retried.
+        /// </summary>
+        Task<int> ResetFailedEnrichmentAsync(CancellationToken cancellationToken = default);
     }
 }

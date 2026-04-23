@@ -13,6 +13,7 @@ namespace LucidCartographer.Data
         public DbSet<PoiCollectionItem> PoiCollectionItems => Set<PoiCollectionItem>();
         public DbSet<Tag> Tags => Set<Tag>();
         public DbSet<PoiTag> PoiTags => Set<PoiTag>();
+        public DbSet<Session> Sessions => Set<Session>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -40,15 +41,17 @@ namespace LucidCartographer.Data
                 // Used by PoiEnrichmentBackgroundService to page through
                 // the queue of un-enriched Pois cheaply.
                 entity.HasIndex(e => e.IsEnriched);
+                entity.HasIndex(e => new { e.IsEnriched, e.EnrichmentFailureCount, e.LastEnrichmentAttemptAt });
 
                 // Check constraints for data integrity
                 entity.ToTable(t =>
                 {
-                    t.HasCheckConstraint("CK_Poi_Latitude", "Latitude >= -90 AND Latitude <= 90");
-                    t.HasCheckConstraint("CK_Poi_Longitude", "Longitude >= -180 AND Longitude <= 180");
+                    t.HasCheckConstraint("CK_Poi_Latitude", "Latitude IS NULL OR (Latitude >= -90 AND Latitude <= 90)");
+                    t.HasCheckConstraint("CK_Poi_Longitude", "Longitude IS NULL OR (Longitude >= -180 AND Longitude <= 180)");
                     t.HasCheckConstraint("CK_Poi_Rating", "Rating IS NULL OR (Rating >= 1 AND Rating <= 5)");
                     t.HasCheckConstraint("CK_Poi_GoogleRating", "GoogleRating IS NULL OR (GoogleRating >= 1.0 AND GoogleRating <= 5.0)");
                     t.HasCheckConstraint("CK_Poi_ReviewCount", "ReviewCount IS NULL OR ReviewCount >= 0");
+                    t.HasCheckConstraint("CK_Poi_EnrichmentFailureCount", "EnrichmentFailureCount >= 0");
                 });
             });
 
@@ -111,6 +114,13 @@ namespace LucidCartographer.Data
                     .WithMany(t => t.PoiTags)
                     .HasForeignKey(e => e.TagId)
                     .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<Session>(entity =>
+            {
+                entity.Property(e => e.TokenHash).HasMaxLength(64);
+                entity.HasIndex(e => e.TokenHash).IsUnique();
+                entity.HasIndex(e => e.ExpiresAt);
             });
         }
 

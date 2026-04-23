@@ -128,7 +128,7 @@
         @* Coordinates *@
         <div class="bg-surface-container-low rounded-lg p-3 mb-4">
             <div class="text-xs text-on-surface-variant mb-1">Coordinates</div>
-            <div class="font-mono text-sm">@Poi.Latitude.ToString("F6"), @Poi.Longitude.ToString("F6")</div>
+            <div class="font-mono text-sm">@(Poi.Latitude.HasValue && Poi.Longitude.HasValue ? $"{Poi.Latitude.Value.ToString("F6")}, {Poi.Longitude.Value.ToString("F6")}" : "—")</div>
         </div>
 
         @* Notes *@

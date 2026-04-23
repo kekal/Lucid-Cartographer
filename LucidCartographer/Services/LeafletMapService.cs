@@ -41,8 +41,12 @@ namespace LucidCartographer.Services
 
         public async Task ShowCollectionAsync(int collectionId, List<Poi> pois, string color)
         {
-            // REVIEW-21: Named DTO instead of anonymous type
-            var dtos = pois.Select(p => new MarkerDto(p.Id, p.Name, p.Latitude, p.Longitude, p.Address, p.GoogleMapsUrl)).ToArray();
+            // REVIEW-21: Named DTO instead of anonymous type.
+            // Unlocated POIs (NULL coords) have nothing to render; filter them out here.
+            var dtos = pois
+                .Where(p => p.Latitude.HasValue && p.Longitude.HasValue)
+                .Select(p => new MarkerDto(p.Id, p.Name, p.Latitude!.Value, p.Longitude!.Value, p.Address, p.GoogleMapsUrl))
+                .ToArray();
             await InvokeJsVoidAsync("leafletInterop.addCollectionMarkers", collectionId, dtos, color);
         }
 
@@ -122,18 +126,10 @@ namespace LucidCartographer.Services
             {
                 await _js.InvokeVoidAsync("leafletInterop.destroyMap");
             }
-            catch (JSDisconnectedException)
+            catch (Exception ex) when (IsCircuitGone(ex))
             {
-                // Circuit already disconnected, nothing to clean up on JS side
-            }
-            catch (ObjectDisposedException)
-            {
-                // JS runtime already disposed
-            }
-            catch (InvalidOperationException)
-            {
-                // Defence-in-depth: interop unavailable (prerender / background scope
-                // teardown). The browser tab is responsible for its own cleanup.
+                // Circuit disconnected or interop unavailable during teardown.
+                // Browser-side lifecycle handles final cleanup.
             }
 
             _dotnetRef?.Dispose();
@@ -151,19 +147,14 @@ namespace LucidCartographer.Services
             {
                 await _js.InvokeVoidAsync(identifier, args);
             }
-            catch (JSDisconnectedException)
+            catch (Exception ex) when (IsCircuitGone(ex))
             {
-                // Circuit disconnected — silently ignore since the browser tab is gone
-            }
-            catch (ObjectDisposedException)
-            {
-                // JS runtime disposed — component is being torn down
-            }
-            catch (InvalidOperationException)
-            {
-                // Interop attempted while the component is statically prerendering.
-                // The post-prerender interactive pass will re-issue the call.
+                // Interop unavailable during disconnect/dispose/prerender.
+                // Post-prerender interactive pass will re-issue calls as needed.
             }
         }
+
+        private static bool IsCircuitGone(Exception ex)
+            => ex is JSDisconnectedException or ObjectDisposedException or InvalidOperationException;
     }
 }

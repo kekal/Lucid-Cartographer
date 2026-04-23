@@ -12,9 +12,9 @@ namespace LucidCartographer.Services
     ///
     /// Rule: same-looking name (Levenshtein-derived similarity ≥ threshold)
     /// AND geographic proximity (Haversine distance &lt; threshold meters),
-    /// ONLY when BOTH rows carry real coordinates. Rows at the placeholder
-    /// <c>(0, 0)</c> pre-enrichment location are never considered identical
-    /// — three distinct playgrounds all called "Plac zabaw" must survive
+    /// ONLY when BOTH rows carry real coordinates. Rows with NULL
+    /// coordinates (pending enrichment) are never considered identical —
+    /// three distinct playgrounds all called "Plac zabaw" must survive
     /// until enrichment lands real coords, at which point their identity
     /// becomes decidable.
     ///
@@ -45,17 +45,17 @@ namespace LucidCartographer.Services
         /// the default strictness; defaults match <see cref="Poi.Equals"/>.
         /// </summary>
         public static bool AreSamePlace(
-            string nameA, double latA, double lonA,
-            string nameB, double latB, double lonB,
+            string nameA, double? latA, double? lonA,
+            string nameB, double? latB, double? lonB,
             double toleranceMeters = ProximityThresholdMeters,
             double nameSimilarityThreshold = NameSimilarityThreshold)
         {
-            // Placeholder coordinates can't be compared meaningfully — wait
-            // for enrichment to fill real values before deciding identity.
-            if (latA == 0 && lonA == 0) return false;
-            if (latB == 0 && lonB == 0) return false;
+            // Unlocated rows can't be compared meaningfully — wait for
+            // enrichment to fill real coords before deciding identity.
+            if (!latA.HasValue || !lonA.HasValue) return false;
+            if (!latB.HasValue || !lonB.HasValue) return false;
 
-            if (GeoUtils.HaversineDistance(latA, lonA, latB, lonB) >= toleranceMeters)
+            if (GeoUtils.HaversineDistance(latA.Value, lonA.Value, latB.Value, lonB.Value) >= toleranceMeters)
                 return false;
 
             return PoiMatcher.NameSimilarity(nameA, nameB) >= nameSimilarityThreshold;

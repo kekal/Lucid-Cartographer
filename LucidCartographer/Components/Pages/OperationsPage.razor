@@ -242,7 +242,7 @@ else
                                     }
                                 </td>
                                 <td class="px-4 py-2.5 font-mono text-xs text-on-surface-variant">
-                                    @poi.Latitude.ToString("F4"), @poi.Longitude.ToString("F4")
+                                    @(poi.Latitude.HasValue && poi.Longitude.HasValue ? $"{poi.Latitude.Value.ToString("F4")}, {poi.Longitude.Value.ToString("F4")}" : "—")
                                 </td>
                                 <td class="px-4 py-2.5 text-xs text-on-surface-variant">@poi.Id</td>
                                 <td class="px-4 py-2.5 text-right">

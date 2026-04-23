@@ -798,10 +798,10 @@ namespace LucidCartographer.Services.Import
                     }
                 }
 
-                // Placeholder (0,0) coords when href had none — enrichment
-                // service will fill real lat/lon via a name-based search.
-                var lat = coords?.lat ?? 0.0;
-                var lon = coords?.lon ?? 0.0;
+                // NULL coords when href had none — enrichment service will
+                // fill real lat/lon via a name-based search.
+                double? lat = coords?.lat;
+                double? lon = coords?.lon;
                 results.Add(new ImportedPoi(
                     Name: name!,
                     Latitude: lat,

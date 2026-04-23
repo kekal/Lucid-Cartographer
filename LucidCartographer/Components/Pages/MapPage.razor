@@ -92,7 +92,9 @@ else
                      OnFocusClicked="HandleFocusPoi"
                      OnDeleteClicked="HandleDeletePoi"
                      OnMoveClicked="HandleMovePoi"
-                     OnMoveToNewClicked="HandleMoveToNewCollection" />
+                     OnMoveToNewClicked="HandleMoveToNewCollection"
+                     OnCopyClicked="HandleCopyPoi"
+                     OnCopyToNewClicked="HandleCopyToNewCollection" />
         </div>
     </div>
 
@@ -348,9 +350,10 @@ else
     private async Task HandleFocusPoi(int poiId)
     {
         await SelectPoi(poiId);
-        if (_leafletMap != null && _selectedPoi != null)
+        if (_leafletMap != null && _selectedPoi != null
+            && _selectedPoi.Latitude.HasValue && _selectedPoi.Longitude.HasValue)
         {
-            await _leafletMap.FocusOnPoiAsync(_selectedPoi.Latitude, _selectedPoi.Longitude);
+            await _leafletMap.FocusOnPoiAsync(_selectedPoi.Latitude.Value, _selectedPoi.Longitude.Value);
         }
     }
 
@@ -394,7 +397,8 @@ else
         else
         {
             _filteredPois = _visiblePois
-                .Where(p => _currentBounds.Contains(p.Latitude, p.Longitude))
+                .Where(p => p.Latitude.HasValue && p.Longitude.HasValue
+                    && _currentBounds.Contains(p.Latitude.Value, p.Longitude.Value))
                 .ToList();
         }
         StateHasChanged();
@@ -431,6 +435,20 @@ else
             await PoiService.RemovePoiFromCollectionAsync(args.PoiId, sourceCollectionId);
         }
         // Add the new collection to the VM list
+        _collectionVMs.Insert(0, new CollectionViewModel(newCol));
+        await RefreshAfterMutation();
+    }
+
+    private async Task HandleCopyPoi((int PoiId, int TargetCollectionId) args)
+    {
+        await PoiService.AddPoiToCollectionAsync(args.PoiId, args.TargetCollectionId);
+        await RefreshAfterMutation();
+    }
+
+    private async Task HandleCopyToNewCollection((int PoiId, string NewCollectionName) args)
+    {
+        var newCol = await PoiService.CreateCollectionAsync(args.NewCollectionName);
+        await PoiService.AddPoiToCollectionAsync(args.PoiId, newCol.Id);
         _collectionVMs.Insert(0, new CollectionViewModel(newCol));
         await RefreshAfterMutation();
     }

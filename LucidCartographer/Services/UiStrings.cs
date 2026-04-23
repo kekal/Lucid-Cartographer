@@ -56,6 +56,8 @@ namespace LucidCartographer.Services
         public const string ImportComplete = "Import complete";
         public const string ImportFailed = "Import failed";
         public const string ManagedSources = "Managed Sources";
+        public const string ResetFailedEnrichment = "Reset failed enrichment";
+        public const string FailedEnrichmentReset = "Reset {0} failed enrichment item(s).";
         public const string NoDatasetsYet = "No datasets imported yet. Use the import cards above to get started.";
         public const string CloseImportPanel = "Close import panel";
         public const string ImportFile = "Import File";

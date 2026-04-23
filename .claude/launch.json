@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "lucidcartographer",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "LucidCartographer"],
+      "port": 5087
+    }
+  ]
+}

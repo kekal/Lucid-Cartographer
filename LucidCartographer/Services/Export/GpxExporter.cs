@@ -52,10 +52,10 @@ namespace LucidCartographer.Services.Export
                         new XElement(Gpx + "name", documentName),
                         new XElement(Gpx + "time", DateTime.UtcNow.ToString("O"))
                     ),
-                    pois.Select(poi =>
+                    pois.Where(poi => poi.Latitude.HasValue && poi.Longitude.HasValue).Select(poi =>
                         new XElement(Gpx + "wpt",
-                            new XAttribute("lat", poi.Latitude.ToString(System.Globalization.CultureInfo.InvariantCulture)),
-                            new XAttribute("lon", poi.Longitude.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                            new XAttribute("lat", poi.Latitude!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                            new XAttribute("lon", poi.Longitude!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)),
                             new XElement(Gpx + "name", poi.Name),
                             string.IsNullOrEmpty(poi.Notes) ? null : new XElement(Gpx + "desc", poi.Notes),
                             string.IsNullOrEmpty(poi.GoogleMapsUrl) ? null : new XElement(Gpx + "link",
