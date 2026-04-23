@@ -264,11 +264,24 @@ TaskScheduler.UnobservedTaskException += (_, e) =>
     }
 }
 
-// NEW-02: Warn when auth secret is empty — authentication is silently disabled
+// Auth secret enforcement.
+// In Production, refuse to start if no auth secret is configured — the app
+// will be exposed behind a Zero Trust proxy that does NOT authenticate, so
+// the app's own auth is the only gate. In Development, warn only.
 {
     var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger<Program>();
     if (string.IsNullOrEmpty(GetConfiguredAuthSecret(app.Configuration)))
-        logger.LogWarning("Auth:Password/Auth:PasswordHash not set — authentication is DISABLED");
+    {
+        if (app.Environment.IsDevelopment())
+        {
+            logger.LogWarning("Auth:Password/Auth:PasswordHash not set — authentication is DISABLED (Development only)");
+        }
+        else
+        {
+            throw new InvalidOperationException(
+                "Auth:Password/Auth:PasswordHash is not set. Configure an auth secret before starting the application in a non-Development environment.");
+        }
+    }
 }
 
 // ARCH-CRIT-01: Use MigrateAsync instead of EnsureCreatedAsync to support schema evolution.
@@ -283,6 +296,9 @@ using (var scope = app.Services.CreateScope())
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
+    // HSTS: instruct browsers to only connect over HTTPS. Safe behind the
+    // TLS-terminating proxy (Cloudflare / Zero Trust) since the edge is HTTPS.
+    app.UseHsts();
     // ARCH-HIGH-05: Defense-in-depth — app runs behind Cloudflare which terminates TLS,
     // but UseHttpsRedirection ensures direct-access requests are also redirected.
     app.UseHttpsRedirection();
