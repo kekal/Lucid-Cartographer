@@ -1,0 +1,146 @@
+[40m[1m[33mwarn[39m[22m[49m: Program[0]
+      Auth:Password/Auth:PasswordHash not set — authentication is DISABLED (Development only)
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.DataProtection.KeyManagement.XmlKeyManager[63]
+      User profile is available. Using 'C:\Users\yurik\AppData\Local\ASP.NET\DataProtection-Keys' as key repository and Windows DPAPI to encrypt keys at rest.
+[40m[37mdbug[39m[22m[49m: Microsoft.AspNetCore.Watch.BrowserRefresh.BlazorWasmHotReloadMiddleware[0]
+      Middleware loaded
+[40m[37mdbug[39m[22m[49m: Microsoft.AspNetCore.Watch.BrowserRefresh.BrowserScriptMiddleware[0]
+      Middleware loaded. Script /_framework/aspnetcore-browser-refresh.js (16519 B).
+[40m[37mdbug[39m[22m[49m: Microsoft.AspNetCore.Watch.BrowserRefresh.BrowserScriptMiddleware[0]
+      Middleware loaded. Script /_framework/blazor-hotreload.js (799 B).
+[40m[37mdbug[39m[22m[49m: Microsoft.AspNetCore.Watch.BrowserRefresh.BrowserRefreshMiddleware[0]
+      Middleware loaded: DOTNET_MODIFIABLE_ASSEMBLIES=debug, __ASPNETCORE_BROWSER_TOOLS=true
+[40m[32minfo[39m[22m[49m: Microsoft.Hosting.Lifetime[14]
+      Now listening on: http://localhost:5087
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Mvc.Infrastructure.DefaultActionDescriptorCollectionProvider[1]
+      No action descriptors found. This may indicate an incorrectly configured application or missing application parts. To learn more, visit https://aka.ms/aspnet/mvc/app-parts
+[40m[32minfo[39m[22m[49m: Microsoft.Hosting.Lifetime[0]
+      Application started. Press Ctrl+C to shut down.
+[40m[32minfo[39m[22m[49m: Microsoft.Hosting.Lifetime[0]
+      Hosting environment: Development
+[40m[32minfo[39m[22m[49m: Microsoft.Hosting.Lifetime[0]
+      Content root path: C:\backup\maps_editor\LucidCartographer
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5087/ - - -
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/ (/)'
+[40m[37mdbug[39m[22m[49m: Microsoft.AspNetCore.Watch.BrowserRefresh.BrowserRefreshMiddleware[1]
+      Response markup is scheduled to include browser refresh script injection.
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/ (/)'
+[40m[37mdbug[39m[22m[49m: Microsoft.AspNetCore.Watch.BrowserRefresh.BrowserRefreshMiddleware[2]
+      Response markup was updated to include browser refresh script injection.
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5087/ - 200 - text/html;+charset=utf-8 366.7909ms
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5087/_framework/blazor.web.js - - -
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5087/_framework/aspnetcore-browser-refresh.js - - -
+[40m[37mdbug[39m[22m[49m: Microsoft.AspNetCore.Watch.BrowserRefresh.BrowserScriptMiddleware[0]
+      Script injected: /_framework/aspnetcore-browser-refresh.js
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5087/_framework/aspnetcore-browser-refresh.js - 200 16519 application/javascript;+charset=utf-8 1.5729ms
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Blazor web static files'
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware[6]
+      The file /_framework/blazor.web.js was not modified
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Blazor web static files'
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5087/_framework/blazor.web.js - 304 - text/javascript 6.3295ms
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5087/_vs/browserLink - - -
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5087/_vs/browserLink - 200 - text/javascript;+charset=UTF-8 23.3925ms
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5087/_blazor/initializers - - -
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5087/_blazor/initializers - 200 - application/json;+charset=utf-8 5.2163ms
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 POST http://localhost:5087/_blazor/negotiate?negotiateVersion=1 - - 0
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 POST http://localhost:5087/_blazor/negotiate?negotiateVersion=1 - 200 316 application/json 7.8993ms
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5087/_blazor?id=yY37NRG12McCg2yNGNdseA - - -
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 POST http://localhost:5087/_blazor/disconnect - multipart/form-data;+boundary=----WebKitFormBoundaryV5I9vaiv8WbjBPxq 359
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Microsoft.AspNetCore.Routing.RouteEndpoint'
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 POST http://localhost:5087/_blazor/disconnect - 200 0 - 13.1853ms
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5087/datasources - - -
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/datasources (/datasources)'
+[40m[37mdbug[39m[22m[49m: Microsoft.AspNetCore.Watch.BrowserRefresh.BrowserRefreshMiddleware[1]
+      Response markup is scheduled to include browser refresh script injection.
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/datasources (/datasources)'
+[40m[37mdbug[39m[22m[49m: Microsoft.AspNetCore.Watch.BrowserRefresh.BrowserRefreshMiddleware[2]
+      Response markup was updated to include browser refresh script injection.
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5087/datasources - 200 - text/html;+charset=utf-8 93.4461ms
+[40m[32minfo[39m[22m[49m: LucidCartographer.Services.Enrichment.PoiEnrichmentBackgroundService[0]
+      Ensuring Playwright Chromium browser is installed (one-time bootstrap)…
+[40m[32minfo[39m[22m[49m: LucidCartographer.Services.Enrichment.PoiEnrichmentBackgroundService[0]
+      Playwright Chromium browser is ready.
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5087/ - - -
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/ (/)'
+[40m[37mdbug[39m[22m[49m: Microsoft.AspNetCore.Watch.BrowserRefresh.BrowserRefreshMiddleware[1]
+      Response markup is scheduled to include browser refresh script injection.
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/ (/)'
+[40m[37mdbug[39m[22m[49m: Microsoft.AspNetCore.Watch.BrowserRefresh.BrowserRefreshMiddleware[2]
+      Response markup was updated to include browser refresh script injection.
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5087/ - 200 - text/html;+charset=utf-8 18.5214ms
+[40m[32minfo[39m[22m[49m: LucidCartographer.Services.Enrichment.PoiEnrichmentBackgroundService[0]
+      PoiEnrichmentBackgroundService started
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5087/datasources - - -
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/datasources (/datasources)'
+[40m[37mdbug[39m[22m[49m: Microsoft.AspNetCore.Watch.BrowserRefresh.BrowserRefreshMiddleware[1]
+      Response markup is scheduled to include browser refresh script injection.
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/datasources (/datasources)'
+[40m[37mdbug[39m[22m[49m: Microsoft.AspNetCore.Watch.BrowserRefresh.BrowserRefreshMiddleware[2]
+      Response markup was updated to include browser refresh script injection.
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5087/datasources - 200 - text/html;+charset=utf-8 9.7574ms
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5087/ - - -
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/ (/)'
+[40m[37mdbug[39m[22m[49m: Microsoft.AspNetCore.Watch.BrowserRefresh.BrowserRefreshMiddleware[1]
+      Response markup is scheduled to include browser refresh script injection.
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/ (/)'
+[40m[37mdbug[39m[22m[49m: Microsoft.AspNetCore.Watch.BrowserRefresh.BrowserRefreshMiddleware[2]
+      Response markup was updated to include browser refresh script injection.
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5087/ - 200 - text/html;+charset=utf-8 6.5990ms
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5087/api/poi-image/338 - - -
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'HTTP: GET /api/poi-image/{id:int}'
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Http.Result.FileContentResult[5]
+      Sending file with download name ''.
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'HTTP: GET /api/poi-image/{id:int}'
+[40m[32minfo[39m[22m[49m: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5087/api/poi-image/338 - 200 176787 image/jpeg 24.0740ms

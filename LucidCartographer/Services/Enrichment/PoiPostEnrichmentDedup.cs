@@ -42,6 +42,7 @@ namespace LucidCartographer.Services.Enrichment
             if (canonical == null)
                 return false;
 
+            BackfillCanonicalFields(justEnriched, canonical);
             await RewriteCollectionLinksAsync(db, justEnriched, canonical, ct);
             await ReassignOrDropDuplicateImageAsync(db, justEnriched, canonical, ct);
             db.Pois.Remove(justEnriched);
@@ -95,7 +96,6 @@ namespace LucidCartographer.Services.Enrichment
 
             var candidates = await db.Pois
                 .Where(p => p.Id < justEnriched.Id
-                         && p.IsEnriched
                          && p.Latitude != null
                          && p.Longitude != null
                          && p.Latitude >= latLo
@@ -160,6 +160,16 @@ namespace LucidCartographer.Services.Enrichment
             var canonicalImage = await db.PoiImages.FindAsync(new object?[] { canonical.Id }, ct);
             if (canonicalImage != null)
             {
+                if (!IsLikelyPlacePhotoUrl(canonical.ImageUrl)
+                    && IsLikelyPlacePhotoUrl(duplicate.ImageUrl))
+                {
+                    canonicalImage.Data = duplicateImage.Data;
+                    canonicalImage.ContentType = duplicateImage.ContentType;
+                    canonical.ImageUrl = duplicate.ImageUrl;
+                    db.PoiImages.Remove(duplicateImage);
+                    return;
+                }
+
                 // Canonical already has an image — drop the duplicate's.
                 db.PoiImages.Remove(duplicateImage);
                 return;
@@ -178,6 +188,41 @@ namespace LucidCartographer.Services.Enrichment
                 Data = bytes,
                 ContentType = contentType
             });
+        }
+
+        private static bool IsLikelyPlacePhotoUrl(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+                return false;
+
+            if (url.Contains("/maps/vt", StringComparison.OrdinalIgnoreCase)
+                || url.Contains("/vt/", StringComparison.OrdinalIgnoreCase)
+                || url.Contains("tile.openstreetmap.org", StringComparison.OrdinalIgnoreCase)
+                || (url.Contains("x=", StringComparison.OrdinalIgnoreCase)
+                    && url.Contains("y=", StringComparison.OrdinalIgnoreCase)
+                    && url.Contains("z=", StringComparison.OrdinalIgnoreCase)))
+                return false;
+
+            return url.Contains("googleusercontent.com", StringComparison.OrdinalIgnoreCase)
+                || url.Contains("streetviewpixels-pa.googleapis.com", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void BackfillCanonicalFields(Poi duplicate, Poi canonical)
+        {
+            if (string.IsNullOrWhiteSpace(canonical.ImageUrl) && !string.IsNullOrWhiteSpace(duplicate.ImageUrl))
+                canonical.ImageUrl = duplicate.ImageUrl;
+
+            if (string.IsNullOrWhiteSpace(canonical.GoogleMapsUrl) && !string.IsNullOrWhiteSpace(duplicate.GoogleMapsUrl))
+                canonical.GoogleMapsUrl = duplicate.GoogleMapsUrl;
+
+            if (string.IsNullOrWhiteSpace(canonical.Address) && !string.IsNullOrWhiteSpace(duplicate.Address))
+                canonical.Address = duplicate.Address;
+
+            if (string.IsNullOrWhiteSpace(canonical.Website) && !string.IsNullOrWhiteSpace(duplicate.Website))
+                canonical.Website = duplicate.Website;
+
+            if (string.IsNullOrWhiteSpace(canonical.Phone) && !string.IsNullOrWhiteSpace(duplicate.Phone))
+                canonical.Phone = duplicate.Phone;
         }
     }
 }

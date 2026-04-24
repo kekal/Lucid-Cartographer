@@ -202,8 +202,13 @@ namespace LucidCartographer.Services.Import
             // existing record is empty or came from a Google source URL.
             // Non-Google URLs are treated as user-set and left untouched, as
             // are address/rating/phone and other metadata.
+            var hasStoredImageBytes = await _db.PoiImages
+                .AsNoTracking()
+                .AnyAsync(i => i.PoiId == existing.Id, _ct);
+
             var existingIsGoogleSourced = string.IsNullOrEmpty(existing.ImageUrl)
-                || existing.ImageUrl.Contains("googleusercontent.com");
+                || existing.ImageUrl.Contains("googleusercontent.com")
+                || !hasStoredImageBytes;
             if (!existingIsGoogleSourced) return;
 
             if (imported.ImageData is { Length: > 0 })

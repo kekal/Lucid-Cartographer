@@ -169,7 +169,13 @@
                             <tr @key="col.Id" class="hover:bg-surface-container transition-colors">
                                 <td class="px-4 py-3">
                                     <div class="flex items-center gap-3">
-                                        <div class="w-3 h-3 rounded-full" style="background-color: @col.Color" aria-hidden="true"></div>
+                                        <button type="button"
+                                                class="w-3 h-3 rounded-full cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary"
+                                                style="background-color: @col.Color"
+                                                aria-label="@($"Change color for {col.Name}")"
+                                                title="Change dataset color"
+                                                @onclick="() => OpenColorPicker(col)">
+                                        </button>
                                         <span class="font-medium">@col.Name</span>
                                     </div>
                                 </td>
@@ -269,6 +275,72 @@
     </div>
 </div>
 
+@if (_colorPickerCollectionId != null)
+{
+    var targetCollection = _collections.FirstOrDefault(c => c.Id == _colorPickerCollectionId.Value);
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="Change collection color">
+        <div class="w-full max-w-md rounded-xl bg-surface-container p-5 shadow-xl">
+            <div class="flex items-center justify-between mb-4">
+                <h4 class="font-bold font-headline text-base">Change color: @(targetCollection?.Name ?? "Collection")</h4>
+                <button type="button"
+                        class="p-1 rounded hover:bg-surface-container-high transition-colors"
+                        aria-label="Close color picker"
+                        @onclick="CloseColorPicker">
+                    <span class="material-symbols-outlined text-sm">close</span>
+                </button>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_colorPickerError))
+            {
+                <div class="mb-3 p-2 rounded-lg bg-tertiary/10 text-tertiary text-sm">@_colorPickerError</div>
+            }
+
+            <div class="mb-4">
+                <label class="block text-sm font-medium mb-2">Color</label>
+                <div class="flex items-center gap-3">
+                    <input type="color"
+                           class="h-10 w-14 rounded border border-outline-variant bg-surface"
+                           @bind="_colorPickerValue" />
+                    <span class="text-sm text-on-surface-variant">@_colorPickerValue</span>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap gap-2 mb-4">
+                @foreach (var color in _availableColors)
+                {
+                    var isSelected = string.Equals(_colorPickerValue, color, StringComparison.OrdinalIgnoreCase);
+                    var swatchStyle = $"background-color: {color}; width: 1.75rem; height: 1.75rem; border-radius: 9999px;";
+                    if (isSelected)
+                    {
+                        swatchStyle += " outline: 2px solid #005bbf; outline-offset: 2px;";
+                    }
+                    <button type="button"
+                            class="border border-outline-variant p-0 flex-shrink-0"
+                            style="@swatchStyle"
+                            aria-label="@($"Use color {color}")"
+                            @onclick="() => _colorPickerValue = color">
+                    </button>
+                }
+            </div>
+
+            <div class="flex justify-end gap-2">
+                <button type="button"
+                        class="px-3 py-2 text-sm rounded-lg border border-outline-variant hover:bg-surface-container-high transition-colors"
+                        @onclick="CloseColorPicker"
+                        disabled="@_isSavingColorPicker">
+                    Cancel
+                </button>
+                <button type="button"
+                        class="px-3 py-2 text-sm rounded-lg bg-primary text-on-primary hover:bg-primary/90 transition-colors disabled:opacity-50"
+                        @onclick="SaveCollectionColor"
+                        disabled="@_isSavingColorPicker">
+                    @(_isSavingColorPicker ? "Saving..." : "Save")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private IReadOnlyList<PoiCollection> _collections = Array.Empty<PoiCollection>();
     private bool _showUpload = false;
@@ -288,6 +360,10 @@
     private IDisposable? _statusSubscription;
     private int _failedEnrichmentCount;
     private string? _maintenanceMessage;
+    private int? _colorPickerCollectionId;
+    private string _colorPickerValue = "#005bbf";
+    private bool _isSavingColorPicker;
+    private string? _colorPickerError;
 
     private string _uploadTitle => _activeCard switch
     {
@@ -685,6 +761,49 @@
         _pendingDeleteId = null;
         await PoiService.DeleteCollectionAsync(id);
         await LoadCollections();
+    }
+
+    private void OpenColorPicker(PoiCollection collection)
+    {
+        _colorPickerCollectionId = collection.Id;
+        _colorPickerValue = string.IsNullOrWhiteSpace(collection.Color) ? "#005bbf" : collection.Color;
+        _colorPickerError = null;
+    }
+
+    private void CloseColorPicker()
+    {
+        _colorPickerCollectionId = null;
+        _colorPickerError = null;
+    }
+
+    private async Task SaveCollectionColor()
+    {
+        if (_colorPickerCollectionId == null)
+        {
+            return;
+        }
+
+        _isSavingColorPicker = true;
+        _colorPickerError = null;
+
+        try
+        {
+            await PoiService.UpdateCollectionColorAsync(_colorPickerCollectionId.Value, _colorPickerValue, _cts.Token);
+            await LoadCollections();
+            CloseColorPicker();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _colorPickerError = ex.Message;
+        }
+        catch (ArgumentException ex)
+        {
+            _colorPickerError = ex.Message;
+        }
+        finally
+        {
+            _isSavingColorPicker = false;
+        }
     }
 
     public ValueTask DisposeAsync()

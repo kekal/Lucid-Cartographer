@@ -1,4 +1,5 @@
 using LucidCartographer.Data;
+using LucidCartographer.Data.Entities;
 using LucidCartographer.Services.Import;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -266,6 +267,8 @@ namespace LucidCartographer.Services.Enrichment
                     && (string.IsNullOrEmpty(poi.GoogleMapsUrl) || !poi.GoogleMapsUrl.Contains("/maps/place/")))
                     poi.GoogleMapsUrl = details.GoogleMapsUrl;
 
+                await BackfillImageAsync(context, db, poi, details.ImageUrl, ct);
+
                 var hasCoordinates = poi.Latitude.HasValue && poi.Longitude.HasValue;
                 poi.IsEnriched = hasCoordinates;
                 poi.LastEnrichmentAttemptAt = DateTime.UtcNow;
@@ -395,6 +398,92 @@ namespace LucidCartographer.Services.Enrichment
         {
             if (failureCount <= 0 || !lastAttemptAt.HasValue) return true;
             return nowUtc - lastAttemptAt.Value >= GetRetryDelay(failureCount);
+        }
+
+        private async Task BackfillImageAsync(
+            IBrowserContext context,
+            AppDbContext db,
+            Poi poi,
+            string? imageUrl,
+            CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(imageUrl))
+                return;
+
+            if (!IsLikelyPlacePhotoUrl(imageUrl))
+                return;
+
+            if (string.IsNullOrWhiteSpace(poi.ImageUrl))
+                poi.ImageUrl = imageUrl;
+
+            var existingImage = await db.PoiImages.FindAsync(new object?[] { poi.Id }, ct);
+            if (existingImage != null)
+            {
+                if (IsLikelyPlacePhotoUrl(poi.ImageUrl ?? string.Empty))
+                    return;
+
+                // Existing bytes appear to be a non-photo artifact (tile/snapshot);
+                // replace with a validated place-photo candidate when available.
+                db.PoiImages.Remove(existingImage);
+            }
+
+            foreach (var candidateUrl in BuildImageFetchCandidates(imageUrl))
+            {
+                try
+                {
+                    var resp = await context.APIRequest.GetAsync(candidateUrl);
+                    if (resp.Status != 200)
+                        continue;
+
+                    var bytes = await resp.BodyAsync();
+                    if (bytes.Length == 0)
+                        continue;
+
+                    var contentType = resp.Headers.TryGetValue("content-type", out var ctHeader)
+                        ? ctHeader
+                        : "image/jpeg";
+
+                    db.PoiImages.Add(new PoiImage
+                    {
+                        PoiId = poi.Id,
+                        Data = bytes,
+                        ContentType = contentType
+                    });
+                    poi.ImageUrl = candidateUrl;
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Image download failed for Poi {PoiId} from {ImageUrl}", poi.Id, candidateUrl);
+                }
+            }
+        }
+
+        private static IEnumerable<string> BuildImageFetchCandidates(string imageUrl)
+        {
+            yield return imageUrl;
+
+            var equalsIdx = imageUrl.LastIndexOf('=');
+            if (equalsIdx > 0)
+            {
+                var upscaled = imageUrl[..equalsIdx] + "=w1024";
+                if (!string.Equals(upscaled, imageUrl, StringComparison.Ordinal))
+                    yield return upscaled;
+            }
+        }
+
+        private static bool IsLikelyPlacePhotoUrl(string url)
+        {
+            if (url.Contains("/maps/vt", StringComparison.OrdinalIgnoreCase)
+                || url.Contains("/vt/", StringComparison.OrdinalIgnoreCase)
+                || url.Contains("tile.openstreetmap.org", StringComparison.OrdinalIgnoreCase)
+                || (url.Contains("x=", StringComparison.OrdinalIgnoreCase)
+                    && url.Contains("y=", StringComparison.OrdinalIgnoreCase)
+                    && url.Contains("z=", StringComparison.OrdinalIgnoreCase)))
+                return false;
+
+            return url.Contains("googleusercontent.com", StringComparison.OrdinalIgnoreCase)
+                || url.Contains("streetviewpixels-pa.googleapis.com", StringComparison.OrdinalIgnoreCase);
         }
 
         private TimeSpan GetRetryDelay(int failureCount)

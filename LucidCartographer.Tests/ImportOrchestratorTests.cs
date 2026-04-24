@@ -230,6 +230,55 @@ namespace LucidCartographer.Tests
         }
 
         [Fact]
+        public async Task ImportFromScrapedAsync_DuplicateWithoutStoredImageBytes_BackfillsImageData()
+        {
+            var factory = TestDbHelper.CreateFactory();
+
+            int existingPoiId;
+            await using (var seed = factory.CreateDbContext())
+            {
+                var existing = new Poi
+                {
+                    Name = "Alpaki Fajne Sprawy Habdzin",
+                    Latitude = 50.0,
+                    Longitude = 20.0,
+                    IsEnriched = true,
+                    Status = "imported",
+                    AddedDate = DateTime.UtcNow,
+                    ImageUrl = "https://example.com/old-image.jpg"
+                };
+                seed.Pois.Add(existing);
+                await seed.SaveChangesAsync();
+                existingPoiId = existing.Id;
+            }
+
+            var orchestrator = CreateOrchestrator(factory);
+            var scraped = new List<ImportedPoi>
+            {
+                new(
+                    Name: "Alpaki Fajne Sprawy Habdzin",
+                    Latitude: 50.0,
+                    Longitude: 20.0,
+                    GoogleMapsUrl: "https://www.google.com/maps/place/Alpaki",
+                    ImageUrl: "https://lh3.googleusercontent.com/photo=w1024",
+                    ImageData: new byte[] { 1, 2, 3, 4 },
+                    ImageContentType: "image/jpeg")
+            };
+
+            var result = await orchestrator.ImportFromScrapedAsync(scraped, "Reimport");
+
+            result.AddedCount.Should().Be(0);
+            result.SkippedCount.Should().Be(1);
+
+            await using var check = factory.CreateDbContext();
+            (await check.Pois.CountAsync()).Should().Be(1);
+
+            var image = await check.PoiImages.FirstOrDefaultAsync(i => i.PoiId == existingPoiId);
+            image.Should().NotBeNull();
+            image!.Data.Should().Equal(new byte[] { 1, 2, 3, 4 });
+        }
+
+        [Fact]
         public async Task ImportFromScrapedAsync_DiacriticVariant_DocumentsCandidatePoolExactMatchLimitation()
         {
             // KNOWN LIMITATION: ImportPersister.LoadCandidatePoolAsync uses

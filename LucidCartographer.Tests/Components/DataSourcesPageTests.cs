@@ -30,6 +30,10 @@ namespace LucidCartographer.Tests.Components
             Services.AddScoped<IFileImporter, CsvImporter>();
             Services.AddScoped<IImportOrchestrator, ImportOrchestrator>();
             Services.AddScoped<IGoogleMapsListScraper>(_ => Mock.Of<IGoogleMapsListScraper>());
+            var httpClientFactory = new Mock<IHttpClientFactory>();
+            httpClientFactory.Setup(x => x.CreateClient(It.IsAny<string>())).Returns(new HttpClient());
+            Services.AddSingleton(httpClientFactory.Object);
+            Services.AddSingleton<LucidCartographer.Services.Enrichment.EnrichmentTrigger>();
             // Background-import wiring: the page now enqueues via
             // IImportJobQueue and subscribes to ImportJobStatusService
             // instead of awaiting IImportOrchestrator directly.
@@ -167,9 +171,40 @@ namespace LucidCartographer.Tests.Components
             SeedOneCollection();
             var cut = RenderComponent<DataSourcesPage>();
 
-            var deleteButtons = cut.FindAll("table tbody button");
+            var deleteButtons = cut.FindAll("table tbody button")
+                .Where(btn => btn.GetAttribute("aria-label")?.StartsWith("Delete ") == true)
+                .ToList();
             deleteButtons.Should().HaveCount(1);
             deleteButtons[0].InnerHtml.Should().Contain("delete");
+        }
+
+        [Fact]
+        public void Clicking_Collection_Color_Opens_Color_Picker_Modal()
+        {
+            SeedOneCollection();
+            var cut = RenderComponent<DataSourcesPage>();
+
+            cut.Find("button[aria-label='Change color for Test Set']").Click();
+
+            cut.Find("div[role='dialog'] h4").TextContent.Should().Contain("Change color: Test Set");
+            cut.Find("input[type='color']").GetAttribute("value").Should().Be("#ff0000");
+        }
+
+        [Fact]
+        public void Saving_Collection_Color_Updates_Database()
+        {
+            SeedOneCollection();
+            var cut = RenderComponent<DataSourcesPage>();
+
+            cut.Find("button[aria-label='Change color for Test Set']").Click();
+            cut.Find("input[type='color']").Change("#006e2c");
+            cut.Find("div[role='dialog'] button.bg-primary").Click();
+
+            cut.WaitForAssertion(() =>
+            {
+                using var db = _factory.CreateDbContext();
+                db.PoiCollections.Single(c => c.Name == "Test Set").Color.Should().Be("#006e2c");
+            });
         }
 
         [Fact]

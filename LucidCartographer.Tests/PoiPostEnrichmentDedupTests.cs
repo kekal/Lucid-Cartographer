@@ -243,6 +243,56 @@ namespace LucidCartographer.Tests
         }
 
         [Fact]
+        public async Task MergeIfDuplicate_OlderRowNotEnrichedButLocated_MergesIntoOlderCanonical()
+        {
+            var factory = TestDbHelper.CreateFactory();
+            int olderId, newerId;
+
+            await using (var seed = factory.CreateDbContext())
+            {
+                var older = new Poi
+                {
+                    Name = "Alpaki Fajne Sprawy Habdzin",
+                    Latitude = 52.091133,
+                    Longitude = 21.161223,
+                    IsEnriched = false,
+                    Status = "imported",
+                    AddedDate = DateTime.UtcNow,
+                    Address = null,
+                    Phone = null
+                };
+                var newer = NewEnriched(
+                    "Alpaki Fajne Sprawy Habdzin",
+                    52.091133,
+                    21.161223,
+                    "https://www.google.com/maps/place/alpaki");
+                newer.Address = "Habdzin 61a";
+                newer.Phone = "503 302 302";
+
+                seed.Pois.AddRange(older, newer);
+                await seed.SaveChangesAsync();
+                olderId = older.Id;
+                newerId = newer.Id;
+            }
+
+            await using (var db = factory.CreateDbContext())
+            {
+                var newer = await db.Pois.FirstAsync(p => p.Id == newerId);
+                (await PoiPostEnrichmentDedup.MergeIfDuplicateAsync(db, newer, CancellationToken.None))
+                    .Should().BeTrue();
+            }
+
+            await using (var check = factory.CreateDbContext())
+            {
+                var rows = await check.Pois.ToListAsync();
+                rows.Should().HaveCount(1);
+                rows.Single().Id.Should().Be(olderId);
+                rows.Single().Address.Should().Be("Habdzin 61a");
+                rows.Single().Phone.Should().Be("503 302 302");
+            }
+        }
+
+        [Fact]
         public async Task MergeIfDuplicate_NoCollision_IsNoOp()
         {
             var factory = TestDbHelper.CreateFactory();
@@ -309,6 +359,50 @@ namespace LucidCartographer.Tests
                 images.Single().PoiId.Should().Be(canonicalId);
                 images.Single().Data.Should().Equal(imageBytes);
                 images.Single().ContentType.Should().Be("image/png");
+            }
+        }
+
+        [Fact]
+        public async Task MergeIfDuplicate_CanonicalMissingMetadata_BackfillsFromDuplicate()
+        {
+            var factory = TestDbHelper.CreateFactory();
+            int canonicalId, duplicateId;
+
+            await using (var seed = factory.CreateDbContext())
+            {
+                var canonical = NewEnriched("Farm", 50.1, 20.1, null);
+                canonical.Address = null;
+                canonical.Phone = null;
+                canonical.Website = null;
+                canonical.ImageUrl = null;
+
+                var duplicate = NewEnriched("Farm", 50.1, 20.1, "https://www.google.com/maps/place/farm");
+                duplicate.Address = "Habdzin 1";
+                duplicate.Phone = "+48 123 456 789";
+                duplicate.Website = "https://example.test";
+                duplicate.ImageUrl = "https://lh3.googleusercontent.com/photo=w1024";
+
+                seed.Pois.AddRange(canonical, duplicate);
+                await seed.SaveChangesAsync();
+                canonicalId = canonical.Id;
+                duplicateId = duplicate.Id;
+            }
+
+            await using (var db = factory.CreateDbContext())
+            {
+                var duplicate = await db.Pois.FirstAsync(p => p.Id == duplicateId);
+                (await PoiPostEnrichmentDedup.MergeIfDuplicateAsync(db, duplicate, CancellationToken.None))
+                    .Should().BeTrue();
+            }
+
+            await using (var check = factory.CreateDbContext())
+            {
+                var canonical = await check.Pois.SingleAsync(p => p.Id == canonicalId);
+                canonical.Address.Should().Be("Habdzin 1");
+                canonical.Phone.Should().Be("+48 123 456 789");
+                canonical.Website.Should().Be("https://example.test");
+                canonical.ImageUrl.Should().Be("https://lh3.googleusercontent.com/photo=w1024");
+                canonical.GoogleMapsUrl.Should().Be("https://www.google.com/maps/place/farm");
             }
         }
 
@@ -389,6 +483,47 @@ namespace LucidCartographer.Tests
                 images.Single().PoiId.Should().Be(canonicalId);
                 images.Single().Data.Should().Equal(new byte[] { 0x01 });
                 images.Single().ContentType.Should().Be("image/jpeg");
+            }
+        }
+
+        [Fact]
+        public async Task MergeIfDuplicate_CanonicalHasTileImage_ReplacesWithDuplicatesPhoto()
+        {
+            var factory = TestDbHelper.CreateFactory();
+            int canonicalId, duplicateId;
+
+            await using (var seed = factory.CreateDbContext())
+            {
+                var canonical = NewEnriched("Farm", 48.0, 21.0, "https://www.google.com/maps/place/farm");
+                canonical.ImageUrl = "https://tile.openstreetmap.org/1/2/3.png";
+                var duplicate = NewEnriched("Farm", 48.0, 21.0, "https://www.google.com/maps/place/farm");
+                duplicate.ImageUrl = "https://lh3.googleusercontent.com/photo=w1024";
+                seed.Pois.AddRange(canonical, duplicate);
+                await seed.SaveChangesAsync();
+                canonicalId = canonical.Id;
+                duplicateId = duplicate.Id;
+
+                seed.PoiImages.AddRange(
+                    new PoiImage { PoiId = canonicalId, Data = new byte[] { 0x10 }, ContentType = "image/png" },
+                    new PoiImage { PoiId = duplicateId, Data = new byte[] { 0x20, 0x21 }, ContentType = "image/jpeg" });
+                await seed.SaveChangesAsync();
+            }
+
+            await using (var db = factory.CreateDbContext())
+            {
+                var duplicate = await db.Pois.FirstAsync(p => p.Id == duplicateId);
+                (await PoiPostEnrichmentDedup.MergeIfDuplicateAsync(db, duplicate, CancellationToken.None))
+                    .Should().BeTrue();
+            }
+
+            await using (var check = factory.CreateDbContext())
+            {
+                var canonical = await check.Pois.SingleAsync(p => p.Id == canonicalId);
+                canonical.ImageUrl.Should().Be("https://lh3.googleusercontent.com/photo=w1024");
+
+                var img = await check.PoiImages.SingleAsync(i => i.PoiId == canonicalId);
+                img.Data.Should().Equal(new byte[] { 0x20, 0x21 });
+                img.ContentType.Should().Be("image/jpeg");
             }
         }
     }

@@ -10,7 +10,8 @@ namespace LucidCartographer.Services.Enrichment
         string? Phone,
         double? Latitude,
         double? Longitude,
-        string? GoogleMapsUrl);
+        string? GoogleMapsUrl,
+        string? ImageUrl);
 
     /// <summary>
     /// Opens a Google Maps place on a provided Playwright page and reads the
@@ -82,7 +83,18 @@ namespace LucidCartographer.Services.Enrichment
                                     new() { Timeout = 15000 });
                             }
                             catch (TimeoutException) { }
-                            await clickTask;
+                            catch (PlaywrightException ex) when (IsNavigationAbortDuringConsent(ex))
+                            {
+                                logger?.LogDebug(ex, "Consent redirect wait aborted; continuing with current page URL '{Url}'", page.Url);
+                            }
+                            try
+                            {
+                                await clickTask;
+                            }
+                            catch (PlaywrightException ex) when (IsNavigationAbortDuringConsent(ex))
+                            {
+                                logger?.LogDebug(ex, "Consent click navigation aborted; continuing with current page URL '{Url}'", page.Url);
+                            }
                             break;
                         }
                     }
@@ -140,13 +152,16 @@ namespace LucidCartographer.Services.Enrichment
                 EnrichmentMetrics.RecordSelectorMiss();
             }
 
+            var imageUrl = await TryExtractImageUrlAsync(page, logger);
+
             return new EnrichedDetails(
                 Address: address,
                 Website: website,
                 Phone: phone,
                 Latitude: coords?.lat,
                 Longitude: coords?.lon,
-                GoogleMapsUrl: finalUrl.Contains("/maps/place/") ? finalUrl : null);
+                GoogleMapsUrl: finalUrl.Contains("/maps/place/") ? finalUrl : null,
+                ImageUrl: imageUrl);
         }
 
         private static async Task<string?> TryInnerTextAsync(IPage page, string selector, string field, ILogger? logger)
@@ -163,6 +178,59 @@ namespace LucidCartographer.Services.Enrichment
                 EnrichmentMetrics.RecordSelectorMiss();
             }
             return null;
+        }
+
+        private static bool IsNavigationAbortDuringConsent(PlaywrightException ex)
+            => ex.Message.Contains("ERR_ABORTED", StringComparison.OrdinalIgnoreCase)
+               || ex.Message.Contains("frame was detached", StringComparison.OrdinalIgnoreCase);
+
+        private static async Task<string?> TryExtractImageUrlAsync(IPage page, ILogger? logger)
+        {
+            string[] selectors =
+            {
+                "button[jsaction*='pane.heroHeaderImage.click'] img[src]",
+                "img[src*='googleusercontent.com']"
+            };
+
+            foreach (var selector in selectors)
+            {
+                try
+                {
+                    var img = page.Locator(selector).First;
+                    if (await img.IsVisibleAsync())
+                    {
+                        var src = await img.GetAttributeAsync("src");
+                        if (IsLikelyPlacePhotoUrl(src))
+                            return src;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogDebug(ex, "Image selector miss for Google Maps details panel: {Selector}", selector);
+                }
+            }
+
+            return null;
+        }
+
+        private static bool IsLikelyPlacePhotoUrl(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+                return false;
+
+            if (!url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            if (url.Contains("/maps/vt", StringComparison.OrdinalIgnoreCase)
+                || url.Contains("/vt/", StringComparison.OrdinalIgnoreCase)
+                || url.Contains("tile.openstreetmap.org", StringComparison.OrdinalIgnoreCase)
+                || (url.Contains("x=", StringComparison.OrdinalIgnoreCase)
+                    && url.Contains("y=", StringComparison.OrdinalIgnoreCase)
+                    && url.Contains("z=", StringComparison.OrdinalIgnoreCase)))
+                return false;
+
+            return url.Contains("googleusercontent.com", StringComparison.OrdinalIgnoreCase)
+                || url.Contains("streetviewpixels-pa.googleapis.com", StringComparison.OrdinalIgnoreCase);
         }
     }
 }
