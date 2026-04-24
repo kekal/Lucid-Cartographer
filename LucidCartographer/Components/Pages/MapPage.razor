@@ -86,6 +86,7 @@ else
                      SelectedPoiId="_selectedPoiId"
                      CollectionName="@_selectedCollectionName"
                      PoiCollectionNames="_poiCollectionNames"
+                     PoiCollectionMemberships="_poiCollectionMemberships"
                      PoiCollectionIds="_poiCollectionIds"
                      Collections="_collectionVMs"
                      OnPoiSelected="HandlePoiSelected"
@@ -115,6 +116,7 @@ else
     private IReadOnlyList<Poi> _visiblePois = Array.Empty<Poi>();
     private IReadOnlyList<Poi> _filteredPois = Array.Empty<Poi>();
     private Dictionary<int, IReadOnlyList<string>> _poiCollectionNames = new();
+    private Dictionary<int, IReadOnlyList<int>> _poiCollectionMemberships = new();
     private Dictionary<int, int> _poiCollectionIds = new();
     private int? _selectedCollectionId;
     private int? _selectedPoiId;
@@ -252,9 +254,7 @@ else
         await _leafletMap.ShowCollectionAsync(SearchLayerId, searchPois, SearchMarkerColor);
 
         // Populate collection IDs/names for search results so move/delete work
-        _poiCollectionIds = await PoiService.GetPoiCollectionIdsAsync(searchPois.Select(p => p.Id));
-        _poiCollectionNames = (await PoiService.GetPoiCollectionNamesAsync(searchPois.Select(p => p.Id)))
-            .ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<string>)kvp.Value);
+        await RefreshPoiCollectionMaps(searchPois);
 
         _filteredPois = _visiblePois;
         await _leafletMap.FitBoundsAsync();
@@ -282,8 +282,6 @@ else
         // key value". Dedup by Id while flattening.
         var seen = new HashSet<int>();
         var newPois = new List<Poi>();
-        var idMap = new Dictionary<int, int>();
-
         foreach (var vm in _collectionVMs)
         {
             if (vm.IsVisible && grouped.ContainsKey(vm.Id))
@@ -293,7 +291,6 @@ else
                 {
                     if (seen.Add(poi.Id))
                         newPois.Add(poi);
-                    idMap.TryAdd(poi.Id, vm.Id);
                 }
             }
             else
@@ -302,9 +299,7 @@ else
             }
         }
         _visiblePois = newPois;
-        _poiCollectionNames = (await PoiService.GetPoiCollectionNamesAsync(newPois.Select(p => p.Id)))
-            .ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<string>)kvp.Value);
-        _poiCollectionIds = idMap;
+        await RefreshPoiCollectionMaps(newPois);
         ApplyViewportFilter();
     }
 
@@ -324,6 +319,7 @@ else
         var vm = _collectionVMs.FirstOrDefault(c => c.Id == collectionId);
         _selectedCollectionName = vm?.Name;
         _visiblePois = await PoiService.GetPoisByCollectionAsync(collectionId);
+        await RefreshPoiCollectionMaps(_visiblePois);
         ApplyViewportFilter();
     }
 
@@ -412,10 +408,14 @@ else
 
     private async Task HandleMovePoi((int PoiId, int TargetCollectionId) args)
     {
-        if (_poiCollectionIds.TryGetValue(args.PoiId, out var sourceCollectionId))
+        await PoiService.AddPoiToCollectionAsync(args.PoiId, args.TargetCollectionId);
+
+        if (_poiCollectionMemberships.TryGetValue(args.PoiId, out var sourceCollectionIds))
         {
-            await PoiService.AddPoiToCollectionAsync(args.PoiId, args.TargetCollectionId);
-            await PoiService.RemovePoiFromCollectionAsync(args.PoiId, sourceCollectionId);
+            foreach (var sourceCollectionId in sourceCollectionIds.Where(id => id != args.TargetCollectionId))
+            {
+                await PoiService.RemovePoiFromCollectionAsync(args.PoiId, sourceCollectionId);
+            }
         }
         await RefreshAfterMutation();
     }
@@ -423,14 +423,41 @@ else
     private async Task HandleMoveToNewCollection((int PoiId, string NewCollectionName) args)
     {
         var newCol = await PoiService.CreateCollectionAsync(args.NewCollectionName);
-        if (_poiCollectionIds.TryGetValue(args.PoiId, out var sourceCollectionId))
+        await PoiService.AddPoiToCollectionAsync(args.PoiId, newCol.Id);
+
+        if (_poiCollectionMemberships.TryGetValue(args.PoiId, out var sourceCollectionIds))
         {
-            await PoiService.AddPoiToCollectionAsync(args.PoiId, newCol.Id);
-            await PoiService.RemovePoiFromCollectionAsync(args.PoiId, sourceCollectionId);
+            foreach (var sourceCollectionId in sourceCollectionIds)
+            {
+                await PoiService.RemovePoiFromCollectionAsync(args.PoiId, sourceCollectionId);
+            }
         }
         // Add the new collection to the VM list
         _collectionVMs.Insert(0, new CollectionViewModel(newCol));
         await RefreshAfterMutation();
+    }
+
+    private async Task RefreshPoiCollectionMaps(IEnumerable<Poi> pois)
+    {
+        var poiIds = pois.Select(p => p.Id).Distinct().ToList();
+        if (poiIds.Count == 0)
+        {
+            _poiCollectionNames = new();
+            _poiCollectionMemberships = new();
+            _poiCollectionIds = new();
+            return;
+        }
+
+        _poiCollectionNames = (await PoiService.GetPoiCollectionNamesAsync(poiIds))
+            .ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<string>)kvp.Value);
+
+        var memberships = await PoiService.GetPoiCollectionMembershipsAsync(poiIds);
+        _poiCollectionMemberships = memberships
+            .ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<int>)kvp.Value);
+
+        _poiCollectionIds = memberships
+            .Where(kvp => kvp.Value.Count > 0)
+            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value[0]);
     }
 
     private async Task HandleCopyPoi((int PoiId, int TargetCollectionId) args)

@@ -3,6 +3,7 @@ using BunitTestContext = Bunit.TestContext;
 using FluentAssertions;
 using LucidCartographer.Components.Shared;
 using LucidCartographer.Data.Entities;
+using LucidCartographer.Services;
 using Microsoft.AspNetCore.Components;
 
 namespace LucidCartographer.Tests.Components
@@ -167,6 +168,56 @@ namespace LucidCartographer.Tests.Components
 
             cut.Markup.Should().Contain("Favorites");
             cut.Markup.Should().Contain("Visited");
+        }
+
+        [Fact]
+        public void CopyModal_ShowsOnlyCollections_ThatDoNotContainPoi()
+        {
+            var pois = new List<Poi> { CreatePoi(1, "Test Place") };
+            var collections = new List<CollectionViewModel>
+            {
+                new(new PoiCollection { Id = 1, Name = "Alpha", Color = "#005bbf" }),
+                new(new PoiCollection { Id = 2, Name = "Beta", Color = "#006e2c" }),
+                new(new PoiCollection { Id = 3, Name = "Gamma", Color = "#b81d17" })
+            };
+
+            var cut = RenderComponent<PoiTable>(parameters => parameters
+                .Add(p => p.Pois, pois)
+                .Add(p => p.Collections, collections)
+                .Add(p => p.PoiCollectionMemberships, new Dictionary<int, IReadOnlyList<int>> { [1] = [1, 2] }));
+
+            cut.Find("button[aria-label='Copy Test Place to another collection']").Click();
+
+            var options = cut.FindAll("div.flex-1.overflow-y-auto.p-2 > button")
+                .Select(x => x.TextContent.Trim())
+                .ToList();
+
+            options.Should().BeEquivalentTo(["Gamma"]);
+        }
+
+        [Fact]
+        public void MoveModal_ShowsAllCollections()
+        {
+            var pois = new List<Poi> { CreatePoi(1, "Test Place") };
+            var collections = new List<CollectionViewModel>
+            {
+                new(new PoiCollection { Id = 1, Name = "Alpha", Color = "#005bbf" }),
+                new(new PoiCollection { Id = 2, Name = "Beta", Color = "#006e2c" }),
+                new(new PoiCollection { Id = 3, Name = "Gamma", Color = "#b81d17" })
+            };
+
+            var cut = RenderComponent<PoiTable>(parameters => parameters
+                .Add(p => p.Pois, pois)
+                .Add(p => p.Collections, collections)
+                .Add(p => p.PoiCollectionMemberships, new Dictionary<int, IReadOnlyList<int>> { [1] = [1, 2] }));
+
+            cut.Find("button[aria-label='Move Test Place to another collection']").Click();
+
+            var options = cut.FindAll("div.flex-1.overflow-y-auto.p-2 > button")
+                .Select(x => x.TextContent.Trim())
+                .ToList();
+
+            options.Should().BeEquivalentTo(["Alpha", "Beta", "Gamma"]);
         }
     }
 }

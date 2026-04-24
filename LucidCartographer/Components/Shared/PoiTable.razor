@@ -123,7 +123,7 @@
             <div class="flex-1 overflow-y-auto p-2">
                 @if (Collections != null)
                 {
-                    @foreach (var col in Collections.Where(c => c.Id != GetCollectionId(_modalPoiId.Value)))
+                    @foreach (var col in GetModalCollections(_modalPoiId.Value))
                     {
                         <button class="w-full text-left px-3 py-2 rounded-lg hover:bg-surface-container-low transition-colors text-sm flex items-center gap-2"
                                 @onclick="() => HandleTargetSelected(_modalPoiId.Value, col.Id)">
@@ -162,6 +162,7 @@
     [Parameter] public int? SelectedPoiId { get; set; }
     [Parameter] public string? CollectionName { get; set; }
     [Parameter] public IReadOnlyDictionary<int, IReadOnlyList<string>>? PoiCollectionNames { get; set; }
+    [Parameter] public IReadOnlyDictionary<int, IReadOnlyList<int>>? PoiCollectionMemberships { get; set; }
     [Parameter] public IReadOnlyDictionary<int, int>? PoiCollectionIds { get; set; }
     [Parameter] public IReadOnlyList<CollectionViewModel>? Collections { get; set; }
     [Parameter] public EventCallback<int> OnPoiSelected { get; set; }
@@ -184,10 +185,23 @@
         return [];
     }
 
-    private int GetCollectionId(int poiId)
+    private IReadOnlyList<int> GetCollectionMemberships(int poiId)
     {
-        if (PoiCollectionIds != null && PoiCollectionIds.TryGetValue(poiId, out var id)) return id;
-        return -1;
+        if (PoiCollectionMemberships != null && PoiCollectionMemberships.TryGetValue(poiId, out var memberships)) return memberships;
+        return [];
+    }
+
+    private IEnumerable<CollectionViewModel> GetModalCollections(int poiId)
+    {
+        if (Collections == null) return Enumerable.Empty<CollectionViewModel>();
+
+        var memberships = GetCollectionMemberships(poiId);
+        if (_isCopy)
+        {
+            return Collections.Where(c => !memberships.Contains(c.Id));
+        }
+
+        return Collections;
     }
 
     private void OpenMoveModal(int poiId) { _modalPoiId = poiId; _isCopy = false; _showNewCollectionInput = false; _newCollectionName = ""; }
