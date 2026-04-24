@@ -2,6 +2,7 @@ using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
 using LucidCartographer.Services.Operations;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 
 namespace LucidCartographer.Services.Import
 {
@@ -190,10 +191,51 @@ namespace LucidCartographer.Services.Import
         private static void BackfillGoogleMapsUrl(Poi existing, ImportedPoi imported)
         {
             if (string.IsNullOrEmpty(imported.GoogleMapsUrl)) return;
-            if (!imported.GoogleMapsUrl.Contains("/maps/place/")) return;
-            // Only upgrade if existing URL is missing or not a proper place URL
-            if (!string.IsNullOrEmpty(existing.GoogleMapsUrl) && existing.GoogleMapsUrl.Contains("/maps/place/")) return;
-            existing.GoogleMapsUrl = imported.GoogleMapsUrl;
+
+            var normalizedImported = PoiMatcher.NormalizeUrl(imported.GoogleMapsUrl);
+            if (string.IsNullOrWhiteSpace(normalizedImported)) return;
+            if (IsCoordinateSearchFallback(normalizedImported)) return;
+
+            var normalizedExisting = string.IsNullOrWhiteSpace(existing.GoogleMapsUrl)
+                ? null
+                : PoiMatcher.NormalizeUrl(existing.GoogleMapsUrl);
+
+            if (string.Equals(normalizedExisting, normalizedImported, StringComparison.OrdinalIgnoreCase)) return;
+            if (IsCanonicalPlaceUrl(normalizedExisting)) return;
+
+            existing.GoogleMapsUrl = normalizedImported;
+        }
+
+        private static bool IsCanonicalPlaceUrl(string? url)
+        {
+            return !string.IsNullOrWhiteSpace(url)
+                && url.Contains("/maps/place/", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsCoordinateSearchFallback(string url)
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return false;
+            if (!uri.Host.Contains("google.", StringComparison.OrdinalIgnoreCase)) return false;
+            if (!uri.AbsolutePath.Equals("/maps/search", StringComparison.OrdinalIgnoreCase)) return false;
+
+            var query = uri.Query;
+            if (string.IsNullOrWhiteSpace(query)) return false;
+
+            foreach (var segment in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var parts = segment.Split('=', 2);
+                if (parts.Length != 2) continue;
+                if (!parts[0].Equals("query", StringComparison.OrdinalIgnoreCase)) continue;
+
+                var value = Uri.UnescapeDataString(parts[1]);
+                var coordParts = value.Split(',', 2);
+                if (coordParts.Length != 2) return false;
+
+                return double.TryParse(coordParts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out _)
+                    && double.TryParse(coordParts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out _);
+            }
+
+            return false;
         }
 
         private async Task BackfillImageIfAllowedAsync(Poi existing, ImportedPoi imported)

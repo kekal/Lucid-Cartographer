@@ -279,6 +279,46 @@ namespace LucidCartographer.Tests
         }
 
         [Fact]
+        public async Task ImportFromScrapedAsync_DuplicateWithLegacySearchGoogleUrl_UpgradesToImportedUrl()
+        {
+            var factory = TestDbHelper.CreateFactory();
+
+            await using (var seed = factory.CreateDbContext())
+            {
+                seed.Pois.Add(new Poi
+                {
+                    Name = "Centrum Przyrodnicze",
+                    Latitude = 50.9856105,
+                    Longitude = 17.7016002,
+                    GoogleMapsUrl = "https://www.google.com/maps/search/?api=1&query=50.9856105,17.7016002",
+                    IsEnriched = true,
+                    Status = "imported",
+                    AddedDate = DateTime.UtcNow
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            var orchestrator = CreateOrchestrator(factory);
+            var scraped = new List<ImportedPoi>
+            {
+                new(
+                    Name: "Centrum Przyrodnicze",
+                    Latitude: 50.9856105,
+                    Longitude: 17.7016002,
+                    GoogleMapsUrl: "https://maps.app.goo.gl/mHCBTX7XAJH3wVeD9")
+            };
+
+            var result = await orchestrator.ImportFromScrapedAsync(scraped, "Reimport");
+
+            result.AddedCount.Should().Be(0);
+            result.SkippedCount.Should().Be(1);
+
+            await using var check = factory.CreateDbContext();
+            var poi = await check.Pois.SingleAsync(p => p.Name == "Centrum Przyrodnicze");
+            poi.GoogleMapsUrl.Should().Be("https://maps.app.goo.gl/mHCBTX7XAJH3wVeD9");
+        }
+
+        [Fact]
         public async Task ImportFromScrapedAsync_DiacriticVariant_DocumentsCandidatePoolExactMatchLimitation()
         {
             // KNOWN LIMITATION: ImportPersister.LoadCandidatePoolAsync uses
