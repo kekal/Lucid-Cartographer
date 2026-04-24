@@ -114,7 +114,7 @@ else
     private List<CollectionViewModel> _collectionVMs = new();
     private IReadOnlyList<Poi> _visiblePois = Array.Empty<Poi>();
     private IReadOnlyList<Poi> _filteredPois = Array.Empty<Poi>();
-    private Dictionary<int, string> _poiCollectionNames = new();
+    private Dictionary<int, IReadOnlyList<string>> _poiCollectionNames = new();
     private Dictionary<int, int> _poiCollectionIds = new();
     private int? _selectedCollectionId;
     private int? _selectedPoiId;
@@ -253,13 +253,8 @@ else
 
         // Populate collection IDs/names for search results so move/delete work
         _poiCollectionIds = await PoiService.GetPoiCollectionIdsAsync(searchPois.Select(p => p.Id));
-        var nameMap = new Dictionary<int, string>();
-        foreach (var kvp in _poiCollectionIds)
-        {
-            var vm = _collectionVMs.FirstOrDefault(c => c.Id == kvp.Value);
-            if (vm != null) nameMap.TryAdd(kvp.Key, vm.Name);
-        }
-        _poiCollectionNames = nameMap;
+        _poiCollectionNames = (await PoiService.GetPoiCollectionNamesAsync(searchPois.Select(p => p.Id)))
+            .ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<string>)kvp.Value);
 
         _filteredPois = _visiblePois;
         await _leafletMap.FitBoundsAsync();
@@ -287,7 +282,6 @@ else
         // key value". Dedup by Id while flattening.
         var seen = new HashSet<int>();
         var newPois = new List<Poi>();
-        var nameMap = new Dictionary<int, string>();
         var idMap = new Dictionary<int, int>();
 
         foreach (var vm in _collectionVMs)
@@ -299,7 +293,6 @@ else
                 {
                     if (seen.Add(poi.Id))
                         newPois.Add(poi);
-                    nameMap.TryAdd(poi.Id, vm.Name);
                     idMap.TryAdd(poi.Id, vm.Id);
                 }
             }
@@ -309,7 +302,8 @@ else
             }
         }
         _visiblePois = newPois;
-        _poiCollectionNames = nameMap;
+        _poiCollectionNames = (await PoiService.GetPoiCollectionNamesAsync(newPois.Select(p => p.Id)))
+            .ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<string>)kvp.Value);
         _poiCollectionIds = idMap;
         ApplyViewportFilter();
     }

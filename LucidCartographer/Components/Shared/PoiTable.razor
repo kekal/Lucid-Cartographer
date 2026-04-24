@@ -51,10 +51,15 @@
                                 @(poi.Latitude.HasValue && poi.Longitude.HasValue ? $"{poi.Latitude.Value.ToString("F4")}, {poi.Longitude.Value.ToString("F4")}" : "—")
                             </td>
                             <td class="px-4 py-2.5">
-                                @{ var cn = GetCollectionName(poi.Id); }
-                                @if (cn != null)
+                                @{ var cns = GetCollectionNames(poi.Id); }
+                                @if (cns.Count > 0)
                                 {
-                                    <span class="text-xs px-2 py-0.5 rounded-full bg-surface-container-high">@cn</span>
+                                    <div class="flex flex-wrap gap-1">
+                                        @foreach (var cn in cns)
+                                        {
+                                            <span class="text-xs px-2 py-0.5 rounded-full bg-surface-container-high">@cn</span>
+                                        }
+                                    </div>
                                 }
                             </td>
                             <td class="px-4 py-2.5 text-xs text-on-surface-variant">@poi.AddedDate.ToString("MMM dd, yyyy")</td>
@@ -156,7 +161,7 @@
     [Parameter, EditorRequired] public IReadOnlyList<Poi> Pois { get; set; } = Array.Empty<Poi>();
     [Parameter] public int? SelectedPoiId { get; set; }
     [Parameter] public string? CollectionName { get; set; }
-    [Parameter] public IReadOnlyDictionary<int, string>? PoiCollectionNames { get; set; }
+    [Parameter] public IReadOnlyDictionary<int, IReadOnlyList<string>>? PoiCollectionNames { get; set; }
     [Parameter] public IReadOnlyDictionary<int, int>? PoiCollectionIds { get; set; }
     [Parameter] public IReadOnlyList<CollectionViewModel>? Collections { get; set; }
     [Parameter] public EventCallback<int> OnPoiSelected { get; set; }
@@ -172,11 +177,11 @@
     private bool _showNewCollectionInput;
     private string _newCollectionName = "";
 
-    private string? GetCollectionName(int poiId)
+    private IReadOnlyList<string> GetCollectionNames(int poiId)
     {
-        if (CollectionName != null) return CollectionName;
-        if (PoiCollectionNames != null && PoiCollectionNames.TryGetValue(poiId, out var name)) return name;
-        return null;
+        if (CollectionName != null) return [CollectionName];
+        if (PoiCollectionNames != null && PoiCollectionNames.TryGetValue(poiId, out var names)) return names;
+        return [];
     }
 
     private int GetCollectionId(int poiId)

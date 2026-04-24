@@ -21,6 +21,7 @@ namespace LucidCartographer.Services
         Task<Poi?> GetPoiAsync(int poiId, CancellationToken cancellationToken = default);
         Task<IReadOnlyList<Poi>> SearchAsync(string query, CancellationToken cancellationToken = default);
         Task<Dictionary<int, int>> GetPoiCollectionIdsAsync(IEnumerable<int> poiIds, CancellationToken cancellationToken = default);
+        Task<Dictionary<int, List<string>>> GetPoiCollectionNamesAsync(IEnumerable<int> poiIds, CancellationToken cancellationToken = default);
         /// <summary>
         /// Returns the number of POIs with enrichment failures pending manual reset.
         /// </summary>

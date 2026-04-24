@@ -293,6 +293,28 @@ namespace LucidCartographer.Services
             return items;
         }
 
+        public async Task<Dictionary<int, List<string>>> GetPoiCollectionNamesAsync(IEnumerable<int> poiIds, CancellationToken cancellationToken = default)
+        {
+            var ids = poiIds.ToList();
+            if (ids.Count == 0) return new();
+
+            await using var db = await _factory.CreateDbContextAsync(cancellationToken);
+            var items = await db.PoiCollectionItems
+                .AsNoTracking()
+                .Where(ci => ids.Contains(ci.PoiId))
+                .Select(ci => new { ci.PoiId, ci.PoiCollection.Name })
+                .ToListAsync(cancellationToken);
+
+            return items
+                .GroupBy(x => x.PoiId)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Select(x => x.Name)
+                        .Distinct(StringComparer.Ordinal)
+                        .OrderBy(name => name)
+                        .ToList());
+        }
+
         /// <summary>
         /// Counts POIs that failed enrichment and are awaiting manual reset.
         /// </summary>

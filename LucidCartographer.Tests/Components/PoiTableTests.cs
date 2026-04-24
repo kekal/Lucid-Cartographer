@@ -151,5 +151,22 @@ namespace LucidCartographer.Tests.Components
 
             cut.Markup.Should().Contain("3 items");
         }
+
+        [Fact]
+        public void Renders_AllCollectionBadges_ForPoi()
+        {
+            var pois = new List<Poi> { CreatePoi(1, "Multi-home POI") };
+            var collectionNames = new Dictionary<int, IReadOnlyList<string>>
+            {
+                [1] = new List<string> { "Favorites", "Visited" }
+            };
+
+            var cut = RenderComponent<PoiTable>(parameters => parameters
+                .Add(p => p.Pois, pois)
+                .Add(p => p.PoiCollectionNames, collectionNames));
+
+            cut.Markup.Should().Contain("Favorites");
+            cut.Markup.Should().Contain("Visited");
+        }
     }
 }
