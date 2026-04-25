@@ -22,16 +22,11 @@ public abstract class IntegrationTestBase : IAsyncLifetime
     private IServiceScope _scope = null!;
     private IPlaywright _playwright = null!;
     private IBrowser _browser = null!;
-    private IPage _rawPage = null!;
-    protected IPage Page => _rawPage;
-    protected string BaseUrl = null!;
-    private readonly string _dbPath;
-    private readonly Stopwatch _sw = new();
+    protected IPage Page { get; private set; } = null!;
 
-    protected IntegrationTestBase()
-    {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"cartographer_test_{Guid.NewGuid()}.db");
-    }
+    protected string BaseUrl = null!;
+    private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"cartographer_test_{Guid.NewGuid()}.db");
+    private readonly Stopwatch _sw = new();
 
     public async Task InitializeAsync()
     {
@@ -53,12 +48,12 @@ public abstract class IntegrationTestBase : IAsyncLifetime
         builder.Services.AddDbContextFactory<AppDbContext>(options =>
             options.UseSqlite($"Data Source={_dbPath}"));
 
-        builder.Services.AddScoped<LucidCartographer.Services.IPoiService, LucidCartographer.Services.PoiService>();
-        builder.Services.AddScoped<LucidCartographer.Services.Import.IFileImporter, LucidCartographer.Services.Import.GpxImporter>();
-        builder.Services.AddScoped<LucidCartographer.Services.Import.IFileImporter, LucidCartographer.Services.Import.KmlImporter>();
-        builder.Services.AddScoped<LucidCartographer.Services.Import.IFileImporter, LucidCartographer.Services.Import.GeoJsonImporter>();
-        builder.Services.AddScoped<LucidCartographer.Services.Import.IFileImporter, LucidCartographer.Services.Import.CsvImporter>();
-        builder.Services.AddScoped<LucidCartographer.Services.Import.IImportOrchestrator, LucidCartographer.Services.Import.ImportOrchestrator>();
+        builder.Services.AddScoped<Services.IPoiService, Services.PoiService>();
+        builder.Services.AddScoped<IFileImporter, GpxImporter>();
+        builder.Services.AddScoped<IFileImporter, KmlImporter>();
+        builder.Services.AddScoped<IFileImporter, GeoJsonImporter>();
+        builder.Services.AddScoped<IFileImporter, CsvImporter>();
+        builder.Services.AddScoped<IImportOrchestrator, ImportOrchestrator>();
 
         // Background-import pipeline (mirrors Program.cs). Registered so
         // ImportOrchestrator can resolve its EnrichmentTrigger dependency
@@ -108,11 +103,11 @@ public abstract class IntegrationTestBase : IAsyncLifetime
                 .AddTimeout(TimeSpan.FromMinutes(2));
         });
 
-        builder.Services.AddSingleton<LucidCartographer.Services.Export.KmlExporter>();
-        builder.Services.AddSingleton<LucidCartographer.Services.Export.GpxExporter>();
-        builder.Services.AddScoped<LucidCartographer.Services.Operations.IPoiMatcher, LucidCartographer.Services.Operations.PoiMatcher>();
-        builder.Services.AddScoped<LucidCartographer.Services.Operations.ISetOperationService, LucidCartographer.Services.Operations.SetOperationService>();
-        builder.Services.AddScoped<LucidCartographer.Services.IMapService, StubMapService>();
+        builder.Services.AddSingleton<Services.Export.KmlExporter>();
+        builder.Services.AddSingleton<Services.Export.GpxExporter>();
+        builder.Services.AddScoped<Services.Operations.IPoiMatcher, Services.Operations.PoiMatcher>();
+        builder.Services.AddScoped<Services.Operations.ISetOperationService, Services.Operations.SetOperationService>();
+        builder.Services.AddScoped<Services.IMapService, StubMapService>();
 
         RegisterAdditionalServices(builder.Services);
         Log("INIT: services registered");
@@ -125,7 +120,7 @@ public abstract class IntegrationTestBase : IAsyncLifetime
 
         _scope = _app.Services.CreateScope();
         var dbFactory = _scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
-        using var db = await dbFactory.CreateDbContextAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
         await db.Database.EnsureCreatedAsync();
         Log("INIT: DB created");
 
@@ -138,17 +133,17 @@ public abstract class IntegrationTestBase : IAsyncLifetime
         // tests don't fail with "Please run `playwright install`". The helper
         // is idempotent and fast when browsers are already present, and the
         // same call path is used by the runtime scraper — one source of truth.
-        await Services.Import.PlaywrightBootstrap.EnsureBrowsersInstalledAsync();
+        await PlaywrightBootstrap.EnsureBrowsersInstalledAsync();
         _playwright = await Playwright.CreateAsync();
         _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
         {
             Headless = true
         });
-        _rawPage = await _browser.NewPageAsync();
+        Page = await _browser.NewPageAsync();
 
         // Inject browser-side DOM listeners that log every user interaction.
         // These fire on real DOM events so ALL test actions are captured automatically.
-        await _rawPage.AddInitScriptAsync(@"
+        await Page.AddInitScriptAsync(@"
             document.addEventListener('click', e => {
                 const t = e.target;
                 const tag = t.tagName.toLowerCase();
@@ -174,27 +169,31 @@ public abstract class IntegrationTestBase : IAsyncLifetime
         ");
 
         // Pipe browser console [UI] messages to test log
-        _rawPage.Console += (_, msg) =>
+        Page.Console += (_, msg) =>
         {
             var text = msg.Text;
             if (text.StartsWith("[UI]"))
+            {
                 Log($"  {text}");
+            }
         };
 
         // Log navigation events
-        _rawPage.FrameNavigated += (_, frame) =>
+        Page.FrameNavigated += (_, frame) =>
         {
-            if (frame == _rawPage.MainFrame)
+            if (frame == Page.MainFrame)
+            {
                 Log($"  NAV: {frame.Url}");
+            }
         };
-        _rawPage.Download += (_, dl) => Log($"  DOWNLOAD: {dl.SuggestedFilename}");
+        Page.Download += (_, dl) => Log($"  DOWNLOAD: {dl.SuggestedFilename}");
 
         Log("INIT: browser ready");
     }
 
     protected virtual void RegisterAdditionalServices(IServiceCollection services)
     {
-        services.AddScoped<LucidCartographer.Services.Import.IGoogleMapsListScraper, LucidCartographer.Services.Import.GoogleMapsListScraper>();
+        services.AddScoped<IGoogleMapsListScraper, GoogleMapsListScraper>();
     }
 
     // === Navigation helpers with logging ===
@@ -308,7 +307,7 @@ public abstract class IntegrationTestBase : IAsyncLifetime
     {
         Log("SEED: start");
         var dbFactory = _scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
-        using var db = await dbFactory.CreateDbContextAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
         await seedAction(db);
         Log("SEED: done");
     }
@@ -316,9 +315,9 @@ public abstract class IntegrationTestBase : IAsyncLifetime
     protected async Task ImportTestFileAsync(string testDataFile, string collectionName, string color = "#005bbf")
     {
         Log($"IMPORT: {testDataFile} → \"{collectionName}\"");
-        var orchestrator = _scope.ServiceProvider.GetRequiredService<LucidCartographer.Services.Import.IImportOrchestrator>();
+        var orchestrator = _scope.ServiceProvider.GetRequiredService<IImportOrchestrator>();
         var filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestData", testDataFile);
-        using var stream = File.OpenRead(filePath);
+        await using var stream = File.OpenRead(filePath);
         await orchestrator.ImportAsync(stream, testDataFile, collectionName, color);
         Log("IMPORT: done");
     }
@@ -331,12 +330,28 @@ public abstract class IntegrationTestBase : IAsyncLifetime
     public async Task DisposeAsync()
     {
         Log("DISPOSE: start");
-        try { if (_rawPage != null) await _rawPage.CloseAsync(); } catch { }
-        try { if (_browser != null) await _browser.DisposeAsync(); } catch { }
+        try { if (Page != null)
+            {
+                await Page.CloseAsync();
+            }
+        } catch { }
+        try { if (_browser != null)
+            {
+                await _browser.DisposeAsync();
+            }
+        } catch { }
         try { _playwright?.Dispose(); } catch { }
         try { _scope?.Dispose(); } catch { }
-        try { if (_app != null) await _app.StopAsync(); } catch { }
-        try { if (_app != null) await _app.DisposeAsync(); } catch { }
+        try { if (_app != null)
+            {
+                await _app.StopAsync();
+            }
+        } catch { }
+        try { if (_app != null)
+            {
+                await _app.DisposeAsync();
+            }
+        } catch { }
         try { File.Delete(_dbPath); } catch { }
         try { File.Delete(_dbPath + "-shm"); } catch { }
         try { File.Delete(_dbPath + "-wal"); } catch { }

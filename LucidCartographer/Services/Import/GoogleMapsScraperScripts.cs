@@ -1,25 +1,25 @@
-namespace LucidCartographer.Services.Import
+namespace LucidCartographer.Services.Import;
+
+/// <summary>
+/// Browser-side scripts used by <see cref="GoogleMapsListScraper"/>. Extracted
+/// into a standalone class so unit tests can execute the same JS against
+/// fixture HTML without spinning up the full scraper pipeline.
+/// </summary>
+public static class GoogleMapsScraperScripts
 {
     /// <summary>
-    /// Browser-side scripts used by <see cref="GoogleMapsListScraper"/>. Extracted
-    /// into a standalone class so unit tests can execute the same JS against
-    /// fixture HTML without spinning up the full scraper pipeline.
+    /// Discovery pass: finds the list panel by DOM topology (the div with the
+    /// most card-like repeating children), tags it with <c>data-scraper-scroll</c>
+    /// and each card with <c>data-scraper-idx</c>. Idempotent — re-running only
+    /// assigns indices to untagged cards, so existing handles stay valid across
+    /// scroll passes and navigations.
+    ///
+    /// Returns a JSON object:
+    ///   <c>{ count, total, scrollFound, divsExamined, diag? }</c>
+    /// where <c>count</c> is newly tagged, <c>total</c> is all tags, and
+    /// <c>diag</c> (failure only) is the top-5 content-heavy divs.
     /// </summary>
-    public static class GoogleMapsScraperScripts
-    {
-        /// <summary>
-        /// Discovery pass: finds the list panel by DOM topology (the div with the
-        /// most card-like repeating children), tags it with <c>data-scraper-scroll</c>
-        /// and each card with <c>data-scraper-idx</c>. Idempotent — re-running only
-        /// assigns indices to untagged cards, so existing handles stay valid across
-        /// scroll passes and navigations.
-        ///
-        /// Returns a JSON object:
-        ///   <c>{ count, total, scrollFound, divsExamined, diag? }</c>
-        /// where <c>count</c> is newly tagged, <c>total</c> is all tags, and
-        /// <c>diag</c> (failure only) is the top-5 content-heavy divs.
-        /// </summary>
-        public const string Discover = @"
+    public const string Discover = @"
             (() => {
                 const MIN_CHILD_HEIGHT = 30;
                 const MIN_CHILD_TEXT = 5;
@@ -140,28 +140,28 @@ namespace LucidCartographer.Services.Import
                 };
             })()";
 
-        /// <summary>
-        /// Harvest pass: reads every card tagged by Discover and returns their
-        /// visible data as an array. Replaces the old click-through strategy —
-        /// instead of paying a full detail-page navigation per item just to get
-        /// lat/lon from the URL bar, we read the place anchor's href (which
-        /// already embeds `@lat,lon,zoom,…`) and let the C# side parse it.
-        ///
-        /// Fields returned per card:
-        ///   idx           data-scraper-idx (int)
-        ///   name          aria-label on the place anchor, or fallback
-        ///   href          place anchor href (abs URL, contains coords)
-        ///   rating        Google rating from span.MW4etd (as text), or null
-        ///   reviewCount   raw text from span.UY7F9, or null (digits parsed in C#)
-        ///   category      first non-trivial line from .W4Efsd, or null
-        ///   description   second non-trivial line from .W4Efsd, or null
-        ///   imageSrc      first img[src] on the card, or null
-        ///
-        /// Anything missing (address / website / phone) is deliberately left
-        /// out — the background enrichment service fills those by opening the
-        /// place URL in its own headless tab.
-        /// </summary>
-        public const string HarvestAll = @"
+    /// <summary>
+    /// Harvest pass: reads every card tagged by Discover and returns their
+    /// visible data as an array. Replaces the old click-through strategy —
+    /// instead of paying a full detail-page navigation per item just to get
+    /// lat/lon from the URL bar, we read the place anchor's href (which
+    /// already embeds `@lat,lon,zoom,…`) and let the C# side parse it.
+    ///
+    /// Fields returned per card:
+    ///   idx           data-scraper-idx (int)
+    ///   name          aria-label on the place anchor, or fallback
+    ///   href          place anchor href (abs URL, contains coords)
+    ///   rating        Google rating from span.MW4etd (as text), or null
+    ///   reviewCount   raw text from span.UY7F9, or null (digits parsed in C#)
+    ///   category      first non-trivial line from .W4Efsd, or null
+    ///   description   second non-trivial line from .W4Efsd, or null
+    ///   imageSrc      first img[src] on the card, or null
+    ///
+    /// Anything missing (address / website / phone) is deliberately left
+    /// out — the background enrichment service fills those by opening the
+    /// place URL in its own headless tab.
+    /// </summary>
+    public const string HarvestAll = @"
             (() => {
                 const cards = Array.from(document.querySelectorAll('[data-scraper-idx]'));
                 return cards.map(card => {
@@ -227,15 +227,15 @@ namespace LucidCartographer.Services.Import
                 });
             })()";
 
-        /// <summary>
-        /// Extracts saved list cards from the Google Maps "Saved → Lists" panel.
-        /// Uses stable DOM structure: each list card is a <c>button</c> whose
-        /// inner <c>div > div:nth-child(2) > div:first-child</c> holds the name
-        /// and <c>div > div:nth-child(2) > div:nth-child(3)</c> holds the count text.
-        /// Tags each card with <c>data-savedlist-idx</c> for click-through.
-        /// Returns a JSON array of { idx, name, count }.
-        /// </summary>
-        public const string DiscoverSavedLists = @"
+    /// <summary>
+    /// Extracts saved list cards from the Google Maps "Saved → Lists" panel.
+    /// Uses stable DOM structure: each list card is a <c>button</c> whose
+    /// inner <c>div > div:nth-child(2) > div:first-child</c> holds the name
+    /// and <c>div > div:nth-child(2) > div:nth-child(3)</c> holds the count text.
+    /// Tags each card with <c>data-savedlist-idx</c> for click-through.
+    /// Returns a JSON array of { idx, name, count }.
+    /// </summary>
+    public const string DiscoverSavedLists = @"
             (() => {
                 const results = [];
                 const placeRx = /(\d+)/;
@@ -266,5 +266,4 @@ namespace LucidCartographer.Services.Import
 
                 return results;
             })()";
-    }
 }

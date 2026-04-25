@@ -1,79 +1,71 @@
 using System.Xml.Linq;
 
-namespace LucidCartographer.Services.Import
+namespace LucidCartographer.Services.Import;
+
+public class GpxImporter(ILogger<GpxImporter> logger) : IFileImporter
 {
-    public class GpxImporter : IFileImporter
+    public string FormatName => "GPX";
+
+    private static readonly string[] Extensions = [".gpx"];
+    public IReadOnlyList<string> SupportedExtensions => Extensions;
+
+    public async Task<List<ImportedPoi>> ParseAsync(Stream fileStream, string fileName, CancellationToken cancellationToken = default)
     {
-        private readonly ILogger<GpxImporter> _logger;
+        logger.LogInformation("Parsing GPX file: {FileName}", fileName);
 
-        public GpxImporter(ILogger<GpxImporter> logger)
+        var doc = await XDocument.LoadAsync(fileStream, LoadOptions.None, cancellationToken);
+        var root = doc.Root!;
+
+        var ns = root.GetDefaultNamespace();
+
+        var waypoints = root.Descendants(ns + "wpt").ToList();
+        if (!waypoints.Any())
         {
-            _logger = logger;
+            waypoints = root.Descendants("wpt").ToList();
         }
 
-        public string FormatName => "GPX";
-
-        private static readonly string[] _extensions = [".gpx"];
-        public IReadOnlyList<string> SupportedExtensions => _extensions;
-
-        public async Task<List<ImportedPoi>> ParseAsync(Stream fileStream, string fileName, CancellationToken cancellationToken = default)
+        var skipped = 0;
+        var results = new List<ImportedPoi>();
+        foreach (var wpt in waypoints)
         {
-            _logger.LogInformation("Parsing GPX file: {FileName}", fileName);
+            cancellationToken.ThrowIfCancellationRequested();
 
-            var doc = await XDocument.LoadAsync(fileStream, LoadOptions.None, cancellationToken);
-            var root = doc.Root!;
+            var latStr = wpt.Attribute("lat")?.Value;
+            var lonStr = wpt.Attribute("lon")?.Value;
+            if (latStr == null || lonStr == null) { skipped++; continue; }
 
-            var ns = root.GetDefaultNamespace();
+            if (!double.TryParse(latStr, System.Globalization.CultureInfo.InvariantCulture, out var lat)) { skipped++; continue; }
+            if (!double.TryParse(lonStr, System.Globalization.CultureInfo.InvariantCulture, out var lon)) { skipped++; continue; }
 
-            var waypoints = root.Descendants(ns + "wpt").ToList();
-            if (!waypoints.Any())
+            // IE-24: Use coordinate-based fallback name (consistent with CsvImporter)
+            var name = XmlParsingHelpers.FindElement(wpt, ns, "name")?.Value ?? $"Point ({lat:F4}, {lon:F4})";
+            var desc = XmlParsingHelpers.FindElement(wpt, ns, "desc")?.Value;
+            var linkHref = XmlParsingHelpers.FindElement(wpt, ns, "link")?.Attribute("href")?.Value;
+
+            // IE-20: Only assign to GoogleMapsUrl if the link is actually a Google Maps URL.
+            // GPX <link> can point to any website; stuffing arbitrary URLs into GoogleMapsUrl
+            // pollutes dedup logic and misleads the user.
+            string? googleUrl = null;
+            if (linkHref != null && (linkHref.Contains("google.com/maps", StringComparison.OrdinalIgnoreCase)
+                                     || linkHref.Contains("maps.google.com", StringComparison.OrdinalIgnoreCase)
+                                     || linkHref.Contains("maps.app.goo.gl", StringComparison.OrdinalIgnoreCase)))
             {
-                waypoints = root.Descendants("wpt").ToList();
+                googleUrl = linkHref;
             }
 
-            var skipped = 0;
-            var results = new List<ImportedPoi>();
-            foreach (var wpt in waypoints)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                var latStr = wpt.Attribute("lat")?.Value;
-                var lonStr = wpt.Attribute("lon")?.Value;
-                if (latStr == null || lonStr == null) { skipped++; continue; }
-
-                if (!double.TryParse(latStr, System.Globalization.CultureInfo.InvariantCulture, out var lat)) { skipped++; continue; }
-                if (!double.TryParse(lonStr, System.Globalization.CultureInfo.InvariantCulture, out var lon)) { skipped++; continue; }
-
-                // IE-24: Use coordinate-based fallback name (consistent with CsvImporter)
-                var name = XmlParsingHelpers.FindElement(wpt, ns, "name")?.Value ?? $"Point ({lat:F4}, {lon:F4})";
-                var desc = XmlParsingHelpers.FindElement(wpt, ns, "desc")?.Value;
-                var linkHref = XmlParsingHelpers.FindElement(wpt, ns, "link")?.Attribute("href")?.Value;
-
-                // IE-20: Only assign to GoogleMapsUrl if the link is actually a Google Maps URL.
-                // GPX <link> can point to any website; stuffing arbitrary URLs into GoogleMapsUrl
-                // pollutes dedup logic and misleads the user.
-                string? googleUrl = null;
-                if (linkHref != null && (linkHref.Contains("google.com/maps", StringComparison.OrdinalIgnoreCase)
-                    || linkHref.Contains("maps.google.com", StringComparison.OrdinalIgnoreCase)
-                    || linkHref.Contains("maps.app.goo.gl", StringComparison.OrdinalIgnoreCase)))
-                {
-                    googleUrl = linkHref;
-                }
-
-                results.Add(new ImportedPoi(
-                    Name: name.Trim(),
-                    Latitude: lat,
-                    Longitude: lon,
-                    GoogleMapsUrl: googleUrl,
-                    Description: desc
-                ));
-            }
-
-            _logger.LogInformation("GPX parse complete: {FileName} — {Count} POIs parsed, {Skipped} skipped",
-                fileName, results.Count, skipped);
-            return results;
+            results.Add(new ImportedPoi(
+                Name: name.Trim(),
+                Latitude: lat,
+                Longitude: lon,
+                GoogleMapsUrl: googleUrl,
+                Description: desc
+            ));
         }
 
-        // IE-04: FindElement moved to XmlParsingHelpers
+        logger.LogInformation("GPX parse complete: {FileName} — {Count} POIs parsed, {Skipped} skipped",
+            fileName, results.Count, skipped);
+        return results;
     }
+
+    // IE-04: FindElement moved to XmlParsingHelpers
 }

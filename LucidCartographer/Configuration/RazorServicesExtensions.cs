@@ -13,7 +13,7 @@ public static class RazorServicesExtensions
         services.AddResponseCompression(opts =>
         {
             opts.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(
-                new[] { "application/octet-stream" }); // SignalR uses octet-stream
+                ["application/octet-stream"]); // SignalR uses octet-stream
         });
 
         return services;

@@ -12,27 +12,15 @@ namespace LucidCartographer.Components.Pages;
 /// dialog. Tolerance debouncing uses a System.Threading.Timer that re-fires
 /// the active operation 500ms after the last slider event.
 /// </summary>
-public sealed class OperationsPageViewModel : IAsyncDisposable
+public sealed class OperationsPageViewModel(
+    IPoiService poiService,
+    ISetOperationService setOperationService,
+    IEnumerable<IFileExporter> exporters,
+    IJSRuntime js)
+    : IAsyncDisposable
 {
-    private readonly IPoiService _poiService;
-    private readonly ISetOperationService _setOperationService;
-    private readonly IEnumerable<IFileExporter> _exporters;
-    private readonly IJSRuntime _js;
-
-    private CancellationTokenSource _cts = new();
-    private System.Threading.Timer? _toleranceDebounce;
-
-    public OperationsPageViewModel(
-        IPoiService poiService,
-        ISetOperationService setOperationService,
-        IEnumerable<IFileExporter> exporters,
-        IJSRuntime js)
-    {
-        _poiService = poiService;
-        _setOperationService = setOperationService;
-        _exporters = exporters;
-        _js = js;
-    }
+    private readonly CancellationTokenSource _cts = new();
+    private Timer? _toleranceDebounce;
 
     public event Action? StateChanged;
 
@@ -40,14 +28,14 @@ public sealed class OperationsPageViewModel : IAsyncDisposable
 
     // --- State ---
 
-    public IReadOnlyList<PoiCollection> Collections { get; private set; } = Array.Empty<PoiCollection>();
+    public IReadOnlyList<PoiCollection> Collections { get; private set; } = [];
     public int CollectionAId { get; set; }
     public int CollectionBId { get; set; }
     public double ToleranceMeters { get; set; } = 100;
     public SetOperation? ActiveOp { get; private set; }
     public OperationResult? Result { get; private set; }
-    public IReadOnlyList<Poi> ResultPois { get; private set; } = Array.Empty<Poi>();
-    public HashSet<int> DiscardedIds { get; } = new();
+    public IReadOnlyList<Poi> ResultPois { get; private set; } = [];
+    public HashSet<int> DiscardedIds { get; } = [];
     public bool IsProcessing { get; private set; }
     public bool IsLoading { get; private set; } = true;
 
@@ -61,7 +49,7 @@ public sealed class OperationsPageViewModel : IAsyncDisposable
 
     public async Task InitializeAsync()
     {
-        Collections = await _poiService.GetCollectionsAsync();
+        Collections = await poiService.GetCollectionsAsync();
         IsLoading = false;
     }
 
@@ -88,7 +76,7 @@ public sealed class OperationsPageViewModel : IAsyncDisposable
         ActiveOp = operation;
         IsProcessing = true;
         Result = null;
-        ResultPois = Array.Empty<Poi>();
+        ResultPois = [];
         DiscardedIds.Clear();
         ShowCommitDialog = false;
         CommitSuccess = null;
@@ -96,7 +84,7 @@ public sealed class OperationsPageViewModel : IAsyncDisposable
 
         try
         {
-            Result = await _setOperationService.ExecuteAsync(
+            Result = await setOperationService.ExecuteAsync(
                 operation,
                 CollectionAId,
                 operation == SetOperation.Dedup ? null : CollectionBId,
@@ -117,12 +105,15 @@ public sealed class OperationsPageViewModel : IAsyncDisposable
     // LOW-09: When tolerance changes and an operation was already run, re-run it with debounce
     public void OnToleranceChanged()
     {
-        if (ActiveOp == null || Result == null) return;
+        if (ActiveOp == null || Result == null)
+        {
+            return;
+        }
 
         _toleranceDebounce?.Dispose();
         // TimerCallback is void-returning; use Task.Run + try/catch so an
         // unhandled async exception cannot crash the process.
-        _toleranceDebounce = new System.Threading.Timer(_ =>
+        _toleranceDebounce = new Timer(o =>
         {
             _ = Task.Run(async () =>
             {
@@ -139,8 +130,8 @@ public sealed class OperationsPageViewModel : IAsyncDisposable
                     // Debounce-driven re-runs swallow exceptions; next UI-driven
                     // run will surface a failure if it persists.
                 }
-            });
-        }, null, 500, Timeout.Infinite);
+            }, _cts.Token);
+        }, state: null, 500, Timeout.Infinite);
     }
 
     public void DiscardPoi(int poiId) => DiscardedIds.Add(poiId);
@@ -159,22 +150,25 @@ public sealed class OperationsPageViewModel : IAsyncDisposable
     public async Task DoCommitAsync()
     {
         var poisToSave = ResultPois.Where(p => !DiscardedIds.Contains(p.Id)).ToList();
-        var saved = await _setOperationService.CommitResultAsync(poisToSave, CommitName);
+        var saved = await setOperationService.CommitResultAsync(poisToSave, CommitName);
         CommitSuccess = $"Saved \"{saved.Name}\" with {saved.PoiCount} POIs";
-        Collections = await _poiService.GetCollectionsAsync();
+        Collections = await poiService.GetCollectionsAsync();
     }
 
     public async Task ExportResultAsync()
     {
         var poisToExport = ResultPois.Where(p => !DiscardedIds.Contains(p.Id)).ToList();
-        if (!poisToExport.Any()) return;
+        if (!poisToExport.Any())
+        {
+            return;
+        }
 
-        var kmlExporter = _exporters.First(e => e.FormatName == "KML");
+        var kmlExporter = exporters.First(e => e.FormatName == "KML");
         var exportTitle = string.IsNullOrEmpty(CommitName) ? GetOperationLabel() : CommitName;
         var bytes = kmlExporter.Export(poisToExport, exportTitle);
         var fileName = $"export_{DateTime.Now:yyyyMMdd_HHmmss}.kml";
 
-        await _js.InvokeVoidAsync("LucidCartographer.downloadFile",
+        await js.InvokeVoidAsync("LucidCartographer.downloadFile",
             fileName, "application/vnd.google-earth.kml+xml", Convert.ToBase64String(bytes));
     }
 

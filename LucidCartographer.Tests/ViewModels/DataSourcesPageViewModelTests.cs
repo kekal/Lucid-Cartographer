@@ -33,7 +33,7 @@ public class DataSourcesPageViewModelTests
         _exporter.SetupGet(e => e.FormatName).Returns("KML");
         return new DataSourcesPageViewModel(
             _queue.Object, _status, _poi.Object, _scraper.Object,
-            new[] { _exporter.Object }, _js.Object, _trigger);
+            [_exporter.Object], _js.Object, _trigger);
     }
 
     private static PoiCollection MakeCollection(int id, string name, string color = "#005bbf")
@@ -43,7 +43,7 @@ public class DataSourcesPageViewModelTests
     public async Task Initialize_LoadsCollections_AndSetsBaselineState()
     {
         _poi.Setup(p => p.GetCollectionsAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<PoiCollection> { MakeCollection(1, "A") });
+            .ReturnsAsync((List<PoiCollection>)[MakeCollection(1, "A")]);
         _poi.Setup(p => p.GetFailedEnrichmentCountAsync(It.IsAny<CancellationToken>())).ReturnsAsync(3);
 
         var vm = CreateVm();
@@ -172,7 +172,7 @@ public class DataSourcesPageViewModelTests
     public async Task ConfirmDelete_DispatchesToService_AndReloads()
     {
         _poi.Setup(p => p.GetCollectionsAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<PoiCollection>());
+            .ReturnsAsync([]);
         _poi.Setup(p => p.GetFailedEnrichmentCountAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
 
         var vm = CreateVm();

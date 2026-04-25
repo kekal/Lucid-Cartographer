@@ -11,7 +11,7 @@ public static class AuthEndpoints
     public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder endpoints)
     {
         // Login endpoint with rate limiting + CSRF validation.
-        endpoints.MapPost("/login", async (HttpContext context) =>
+        endpoints.MapPost("/login", async context =>
         {
             // ARCH-CRIT-03: Validate antiforgery token on login POST
             var antiforgery = context.RequestServices.GetRequiredService<IAntiforgery>();
@@ -37,11 +37,11 @@ public static class AuthEndpoints
                 var store = context.RequestServices.GetRequiredService<SessionStore>();
                 var sessionToken = await store.CreateAsync(context.RequestAborted);
 
-                var claims = new List<Claim>
-                {
+                List<Claim> claims =
+                [
                     new(ClaimTypes.Name, "lucid-user"),
                     new("session_token", sessionToken)
-                };
+                ];
                 var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
                 var principal = new ClaimsPrincipal(identity);
 
@@ -62,7 +62,7 @@ public static class AuthEndpoints
         }).RequireRateLimiting("login");
 
         // Logout endpoint
-        endpoints.MapGet("/logout", async (HttpContext context) =>
+        endpoints.MapGet("/logout", async context =>
         {
             var sessionToken = context.User.FindFirstValue("session_token");
             if (!string.IsNullOrWhiteSpace(sessionToken))

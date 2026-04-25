@@ -71,7 +71,7 @@ app.MapPoiImageEndpoints();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
-app.Run();
+await app.RunAsync();
 
 // Make Program accessible for WebApplicationFactory in integration tests
-public partial class Program { }
+public partial class Program;

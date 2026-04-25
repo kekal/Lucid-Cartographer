@@ -2,212 +2,378 @@ using Microsoft.Playwright;
 using Polly;
 using Polly.Registry;
 
-namespace LucidCartographer.Services.Import
+namespace LucidCartographer.Services.Import;
+
+public class GoogleMapsListScraper(
+    ILogger<GoogleMapsListScraper> logger,
+    ResiliencePipelineProvider<string> pipelineProvider)
+    : IGoogleMapsListScraper
 {
-    public class GoogleMapsListScraper : IGoogleMapsListScraper
+    private const string DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+    private static readonly string BrowserProfilePath =
+        Path.Combine(AppContext.BaseDirectory, "data", "chrome-profile");
+
+    // Separate semaphore for the interactive FetchSavedListsAsync flow —
+    // this must NOT go through the "scraper" Polly pipeline which has a
+    // 10-min timeout and concurrency=1 meant for headless scrapes.
+    private readonly SemaphoreSlim _fetchListsSemaphore = new(1, 1);
+
+    // HIGH-07: Concurrency, retry, and timeout are now enforced by the
+    // "scraper" Polly resilience pipeline registered in Program.cs
+    // (ConcurrencyLimiter(permits=1) + Retry + Timeout). This replaces
+    // the previous static SemaphoreSlim + manual timeout plumbing.
+    private readonly ResiliencePipeline _pipeline = pipelineProvider.GetPipeline("scraper");
+
+    private static readonly string[] AllowedUrlPrefixes =
+    [
+        "https://www.google.com/maps/",
+        "https://maps.google.com/",
+        "https://maps.app.goo.gl/",
+        "https://goo.gl/maps/",
+        "http://www.google.com/maps/",
+        "http://maps.google.com/",
+        "http://maps.app.goo.gl/",
+        "http://goo.gl/maps/"
+    ];
+
+    public async Task<ScrapeResult> ScrapeAsync(string listUrl, Action<int>? onProgress = null, CancellationToken cancellationToken = default)
     {
-        private const string DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-
-        private static readonly string BrowserProfilePath =
-            Path.Combine(AppContext.BaseDirectory, "data", "chrome-profile");
-
-        // Separate semaphore for the interactive FetchSavedListsAsync flow —
-        // this must NOT go through the "scraper" Polly pipeline which has a
-        // 10-min timeout and concurrency=1 meant for headless scrapes.
-        private readonly SemaphoreSlim _fetchListsSemaphore = new(1, 1);
-
-        // HIGH-07: Concurrency, retry, and timeout are now enforced by the
-        // "scraper" Polly resilience pipeline registered in Program.cs
-        // (ConcurrencyLimiter(permits=1) + Retry + Timeout). This replaces
-        // the previous static SemaphoreSlim + manual timeout plumbing.
-        private readonly ResiliencePipeline _pipeline;
-
-        private static readonly string[] AllowedUrlPrefixes =
-        [
-            "https://www.google.com/maps/",
-            "https://maps.google.com/",
-            "https://maps.app.goo.gl/",
-            "https://goo.gl/maps/",
-            "http://www.google.com/maps/",
-            "http://maps.google.com/",
-            "http://maps.app.goo.gl/",
-            "http://goo.gl/maps/"
-        ];
-
-        private readonly ILogger<GoogleMapsListScraper> _logger;
-
-        public GoogleMapsListScraper(
-            ILogger<GoogleMapsListScraper> logger,
-            ResiliencePipelineProvider<string> pipelineProvider)
+        // URL validation: prevent SSRF
+        if (string.IsNullOrWhiteSpace(listUrl))
         {
-            _logger = logger;
-            _pipeline = pipelineProvider.GetPipeline("scraper");
+            throw new ArgumentException("List URL must not be empty.", nameof(listUrl));
         }
 
-        public async Task<ScrapeResult> ScrapeAsync(string listUrl, Action<int>? onProgress = null, CancellationToken cancellationToken = default)
+        var trimmedUrl = listUrl.Trim();
+        if (!AllowedUrlPrefixes.Any(prefix => trimmedUrl.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
         {
-            // URL validation: prevent SSRF
-            if (string.IsNullOrWhiteSpace(listUrl))
-                throw new ArgumentException("List URL must not be empty.", nameof(listUrl));
-
-            var trimmedUrl = listUrl.Trim();
-            if (!AllowedUrlPrefixes.Any(prefix => trimmedUrl.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
-                throw new ArgumentException("URL must be a Google Maps URL (https://www.google.com/maps/... or https://maps.app.goo.gl/...).", nameof(listUrl));
-
-            // Polly "scraper" pipeline enforces: single-flight (permit=1),
-            // retry (2 attempts with jittered backoff), and a 10-minute
-            // per-attempt timeout. Upstream callers should catch
-            // Polly.RateLimiting.RateLimiterRejectedException if they want
-            // to surface a "scraper busy" message; previously this was
-            // TimeoutException("Timed out waiting for scraper availability…").
-            try
-            {
-                return await _pipeline.ExecuteAsync(
-                    async ct => await ScrapeInternalAsync(trimmedUrl, onProgress, ct),
-                    cancellationToken);
-            }
-            catch (Polly.RateLimiting.RateLimiterRejectedException ex)
-            {
-                _logger.LogWarning(ex, "Scraper rate limiter rejected the request — another scrape is already running");
-                throw;
-            }
+            throw new ArgumentException("URL must be a Google Maps URL (https://www.google.com/maps/... or https://maps.app.goo.gl/...).", nameof(listUrl));
         }
 
-        public bool HasBrowserProfile
+        // Polly "scraper" pipeline enforces: single-flight (permit=1),
+        // retry (2 attempts with jittered backoff), and a 10-minute
+        // per-attempt timeout. Upstream callers should catch
+        // Polly.RateLimiting.RateLimiterRejectedException if they want
+        // to surface a "scraper busy" message; previously this was
+        // TimeoutException("Timed out waiting for scraper availability…").
+        try
         {
-            get
-            {
-                try
-                {
-                    return Directory.Exists(BrowserProfilePath) &&
-                           Directory.EnumerateFileSystemEntries(BrowserProfilePath).Any();
-                }
-                catch
-                {
-                    return false;
-                }
-            }
+            return await _pipeline.ExecuteAsync(
+                async ct => await ScrapeInternalAsync(trimmedUrl, onProgress, ct),
+                cancellationToken);
         }
+        catch (Polly.RateLimiting.RateLimiterRejectedException ex)
+        {
+            logger.LogWarning(ex, "Scraper rate limiter rejected the request — another scrape is already running");
+            throw;
+        }
+    }
 
-        public void ResetBrowserProfile()
+    public bool HasBrowserProfile
+    {
+        get
         {
             try
             {
-                if (Directory.Exists(BrowserProfilePath))
-                {
-                    Directory.Delete(BrowserProfilePath, recursive: true);
-                    _logger.LogInformation("Browser profile reset: {Path}", BrowserProfilePath);
-                }
+                return Directory.Exists(BrowserProfilePath) &&
+                       Directory.EnumerateFileSystemEntries(BrowserProfilePath).Any();
             }
-            catch (Exception ex)
+            catch
             {
-                _logger.LogWarning(ex, "Failed to delete browser profile at {Path}", BrowserProfilePath);
-                throw;
+                return false;
             }
         }
+    }
 
-        public async Task<IReadOnlyList<SavedListInfo>> FetchSavedListsAsync(CancellationToken cancellationToken = default)
+    public void ResetBrowserProfile()
+    {
+        try
         {
-            if (!await _fetchListsSemaphore.WaitAsync(0, cancellationToken))
-                throw new InvalidOperationException("Another Fetch My Lists operation is already running.");
-
-            try
+            if (Directory.Exists(BrowserProfilePath))
             {
-                return await FetchSavedListsInternalAsync(cancellationToken);
-            }
-            finally
-            {
-                _fetchListsSemaphore.Release();
+                Directory.Delete(BrowserProfilePath, recursive: true);
+                logger.LogInformation("Browser profile reset: {Path}", BrowserProfilePath);
             }
         }
-
-        private async Task<IReadOnlyList<SavedListInfo>> FetchSavedListsInternalAsync(CancellationToken cancellationToken)
+        catch (Exception ex)
         {
-            _logger.LogInformation("Fetching saved Google Maps lists (profile: {Path})", BrowserProfilePath);
+            logger.LogWarning(ex, "Failed to delete browser profile at {Path}", BrowserProfilePath);
+            throw;
+        }
+    }
 
-            await PlaywrightBootstrap.EnsureBrowsersInstalledAsync(_logger, cancellationToken);
+    public async Task<IReadOnlyList<SavedListInfo>> FetchSavedListsAsync(CancellationToken cancellationToken = default)
+    {
+        if (!await _fetchListsSemaphore.WaitAsync(0, cancellationToken))
+        {
+            throw new InvalidOperationException("Another Fetch My Lists operation is already running.");
+        }
 
-            Directory.CreateDirectory(BrowserProfilePath);
+        try
+        {
+            return await FetchSavedListsInternalAsync(cancellationToken);
+        }
+        finally
+        {
+            _fetchListsSemaphore.Release();
+        }
+    }
 
-            using var playwright = await Playwright.CreateAsync();
-            await using var context = await playwright.Chromium.LaunchPersistentContextAsync(
-                BrowserProfilePath,
-                new BrowserTypeLaunchPersistentContextOptions
-                {
-                    Headless = false,
-                    Locale = "en-US",
-                    UserAgent = DefaultUserAgent,
-                    Args = new[] { "--disable-blink-features=AutomationControlled" }
-                });
+    private async Task<IReadOnlyList<SavedListInfo>> FetchSavedListsInternalAsync(CancellationToken cancellationToken)
+    {
+        logger.LogInformation("Fetching saved Google Maps lists (profile: {Path})", BrowserProfilePath);
 
-            var page = context.Pages.Count > 0 ? context.Pages[0] : await context.NewPageAsync();
+        await PlaywrightBootstrap.EnsureBrowsersInstalledAsync(logger, cancellationToken);
 
-            // Navigate to Google Maps, then open the saved lists via the
-            // hamburger menu → "Your places" → "Lists" tab. There is no
-            // standalone /maps/lists URL; saved lists live inside the SPA.
-            await page.GotoAsync("https://www.google.com/maps",
-                new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30000 });
-            await page.WaitForTimeoutAsync(5000); // Let the SPA render
+        Directory.CreateDirectory(BrowserProfilePath);
 
-            _logger.LogInformation("Post-navigation URL: {Url}", page.Url);
-
-            // Handle consent dialog (same pattern as ScrapeInternalAsync)
-            try
+        using var playwright = await Playwright.CreateAsync();
+        await using var context = await playwright.Chromium.LaunchPersistentContextAsync(
+            BrowserProfilePath,
+            new BrowserTypeLaunchPersistentContextOptions
             {
-                var consentSelectors = new[]
+                Headless = false,
+                Locale = "en-US",
+                UserAgent = DefaultUserAgent,
+                Args = ["--disable-blink-features=AutomationControlled"]
+            });
+
+        var page = context.Pages.Count > 0 ? context.Pages[0] : await context.NewPageAsync();
+
+        // Navigate to Google Maps, then open the saved lists via the
+        // hamburger menu → "Your places" → "Lists" tab. There is no
+        // standalone /maps/lists URL; saved lists live inside the SPA.
+        await page.GotoAsync("https://www.google.com/maps",
+            new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30000 });
+        await page.WaitForTimeoutAsync(5000); // Let the SPA render
+
+        logger.LogInformation("Post-navigation URL: {Url}", page.Url);
+
+        // Handle consent dialog (same pattern as ScrapeInternalAsync)
+        try
+        {
+            var consentSelectors = new[]
+            {
+                "button[aria-label*='Accept']",
+                "button[aria-label*='accept']",
+                "button:has-text('Accept all')",
+                "button:has-text('Agree')",
+                "button:has-text('Принять')",
+                "form[action*='consent'] button"
+            };
+            foreach (var sel in consentSelectors)
+            {
+                var btn = page.Locator(sel).First;
+                if (await btn.IsVisibleAsync())
                 {
-                    "button[aria-label*='Accept']",
-                    "button[aria-label*='accept']",
-                    "button:has-text('Accept all')",
-                    "button:has-text('Agree')",
-                    "button:has-text('Принять')",
-                    "form[action*='consent'] button",
-                };
-                foreach (var sel in consentSelectors)
-                {
-                    var btn = page.Locator(sel).First;
-                    if (await btn.IsVisibleAsync())
+                    logger.LogInformation("Clicking consent button: {Selector}", sel);
+                    var clickTask = btn.ClickAsync();
+                    try
                     {
-                        _logger.LogInformation("Clicking consent button: {Selector}", sel);
-                        var clickTask = btn.ClickAsync();
-                        try
-                        {
-                            await page.WaitForURLAsync(
-                                u => !u.Contains("consent.google.com"),
-                                new() { Timeout = 15000 });
-                        }
-                        catch (TimeoutException) { }
-                        await clickTask;
-                        try
-                        {
-                            await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new() { Timeout = 15000 });
-                        }
-                        catch (TimeoutException) { }
-                        break;
+                        await page.WaitForURLAsync(
+                            u => !u.Contains("consent.google.com"),
+                            new() { Timeout = 15000 });
                     }
+                    catch (TimeoutException) { }
+                    await clickTask;
+                    try
+                    {
+                        await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new() { Timeout = 15000 });
+                    }
+                    catch (TimeoutException) { }
+                    break;
                 }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "No consent dialog found or failed to click");
+        }
+
+        var loginDeadline = DateTime.UtcNow.AddMinutes(5);
+        while (!await IsLoggedInAsync())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (DateTime.UtcNow > loginDeadline)
+            {
+                throw new TimeoutException("Sign-in was not completed within 5 minutes. Please sign in to Google in the browser window.");
+            }
+
+            logger.LogInformation("Waiting for user to sign in... (URL: {Url})", page.Url);
+
+            // If on the Maps page with a sign-in link, click it to redirect to login
+            try
+            {
+                var signInLink = page.Locator("a[href*='ServiceLogin']").First;
+                if (await signInLink.IsVisibleAsync())
+                {
+                    await signInLink.ClickAsync();
+                    logger.LogInformation("Clicked sign-in link to redirect to Google login");
+                    await page.WaitForTimeoutAsync(3000);
+                }
+            }
+            catch { /* best effort */ }
+
+            await page.WaitForTimeoutAsync(2000);
+        }
+
+        logger.LogInformation("User is logged in. Current URL: {Url}", page.Url);
+
+        // After login, ensure we're on Google Maps
+        if (!page.Url.Contains("/maps"))
+        {
+            await page.GotoAsync("https://www.google.com/maps",
+                new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 30000 });
+        }
+
+        await page.WaitForTimeoutAsync(2000);
+
+        // Click "Saved" button — it's the 2nd item in the sidebar ul
+        // XPath: /html/body/div[1]/div[2]/div[9]/div[8]/div/div/div/div[1]/ul/li[2]/button
+        try
+        {
+            var savedBtn = page.Locator("ul > li:nth-child(2) > button").First;
+            await savedBtn.ClickAsync(new LocatorClickOptions { Timeout = 5000 });
+            logger.LogInformation("Clicked 'Saved' button in sidebar");
+            await page.WaitForTimeoutAsync(3000);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to click 'Saved' button");
+        }
+
+        logger.LogInformation("After Saved click, URL: {Url}", page.Url);
+
+        // Clicking "Saved" may redirect to sign-in if session expired.
+        // If so, wait for the user to log in, then navigate back to Maps.
+        if (page.Url.Contains("accounts.google.com") || page.Url.Contains("signin"))
+        {
+            logger.LogInformation("Redirected to sign-in after clicking Saved — waiting for login...");
+            var loginDeadline2 = DateTime.UtcNow.AddMinutes(5);
+            while (page.Url.Contains("accounts.google.com") || page.Url.Contains("signin"))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (DateTime.UtcNow > loginDeadline2)
+                {
+                    throw new TimeoutException("Sign-in was not completed within 5 minutes.");
+                }
+
+                await page.WaitForTimeoutAsync(2000);
+            }
+            logger.LogInformation("Login completed, URL: {Url}", page.Url);
+
+            // After login we land back on Maps — re-click "Saved"
+            await page.WaitForTimeoutAsync(3000);
+            try
+            {
+                var savedBtn2 = page.Locator("ul > li:nth-child(2) > button").First;
+                await savedBtn2.ClickAsync(new LocatorClickOptions { Timeout = 5000 });
+                logger.LogInformation("Re-clicked 'Saved' button after login");
+                await page.WaitForTimeoutAsync(3000);
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "No consent dialog found or failed to click");
+                logger.LogWarning(ex, "Failed to re-click 'Saved' button after login");
             }
+        }
 
-            // Check if user is logged in. Two scenarios:
-            // 1. URL redirected to accounts.google.com (explicit login page)
-            // 2. On Maps page but not logged in (has a "Sign in" link)
-            // In both cases, the browser is visible — wait for user to log in.
-            async Task<bool> IsLoggedInAsync()
+        // Extract saved lists using JS (button.CsEnBe cards)
+        var listsJson = await page.EvaluateAsync<System.Text.Json.JsonElement>(
+            GoogleMapsScraperScripts.DiscoverSavedLists);
+
+        // Parse discovered cards (name + count, no URLs yet)
+        var discovered = new List<(int Idx, string Name, int? Count)>();
+        foreach (var item in listsJson.EnumerateArray())
+        {
+            var name = item.TryGetProperty("name", out var nEl) && nEl.ValueKind == System.Text.Json.JsonValueKind.String
+                ? nEl.GetString() : null;
+            var idx = item.TryGetProperty("idx", out var iEl) && iEl.ValueKind == System.Text.Json.JsonValueKind.Number
+                ? iEl.GetInt32() : -1;
+            int? count = item.TryGetProperty("count", out var cEl) && cEl.ValueKind == System.Text.Json.JsonValueKind.Number
+                ? cEl.GetInt32() : null;
+
+            if (!string.IsNullOrWhiteSpace(name) && idx >= 0)
             {
-                var url = page.Url;
-                if (url.Contains("accounts.google.com") || url.Contains("signin"))
+                discovered.Add((idx, name, count));
+            }
+        }
+
+        logger.LogInformation("Discovered {Count} saved list cards, clicking each to capture URLs", discovered.Count);
+
+        // Click-through: click each card, capture the navigated URL, go back
+        var results = new List<SavedListInfo>();
+        var savedPanelUrl = page.Url;
+
+        foreach (var (cardIdx, cardName, cardCount) in discovered)
+        {
+            try
+            {
+                // Use JS click to avoid pointer-interception issues
+                var clicked = await page.EvaluateAsync<bool>($@"
+                        (() => {{
+                            const el = document.querySelector('[data-savedlist-idx=""{cardIdx}""]');
+                            if (!el) return false;
+                            el.click();
+                            return true;
+                        }})()");
+
+                if (!clicked)
                 {
-                    _logger.LogInformation("IsLoggedIn: false (URL contains accounts/signin): {Url}", url);
-                    return false;
+                    logger.LogWarning("Card {Idx} '{Name}' not found in DOM, skipping", cardIdx, cardName);
+                    continue;
                 }
-                // Check if the page has a sign-in link (ServiceLogin).
-                // Important: do NOT match on generic 'accounts.google.com'
-                // because the sign-OUT link also uses that domain.
-                var signInHref = await page.EvaluateAsync<string>(@"
+
+                await page.WaitForTimeoutAsync(3000);
+
+                var listUrl = page.Url;
+                logger.LogInformation("Card '{Name}' → URL: {Url}", cardName, listUrl);
+
+                if (!string.IsNullOrEmpty(listUrl) && listUrl != savedPanelUrl)
+                {
+                    results.Add(new SavedListInfo(cardName, listUrl, cardCount));
+                }
+                else
+                {
+                    logger.LogWarning("Card '{Name}' click did not navigate, skipping", cardName);
+                }
+
+                // Go back to the saved lists panel
+                await page.GoBackAsync(new PageGoBackOptions { Timeout = 10000 });
+                await page.WaitForTimeoutAsync(2500);
+
+                // Re-tag cards (DOM may have been rebuilt after navigation)
+                await page.EvaluateAsync(GoogleMapsScraperScripts.DiscoverSavedLists);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to capture URL for card '{Name}'", cardName);
+            }
+        }
+
+        logger.LogInformation("Discovered {Count} saved lists with URLs", results.Count);
+
+        // Close the browser (profile persists on disk)
+        await context.CloseAsync();
+
+        return results;
+
+        // Check if user is logged in. Two scenarios:
+        // 1. URL redirected to accounts.google.com (explicit login page)
+        // 2. On Maps page but not logged in (has a "Sign in" link)
+        // In both cases, the browser is visible — wait for user to log in.
+        async Task<bool> IsLoggedInAsync()
+        {
+            var url = page.Url;
+            if (url.Contains("accounts.google.com") || url.Contains("signin"))
+            {
+                logger.LogInformation("IsLoggedIn: false (URL contains accounts/signin): {Url}", url);
+                return false;
+            }
+            // Check if the page has a sign-in link (ServiceLogin).
+            // Important: do NOT match on generic 'accounts.google.com'
+            // because the sign-OUT link also uses that domain.
+            var signInHref = await page.EvaluateAsync<string>(@"
                     (() => {
                         const links = document.querySelectorAll('a');
                         for (const el of links) {
@@ -217,212 +383,52 @@ namespace LucidCartographer.Services.Import
                         }
                         return '';
                     })()");
-                var isLoggedIn = string.IsNullOrEmpty(signInHref);
-                _logger.LogInformation("IsLoggedIn: {Result} (signInHref='{Href}')", isLoggedIn, signInHref.Length > 100 ? signInHref[..100] : signInHref);
-                return isLoggedIn;
-            }
+            var isLoggedIn = string.IsNullOrEmpty(signInHref);
+            logger.LogInformation("IsLoggedIn: {Result} (signInHref='{Href}')", isLoggedIn, signInHref.Length > 100 ? signInHref[..100] : signInHref);
+            return isLoggedIn;
+        }
+    }
 
-            var loginDeadline = DateTime.UtcNow.AddMinutes(5);
-            while (!await IsLoggedInAsync())
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (DateTime.UtcNow > loginDeadline)
-                    throw new TimeoutException("Sign-in was not completed within 5 minutes. Please sign in to Google in the browser window.");
+    private async Task<ScrapeResult> ScrapeInternalAsync(string trimmedUrl, Action<int>? onProgress, CancellationToken cancellationToken)
+    {
+        logger.LogInformation("Starting scrape of {Url}", trimmedUrl);
 
-                _logger.LogInformation("Waiting for user to sign in... (URL: {Url})", page.Url);
+        await PlaywrightBootstrap.EnsureBrowsersInstalledAsync(logger, cancellationToken);
 
-                // If on the Maps page with a sign-in link, click it to redirect to login
-                try
+        using var playwright = await Playwright.CreateAsync();
+
+        // Use the persistent profile if available (needed for private/saved lists).
+        // Otherwise fall back to an anonymous headless browser.
+        IBrowser? browser = null;
+        IBrowserContext context;
+        if (HasBrowserProfile)
+        {
+            logger.LogInformation("Using persistent browser profile for authenticated scrape");
+            context = await playwright.Chromium.LaunchPersistentContextAsync(
+                BrowserProfilePath,
+                new BrowserTypeLaunchPersistentContextOptions
                 {
-                    var signInLink = page.Locator("a[href*='ServiceLogin']").First;
-                    if (await signInLink.IsVisibleAsync())
-                    {
-                        await signInLink.ClickAsync();
-                        _logger.LogInformation("Clicked sign-in link to redirect to Google login");
-                        await page.WaitForTimeoutAsync(3000);
-                    }
-                }
-                catch { /* best effort */ }
-
-                await page.WaitForTimeoutAsync(2000);
-            }
-
-            _logger.LogInformation("User is logged in. Current URL: {Url}", page.Url);
-
-            // After login, ensure we're on Google Maps
-            if (!page.Url.Contains("/maps"))
+                    Headless = false,
+                    Locale = "en-US",
+                    UserAgent = DefaultUserAgent,
+                    Args = ["--disable-blink-features=AutomationControlled"]
+                });
+        }
+        else
+        {
+            browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
             {
-                await page.GotoAsync("https://www.google.com/maps",
-                    new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 30000 });
-            }
-
-            await page.WaitForTimeoutAsync(2000);
-
-            // Click "Saved" button — it's the 2nd item in the sidebar ul
-            // XPath: /html/body/div[1]/div[2]/div[9]/div[8]/div/div/div/div[1]/ul/li[2]/button
-            try
+                Headless = true
+            });
+            context = await browser.NewContextAsync(new BrowserNewContextOptions
             {
-                var savedBtn = page.Locator("ul > li:nth-child(2) > button").First;
-                await savedBtn.ClickAsync(new LocatorClickOptions { Timeout = 5000 });
-                _logger.LogInformation("Clicked 'Saved' button in sidebar");
-                await page.WaitForTimeoutAsync(3000);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to click 'Saved' button");
-            }
-
-            _logger.LogInformation("After Saved click, URL: {Url}", page.Url);
-
-            // Clicking "Saved" may redirect to sign-in if session expired.
-            // If so, wait for the user to log in, then navigate back to Maps.
-            if (page.Url.Contains("accounts.google.com") || page.Url.Contains("signin"))
-            {
-                _logger.LogInformation("Redirected to sign-in after clicking Saved — waiting for login...");
-                var loginDeadline2 = DateTime.UtcNow.AddMinutes(5);
-                while (page.Url.Contains("accounts.google.com") || page.Url.Contains("signin"))
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (DateTime.UtcNow > loginDeadline2)
-                        throw new TimeoutException("Sign-in was not completed within 5 minutes.");
-                    await page.WaitForTimeoutAsync(2000);
-                }
-                _logger.LogInformation("Login completed, URL: {Url}", page.Url);
-
-                // After login we land back on Maps — re-click "Saved"
-                await page.WaitForTimeoutAsync(3000);
-                try
-                {
-                    var savedBtn2 = page.Locator("ul > li:nth-child(2) > button").First;
-                    await savedBtn2.ClickAsync(new LocatorClickOptions { Timeout = 5000 });
-                    _logger.LogInformation("Re-clicked 'Saved' button after login");
-                    await page.WaitForTimeoutAsync(3000);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to re-click 'Saved' button after login");
-                }
-            }
-
-            // Extract saved lists using JS (button.CsEnBe cards)
-            var listsJson = await page.EvaluateAsync<System.Text.Json.JsonElement>(
-                GoogleMapsScraperScripts.DiscoverSavedLists);
-
-            // Parse discovered cards (name + count, no URLs yet)
-            var discovered = new List<(int Idx, string Name, int? Count)>();
-            foreach (var item in listsJson.EnumerateArray())
-            {
-                var name = item.TryGetProperty("name", out var nEl) && nEl.ValueKind == System.Text.Json.JsonValueKind.String
-                    ? nEl.GetString() : null;
-                var idx = item.TryGetProperty("idx", out var iEl) && iEl.ValueKind == System.Text.Json.JsonValueKind.Number
-                    ? iEl.GetInt32() : -1;
-                int? count = item.TryGetProperty("count", out var cEl) && cEl.ValueKind == System.Text.Json.JsonValueKind.Number
-                    ? cEl.GetInt32() : null;
-
-                if (!string.IsNullOrWhiteSpace(name) && idx >= 0)
-                    discovered.Add((idx, name!, count));
-            }
-
-            _logger.LogInformation("Discovered {Count} saved list cards, clicking each to capture URLs", discovered.Count);
-
-            // Click-through: click each card, capture the navigated URL, go back
-            var results = new List<SavedListInfo>();
-            var savedPanelUrl = page.Url;
-
-            foreach (var (cardIdx, cardName, cardCount) in discovered)
-            {
-                try
-                {
-                    // Use JS click to avoid pointer-interception issues
-                    var clicked = await page.EvaluateAsync<bool>($@"
-                        (() => {{
-                            const el = document.querySelector('[data-savedlist-idx=""{cardIdx}""]');
-                            if (!el) return false;
-                            el.click();
-                            return true;
-                        }})()");
-
-                    if (!clicked)
-                    {
-                        _logger.LogWarning("Card {Idx} '{Name}' not found in DOM, skipping", cardIdx, cardName);
-                        continue;
-                    }
-
-                    await page.WaitForTimeoutAsync(3000);
-
-                    var listUrl = page.Url;
-                    _logger.LogInformation("Card '{Name}' → URL: {Url}", cardName, listUrl);
-
-                    if (!string.IsNullOrEmpty(listUrl) && listUrl != savedPanelUrl)
-                    {
-                        results.Add(new SavedListInfo(cardName, listUrl, cardCount));
-                    }
-                    else
-                    {
-                        _logger.LogWarning("Card '{Name}' click did not navigate, skipping", cardName);
-                    }
-
-                    // Go back to the saved lists panel
-                    await page.GoBackAsync(new PageGoBackOptions { Timeout = 10000 });
-                    await page.WaitForTimeoutAsync(2500);
-
-                    // Re-tag cards (DOM may have been rebuilt after navigation)
-                    await page.EvaluateAsync(GoogleMapsScraperScripts.DiscoverSavedLists);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to capture URL for card '{Name}'", cardName);
-                }
-            }
-
-            _logger.LogInformation("Discovered {Count} saved lists with URLs", results.Count);
-
-            // Close the browser (profile persists on disk)
-            await context.CloseAsync();
-
-            return results;
+                Locale = "en-US",
+                UserAgent = DefaultUserAgent
+            });
         }
 
-        private async Task<ScrapeResult> ScrapeInternalAsync(string trimmedUrl, Action<int>? onProgress, CancellationToken cancellationToken)
+        try
         {
-            _logger.LogInformation("Starting scrape of {Url}", trimmedUrl);
-
-            await PlaywrightBootstrap.EnsureBrowsersInstalledAsync(_logger, cancellationToken);
-
-            using var playwright = await Playwright.CreateAsync();
-
-            // Use the persistent profile if available (needed for private/saved lists).
-            // Otherwise fall back to an anonymous headless browser.
-            IBrowser? browser = null;
-            IBrowserContext context;
-            if (HasBrowserProfile)
-            {
-                _logger.LogInformation("Using persistent browser profile for authenticated scrape");
-                context = await playwright.Chromium.LaunchPersistentContextAsync(
-                    BrowserProfilePath,
-                    new BrowserTypeLaunchPersistentContextOptions
-                    {
-                        Headless = false,
-                        Locale = "en-US",
-                        UserAgent = DefaultUserAgent,
-                        Args = new[] { "--disable-blink-features=AutomationControlled" }
-                    });
-            }
-            else
-            {
-                browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
-                {
-                    Headless = true
-                });
-                context = await browser.NewContextAsync(new BrowserNewContextOptions
-                {
-                    Locale = "en-US",
-                    UserAgent = DefaultUserAgent
-                });
-            }
-
-            try
-            {
             var page = context.Pages.Count > 0 ? context.Pages[0] : await context.NewPageAsync();
 
             // Navigate to the list URL
@@ -431,7 +437,7 @@ namespace LucidCartographer.Services.Import
             // Wait for list content to load
             await page.WaitForTimeoutAsync(5000);
 
-            _logger.LogInformation("Page URL after navigation: {Url}", page.Url);
+            logger.LogInformation("Page URL after navigation: {Url}", page.Url);
 
             // Accept cookies/consent if dialog appears
             try
@@ -443,14 +449,14 @@ namespace LucidCartographer.Services.Import
                     "button:has-text('Accept all')",
                     "button:has-text('Agree')",
                     "button:has-text('Принять')",
-                    "form[action*='consent'] button",
+                    "form[action*='consent'] button"
                 };
                 foreach (var sel in consentSelectors)
                 {
                     var btn = page.Locator(sel).First;
                     if (await btn.IsVisibleAsync())
                     {
-                        _logger.LogInformation("Clicking consent button: {Selector}", sel);
+                        logger.LogInformation("Clicking consent button: {Selector}", sel);
                         // The consent button redirects back to the real maps URL;
                         // WaitForNavigationAsync only works for real navigations, but
                         // consent.google.com does a real one, so wait for the URL to
@@ -464,7 +470,7 @@ namespace LucidCartographer.Services.Import
                         }
                         catch (TimeoutException)
                         {
-                            _logger.LogWarning("Consent redirect did not complete within 15s; continuing anyway");
+                            logger.LogWarning("Consent redirect did not complete within 15s; continuing anyway");
                         }
                         await clickTask;
                         // Then wait for the maps UI to finish laying out.
@@ -479,10 +485,10 @@ namespace LucidCartographer.Services.Import
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "No cookie consent dialog found or failed to click it");
+                logger.LogDebug(ex, "No cookie consent dialog found or failed to click it");
             }
 
-            _logger.LogInformation("Post-consent URL: {Url}", page.Url);
+            logger.LogInformation("Post-consent URL: {Url}", page.Url);
 
             // Extract list name from the page header
             string? listName = null;
@@ -497,7 +503,7 @@ namespace LucidCartographer.Services.Import
                         listName = (await titleEl.InnerTextAsync()).Trim();
                         if (!string.IsNullOrEmpty(listName) && listName.Length > 1)
                         {
-                            _logger.LogInformation("Extracted list name: {Name}", listName);
+                            logger.LogInformation("Extracted list name: {Name}", listName);
                             break;
                         }
                         listName = null;
@@ -506,7 +512,7 @@ namespace LucidCartographer.Services.Import
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to extract list name");
+                logger.LogWarning(ex, "Failed to extract list name");
             }
 
             // === Structure discovery =================================================
@@ -537,20 +543,6 @@ namespace LucidCartographer.Services.Import
             // JS source lives in GoogleMapsScraperScripts so it can be unit-tested
             // against fixture HTML independently of the full scraper pipeline.
 
-            async Task<(int total, bool scrollFound, int divsExamined, string? diag)> DiscoverAsync()
-            {
-                var result = await page.EvaluateAsync<System.Text.Json.JsonElement>(GoogleMapsScraperScripts.Discover);
-                var total = result.GetProperty("total").GetInt32();
-                var scrollFound = result.GetProperty("scrollFound").GetBoolean();
-                var divsExamined = result.TryGetProperty("divsExamined", out var d) ? d.GetInt32() : 0;
-                string? diag = null;
-                if (result.TryGetProperty("diag", out var diagEl))
-                {
-                    diag = diagEl.GetRawText();
-                }
-                return (total, scrollFound, divsExamined, diag);
-            }
-
             // Initial discovery — wait up to ~30s for the list panel to hydrate.
             // Consent redirect + lazy rendering can delay the list panel by
             // several seconds on a cold cache. If we still see nothing after
@@ -561,13 +553,17 @@ namespace LucidCartographer.Services.Import
             // jar and URL are already canonical by then.
             (int total, bool scrollFound, int divsExamined, string? diag) discovery = (0, false, 0, null);
             var reloadAttempted = false;
-            for (int attempt = 0; attempt < 30; attempt++)
+            for (var attempt = 0; attempt < 30; attempt++)
             {
                 discovery = await DiscoverAsync();
-                if (discovery.total > 0) break;
+                if (discovery.total > 0)
+                {
+                    break;
+                }
+
                 if (attempt == 10 && !reloadAttempted)
                 {
-                    _logger.LogInformation(
+                    logger.LogInformation(
                         "List panel still empty after 10s (examined {Divs} divs); reloading once",
                         discovery.divsExamined);
                     reloadAttempted = true;
@@ -586,7 +582,7 @@ namespace LucidCartographer.Services.Import
 
             if (discovery.total == 0)
             {
-                _logger.LogWarning(
+                logger.LogWarning(
                     "Could not locate list cards via DOM topology. " +
                     "Divs examined: {Divs}. Top containers by text length: {Diag}. " +
                     "Page may not be a list URL, or Google restructured the list panel.",
@@ -594,7 +590,7 @@ namespace LucidCartographer.Services.Import
             }
             else
             {
-                _logger.LogInformation(
+                logger.LogInformation(
                     "Discovered {Count} initial list items (examined {Divs} divs)",
                     discovery.total, discovery.divsExamined);
 
@@ -613,9 +609,9 @@ namespace LucidCartographer.Services.Import
                                 html: card.outerHTML.slice(0, 1500)
                             });
                         })()");
-                    _logger.LogInformation("DIAG first-card: {Dump}", dump);
+                    logger.LogInformation("DIAG first-card: {Dump}", dump);
                 }
-                catch (Exception ex) { _logger.LogWarning(ex, "DIAG dump failed"); }
+                catch (Exception ex) { logger.LogWarning(ex, "DIAG dump failed"); }
             }
 
             // Scroll loop — drives lazy-loaded cards into the DOM, re-tags each
@@ -626,7 +622,7 @@ namespace LucidCartographer.Services.Import
                 var previousCount = discovery.total;
                 var stableRounds = 0;
 
-                for (int i = 0; i < 100; i++)
+                for (var i = 0; i < 100; i++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
@@ -634,13 +630,16 @@ namespace LucidCartographer.Services.Import
                     await page.WaitForTimeoutAsync(1500);
 
                     var (currentCount, _, _, _) = await DiscoverAsync();
-                    _logger.LogInformation("Scroll {Round}: {Count} places tagged", i + 1, currentCount);
+                    logger.LogInformation("Scroll {Round}: {Count} places tagged", i + 1, currentCount);
                     onProgress?.Invoke(currentCount);
 
                     if (currentCount == previousCount)
                     {
                         stableRounds++;
-                        if (stableRounds >= 3) break;
+                        if (stableRounds >= 3)
+                        {
+                            break;
+                        }
                     }
                     else
                     {
@@ -667,25 +666,25 @@ namespace LucidCartographer.Services.Import
 
             if (totalItems == 0)
             {
-                _logger.LogWarning("Harvest returned zero cards — list panel may have been empty.");
+                logger.LogWarning("Harvest returned zero cards — list panel may have been empty.");
             }
             else
             {
-                _logger.LogInformation("Harvested metadata for {Count} list cards", totalItems);
+                logger.LogInformation("Harvested metadata for {Count} list cards", totalItems);
             }
 
-            for (int i = 0; i < cards.Count; i++)
+            for (var i = 0; i < cards.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var card = cards[i];
 
                 var idx = card.TryGetProperty("idx", out var idxEl) && idxEl.ValueKind == System.Text.Json.JsonValueKind.Number ? idxEl.GetInt32() : i;
-                string? name = card.TryGetProperty("name", out var nEl) && nEl.ValueKind == System.Text.Json.JsonValueKind.String ? nEl.GetString() : null;
-                string? href = card.TryGetProperty("href", out var hEl) && hEl.ValueKind == System.Text.Json.JsonValueKind.String ? hEl.GetString() : null;
+                var name = card.TryGetProperty("name", out var nEl) && nEl.ValueKind == System.Text.Json.JsonValueKind.String ? nEl.GetString() : null;
+                var href = card.TryGetProperty("href", out var hEl) && hEl.ValueKind == System.Text.Json.JsonValueKind.String ? hEl.GetString() : null;
 
                 if (string.IsNullOrWhiteSpace(name))
                 {
-                    _logger.LogWarning("[{Idx}/{Total}] Skipping card — missing name", i + 1, totalItems);
+                    logger.LogWarning("[{Idx}/{Total}] Skipping card — missing name", i + 1, totalItems);
                     continue;
                 }
 
@@ -703,7 +702,7 @@ namespace LucidCartographer.Services.Import
                 // then go back to the list.
                 if (coords == null)
                 {
-                    _logger.LogInformation("[{Idx}/{Total}] '{Name}' — no href, trying click-through", i + 1, totalItems, name);
+                    logger.LogInformation("[{Idx}/{Total}] '{Name}' — no href, trying click-through", i + 1, totalItems, name);
                     try
                     {
                         var cardSelector = $"[data-scraper-idx=\"{idx}\"]";
@@ -712,14 +711,14 @@ namespace LucidCartographer.Services.Import
                         {
                             await cardEl.ClickAsync();
                             // Wait for URL to transition to /maps/place/
-                            for (int w = 0; w < 40; w++)
+                            for (var w = 0; w < 40; w++)
                             {
                                 var u = page.Url;
                                 if (u.Contains("/maps/place/") && u.Contains("/@"))
                                 {
                                     href = u;
                                     coords = ExtractCoordinates(href);
-                                    _logger.LogInformation("[{Idx}/{Total}] '{Name}' — click-through resolved: {Url}", i + 1, totalItems, name, href);
+                                    logger.LogInformation("[{Idx}/{Total}] '{Name}' — click-through resolved: {Url}", i + 1, totalItems, name, href);
                                     break;
                                 }
                                 await page.WaitForTimeoutAsync(300);
@@ -732,13 +731,13 @@ namespace LucidCartographer.Services.Import
                     }
                     catch (Exception clickEx)
                     {
-                        _logger.LogWarning(clickEx, "[{Idx}/{Total}] '{Name}' — click-through failed, deferred to enrichment", i + 1, totalItems, name);
+                        logger.LogWarning(clickEx, "[{Idx}/{Total}] '{Name}' — click-through failed, deferred to enrichment", i + 1, totalItems, name);
                     }
                 }
 
                 if (coords == null && string.IsNullOrEmpty(href))
                 {
-                    _logger.LogInformation("[{Idx}/{Total}] '{Name}' — no coords after click-through, deferred to enrichment", i + 1, totalItems, name);
+                    logger.LogInformation("[{Idx}/{Total}] '{Name}' — no coords after click-through, deferred to enrichment", i + 1, totalItems, name);
                 }
 
                 // Rating (text → double)
@@ -746,7 +745,9 @@ namespace LucidCartographer.Services.Import
                 if (card.TryGetProperty("rating", out var rEl) && rEl.ValueKind == System.Text.Json.JsonValueKind.String)
                 {
                     if (double.TryParse(rEl.GetString()!.Replace(',', '.'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var r))
+                    {
                         rating = r;
+                    }
                 }
 
                 // Review count (raw text → digits → int)
@@ -754,11 +755,14 @@ namespace LucidCartographer.Services.Import
                 if (card.TryGetProperty("reviewCount", out var rcEl) && rcEl.ValueKind == System.Text.Json.JsonValueKind.String)
                 {
                     var digits = new string(rcEl.GetString()!.Where(char.IsDigit).ToArray());
-                    if (int.TryParse(digits, out var rc)) reviewCount = rc;
+                    if (int.TryParse(digits, out var rc))
+                    {
+                        reviewCount = rc;
+                    }
                 }
 
-                string? category = card.TryGetProperty("category", out var cEl) && cEl.ValueKind == System.Text.Json.JsonValueKind.String ? cEl.GetString() : null;
-                string? description = card.TryGetProperty("description", out var dEl) && dEl.ValueKind == System.Text.Json.JsonValueKind.String ? dEl.GetString() : null;
+                var category = card.TryGetProperty("category", out var cEl) && cEl.ValueKind == System.Text.Json.JsonValueKind.String ? cEl.GetString() : null;
+                var description = card.TryGetProperty("description", out var dEl) && dEl.ValueKind == System.Text.Json.JsonValueKind.String ? dEl.GetString() : null;
 
                 // Image: upsize the thumbnail URL (`…=w92-h92-k-no` → `…=w1024`)
                 // and download the bytes now, while the signed `gps-cs-s` token
@@ -788,22 +792,22 @@ namespace LucidCartographer.Services.Import
                             }
                             else
                             {
-                                _logger.LogWarning("Image fetch for '{Name}' returned HTTP {Status}", name, resp.Status);
+                                logger.LogWarning("Image fetch for '{Name}' returned HTTP {Status}", name, resp.Status);
                             }
                         }
                         catch (Exception fetchEx)
                         {
-                            _logger.LogWarning(fetchEx, "Failed to download image bytes for '{Name}' from {Url}", name, imageUrl);
+                            logger.LogWarning(fetchEx, "Failed to download image bytes for '{Name}' from {Url}", name, imageUrl);
                         }
                     }
                 }
 
                 // NULL coords when href had none — enrichment service will
                 // fill real lat/lon via a name-based search.
-                double? lat = coords?.lat;
-                double? lon = coords?.lon;
+                var lat = coords?.lat;
+                var lon = coords?.lon;
                 results.Add(new ImportedPoi(
-                    Name: name!,
+                    Name: name,
                     Latitude: lat,
                     Longitude: lon,
                     GoogleMapsUrl: href,
@@ -821,27 +825,42 @@ namespace LucidCartographer.Services.Import
                     ImageContentType: imageContentType
                 ));
 
-                _logger.LogInformation("[{Idx}/{Total}] {Name} ({Cat}) @ {Lat},{Lon}",
+                logger.LogInformation("[{Idx}/{Total}] {Name} ({Cat}) @ {Lat},{Lon}",
                     i + 1, totalItems, name, category ?? "-", lat, lon);
                 onProgress?.Invoke(results.Count);
             }
 
-            _logger.LogInformation("Successfully scraped {Count} places from list '{ListName}'", results.Count, listName ?? "unknown");
+            logger.LogInformation("Successfully scraped {Count} places from list '{ListName}'", results.Count, listName ?? "unknown");
             return new ScrapeResult { ListName = listName, Pois = results };
 
-            } // end try
-            finally
+            async Task<(int total, bool scrollFound, int divsExamined, string? diag)> DiscoverAsync()
             {
-                await context.CloseAsync();
-                if (browser != null) await browser.CloseAsync();
+                var result = await page.EvaluateAsync<System.Text.Json.JsonElement>(GoogleMapsScraperScripts.Discover);
+                var total = result.GetProperty("total").GetInt32();
+                var scrollFound = result.GetProperty("scrollFound").GetBoolean();
+                var divsExamined = result.TryGetProperty("divsExamined", out var d) ? d.GetInt32() : 0;
+                string? diag = null;
+                if (result.TryGetProperty("diag", out var diagEl))
+                {
+                    diag = diagEl.GetRawText();
+                }
+                return (total, scrollFound, divsExamined, diag);
+            }
+        } // end try
+        finally
+        {
+            await context.CloseAsync();
+            if (browser != null)
+            {
+                await browser.CloseAsync();
             }
         }
-
-        /// <summary>
-        /// IE-14: Delegates to shared PoiUrlHelper.ExtractCoordinatesFromUrl to eliminate
-        /// duplicated @/ coordinate parsing logic.
-        /// </summary>
-        private static (double lat, double lon)? ExtractCoordinates(string url)
-            => PoiUrlHelper.ExtractCoordinatesFromUrl(url);
     }
+
+    /// <summary>
+    /// IE-14: Delegates to shared PoiUrlHelper.ExtractCoordinatesFromUrl to eliminate
+    /// duplicated @/ coordinate parsing logic.
+    /// </summary>
+    private static (double lat, double lon)? ExtractCoordinates(string url)
+        => PoiUrlHelper.ExtractCoordinatesFromUrl(url);
 }

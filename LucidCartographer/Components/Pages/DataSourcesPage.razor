@@ -60,9 +60,9 @@
                          AcceptDescription="@Vm.AcceptDescription"
                          AvailableColors="Vm.AvailableColors"
                          CollectionName="@Vm.CollectionName"
-                         CollectionNameChanged="(val) => Vm.CollectionName = val"
+                         CollectionNameChanged="val => Vm.CollectionName = val"
                          SelectedColor="@Vm.SelectedColor"
-                         SelectedColorChanged="(val) => Vm.SelectedColor = val"
+                         SelectedColorChanged="val => Vm.SelectedColor = val"
                          OnClose="Vm.CloseUpload"
                          OnFileSelected="Vm.HandleFileSelectedAsync"
                          IsImporting="Vm.IsImporting"
@@ -72,43 +72,43 @@
                          ImportError="@Vm.ImportError"
                          ShowFileInput="@(Vm.ActiveCard != "shared")">
             @* Card-specific instructions *@
-            @if (Vm.ActiveCard == "takeout")
+            @switch (Vm.ActiveCard)
             {
-                <div class="mb-4 p-4 rounded-lg bg-secondary/5">
-                    <h4 class="font-bold text-sm mb-2 flex items-center gap-2">
-                        <span class="material-symbols-outlined text-secondary text-base">info</span>
-                        How to export from Google Takeout
-                    </h4>
-                    <ol class="text-sm text-on-surface-variant space-y-1 list-decimal list-inside">
-                        <li>Go to <a href="https://takeout.google.com" target="_blank" rel="noopener" class="text-primary underline">takeout.google.com</a></li>
-                        <li>Click "Deselect all", then scroll down and check <strong>"Saved"</strong> (for custom lists) and <strong>"Maps (your places)"</strong> (for starred places)</li>
-                        <li>Click "Next step" then "Create export" then Download the ZIP</li>
-                        <li>Unzip and find <strong>Saved Places.json</strong> (GeoJSON) - upload it below</li>
-                    </ol>
-                </div>
-            }
-            else if (Vm.ActiveCard == "shared")
-            {
-                <ScraperPanel Url="@Vm.SharedListUrl"
-                              UrlChanged="(val) => Vm.SharedListUrl = val"
-                              IsScraping="Vm.IsImporting"
-                              ScrapeProgress="0"
-                              OnScrape="Vm.ScrapeSharedList"
-                              IsFetchingLists="Vm.IsFetchingLists"
-                              SavedLists="Vm.SavedLists"
-                              FetchListsError="@Vm.FetchListsError"
-                              HasGoogleProfile="Vm.HasGoogleProfile"
-                              OnFetchLists="Vm.HandleFetchMyListsAsync"
-                              OnImportSelected="Vm.HandleImportSelectedLists"
-                              OnResetProfile="Vm.HandleResetProfile" />
-            }
-            else if (Vm.ActiveCard == "file")
-            {
-                <div class="mb-4 p-4 rounded-lg bg-primary/5">
-                    <p class="text-sm text-on-surface-variant">
-                        Upload any geo file: <strong>GPX</strong> (from browser extensions), <strong>KML/KMZ</strong> (from Google My Maps), <strong>GeoJSON</strong>, or <strong>CSV</strong> (must contain lat/lon columns).
-                    </p>
-                </div>
+                case "takeout":
+                    <div class="mb-4 p-4 rounded-lg bg-secondary/5">
+                        <h4 class="font-bold text-sm mb-2 flex items-center gap-2">
+                            <span class="material-symbols-outlined text-secondary text-base">info</span>
+                            How to export from Google Takeout
+                        </h4>
+                        <ol class="text-sm text-on-surface-variant space-y-1 list-decimal list-inside">
+                            <li>Go to <a href="https://takeout.google.com" target="_blank" rel="noopener" class="text-primary underline">takeout.google.com</a></li>
+                            <li>Click "Deselect all", then scroll down and check <strong>"Saved"</strong> (for custom lists) and <strong>"Maps (your places)"</strong> (for starred places)</li>
+                            <li>Click "Next step" then "Create export" then Download the ZIP</li>
+                            <li>Unzip and find <strong>Saved Places.json</strong> (GeoJSON) - upload it below</li>
+                        </ol>
+                    </div>
+                    break;
+                case "shared":
+                    <ScraperPanel Url="@Vm.SharedListUrl"
+                                  UrlChanged="val => Vm.SharedListUrl = val"
+                                  IsScraping="Vm.IsImporting"
+                                  ScrapeProgress="0"
+                                  OnScrape="Vm.ScrapeSharedList"
+                                  IsFetchingLists="Vm.IsFetchingLists"
+                                  SavedLists="Vm.SavedLists"
+                                  FetchListsError="@Vm.FetchListsError"
+                                  HasGoogleProfile="Vm.HasGoogleProfile"
+                                  OnFetchLists="Vm.HandleFetchMyListsAsync"
+                                  OnImportSelected="Vm.HandleImportSelectedLists"
+                                  OnResetProfile="Vm.HandleResetProfile" />
+                    break;
+                case "file":
+                    <div class="mb-4 p-4 rounded-lg bg-primary/5">
+                        <p class="text-sm text-on-surface-variant">
+                            Upload any geo file: <strong>GPX</strong> (from browser extensions), <strong>KML/KMZ</strong> (from Google My Maps), <strong>GeoJSON</strong>, or <strong>CSV</strong> (must contain lat/lon columns).
+                        </p>
+                    </div>
+                    break;
             }
         </FileUploadPanel>
     }

@@ -23,13 +23,11 @@ public static class DiagnosticLogging
     }
 }
 
-internal sealed class MultiTextWriter : TextWriter
+internal sealed class MultiTextWriter(params TextWriter[] writers) : TextWriter
 {
-    private readonly TextWriter[] _writers;
-    public MultiTextWriter(params TextWriter[] writers) => _writers = writers;
     public override System.Text.Encoding Encoding => System.Text.Encoding.UTF8;
-    public override void Write(char value) { foreach (var w in _writers) w.Write(value); }
-    public override void Write(string? value) { foreach (var w in _writers) w.Write(value); }
-    public override void WriteLine(string? value) { foreach (var w in _writers) w.WriteLine(value); }
-    public override void Flush() { foreach (var w in _writers) w.Flush(); }
+    public override void Write(char value) { foreach (var w in writers) w.Write(value); }
+    public override void Write(string? value) { foreach (var w in writers) w.Write(value); }
+    public override void WriteLine(string? value) { foreach (var w in writers) w.WriteLine(value); }
+    public override void Flush() { foreach (var w in writers) w.Flush(); }
 }

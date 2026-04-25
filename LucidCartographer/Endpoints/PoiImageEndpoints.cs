@@ -21,7 +21,10 @@ public static class PoiImageEndpoints
                 .AsNoTracking()
                 .FirstOrDefaultAsync(i => i.PoiId == id);
             if (image is null || image.Data.Length == 0)
+            {
                 return Results.NotFound();
+            }
+
             return Results.File(image.Data, image.ContentType ?? "image/jpeg");
         });
 

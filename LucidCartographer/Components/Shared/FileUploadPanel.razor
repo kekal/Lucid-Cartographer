@@ -86,7 +86,7 @@
     [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
     [Parameter, EditorRequired] public string AcceptExtensions { get; set; } = string.Empty;
     [Parameter, EditorRequired] public string AcceptDescription { get; set; } = string.Empty;
-    [Parameter, EditorRequired] public string[] AvailableColors { get; set; } = Array.Empty<string>();
+    [Parameter, EditorRequired] public string[] AvailableColors { get; set; } = [];
     [Parameter] public string CollectionName { get; set; } = string.Empty;
     [Parameter] public EventCallback<string> CollectionNameChanged { get; set; }
     [Parameter] public string SelectedColor { get; set; } = "#005bbf";

@@ -48,9 +48,12 @@
             @if (!string.IsNullOrEmpty(Poi.Status))
             {
                 <span class="text-xs px-2.5 py-1 rounded-full font-medium
-                    @(Poi.Status == "visited" ? "bg-secondary/10 text-secondary" :
-                      Poi.Status == "want_to_go" ? "bg-primary/10 text-primary" :
-                      "bg-surface-container-high text-on-surface-variant")">
+                    @(Poi.Status switch
+                    {
+                        "visited" => "bg-secondary/10 text-secondary",
+                        "want_to_go" => "bg-primary/10 text-primary",
+                        _ => "bg-surface-container-high text-on-surface-variant"
+                    })">
                     @Poi.Status.Replace("_", " ")
                 </span>
             }
@@ -68,10 +71,9 @@
             <div class="flex items-center gap-2 mb-4" role="img" aria-label="@($"Google rating: {Poi.GoogleRating.Value:F1} out of 5 stars")">
                 <span class="text-lg font-bold text-on-surface">@Poi.GoogleRating.Value.ToString("F1")</span>
                 <div class="flex gap-0.5" aria-hidden="true">
-                    @for (int i = 1; i <= 5; i++)
+                    @for (var i = 1; i <= 5; i++)
                     {
-                        var starIndex = i;
-                        var filled = starIndex <= Math.Round(Poi.GoogleRating.Value);
+                        var filled = i <= Math.Round(Poi.GoogleRating.Value);
                         <span class="material-symbols-outlined text-base @(filled ? "text-yellow-500" : "text-surface-container-highest")"
                               style="font-variation-settings: 'FILL' @(filled ? 1 : 0)">
                             star
@@ -113,11 +115,10 @@
             <div class="flex items-center gap-2 mb-4" role="img" aria-label="@($"Your rating: {Poi.Rating.Value} out of 5 stars")">
                 <span class="text-xs text-on-surface-variant uppercase tracking-wider">Your rating</span>
                 <div class="flex gap-0.5" aria-hidden="true">
-                    @for (int i = 1; i <= 5; i++)
+                    @for (var i = 1; i <= 5; i++)
                     {
-                        var starIndex = i;
-                        <span class="material-symbols-outlined text-base @(starIndex <= Poi.Rating.Value ? "text-primary" : "text-surface-container-highest")"
-                              style="font-variation-settings: 'FILL' @(starIndex <= Poi.Rating.Value ? 1 : 0)">
+                        <span class="material-symbols-outlined text-base @(i <= Poi.Rating.Value ? "text-primary" : "text-surface-container-highest")"
+                              style="font-variation-settings: 'FILL' @(i <= Poi.Rating.Value ? 1 : 0)">
                             star
                         </span>
                     }
@@ -128,7 +129,7 @@
         @* Coordinates *@
         <div class="bg-surface-container-low rounded-lg p-3 mb-4">
             <div class="text-xs text-on-surface-variant mb-1">Coordinates</div>
-            <div class="font-mono text-sm">@(Poi.Latitude.HasValue && Poi.Longitude.HasValue ? $"{Poi.Latitude.Value.ToString("F6")}, {Poi.Longitude.Value.ToString("F6")}" : "—")</div>
+            <div class="font-mono text-sm">@(Poi is { Latitude: not null, Longitude: not null } ? $"{Poi.Latitude.Value:F6}, {Poi.Longitude.Value:F6}" : "—")</div>
         </div>
 
         @* Notes *@
@@ -141,14 +142,14 @@
         }
 
         @* Tags (many-to-many via PoiTag join table) *@
-        @if (Poi.PoiTags?.Any() == true)
+        @if (Poi.PoiTags.Any() == true)
         {
             <div class="mb-4">
                 <div class="text-xs text-on-surface-variant mb-1 uppercase tracking-wider">Tags</div>
                 <div class="flex flex-wrap gap-1">
                     @foreach (var poiTag in Poi.PoiTags)
                     {
-                        <span class="text-xs px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant">@poiTag.Tag?.Name</span>
+                        <span class="text-xs px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant">@poiTag.Tag.Name</span>
                     }
                 </div>
             </div>
@@ -178,7 +179,7 @@
 @code {
     private const int MaxUrlDisplayLength = 35;
 
-    [Parameter, EditorRequired] public Poi Poi { get; set; } = default!;
+    [Parameter, EditorRequired] public Poi Poi { get; set; } = null!;
     [Parameter] public EventCallback OnClose { get; set; }
 
     private static string TruncateUrl(string url)

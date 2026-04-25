@@ -34,11 +34,11 @@ public class MapPageViewModelTests
     [Fact]
     public async Task Initialize_LoadsCollections_PopulatesStates_ClearsLoading()
     {
-        var collections = new List<PoiCollection>
-        {
+        List<PoiCollection> collections =
+        [
             MakeCollection(1, "A", isVisible: true),
             MakeCollection(2, "B", isVisible: false)
-        };
+        ];
         _poi.Setup(p => p.GetCollectionsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(collections);
 
         var vm = CreateVm();
@@ -68,11 +68,11 @@ public class MapPageViewModelTests
     [Fact]
     public void HandleBoundsChanged_AppliesViewportFilter_NotifiesOnce()
     {
-        var pois = new List<Poi>
-        {
+        List<Poi> pois =
+        [
             MakePoi(1, lat: 50.0, lon: 19.0),
-            MakePoi(2, lat: 60.0, lon: 19.0), // outside the test bounds
-        };
+            MakePoi(2, lat: 60.0, lon: 19.0) // outside the test bounds
+        ];
         var vm = CreateVm();
         // Reach via reflection — VisiblePois has a private setter.
         typeof(MapPageViewModel).GetProperty(nameof(MapPageViewModel.VisiblePois))!
@@ -108,7 +108,7 @@ public class MapPageViewModelTests
     public async Task OnNavigationChanged_WithSearchQuery_PopulatesSearchState()
     {
         _poi.Setup(p => p.SearchAsync("wawel", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Poi> { MakePoi(1) });
+            .ReturnsAsync((List<Poi>)[MakePoi(1)]);
 
         var vm = CreateVm();
         _navigation.SetUri("http://test/?search=wawel");
@@ -124,7 +124,7 @@ public class MapPageViewModelTests
     public async Task OnNavigationChanged_SameQueryTwice_NoOp()
     {
         _poi.Setup(p => p.SearchAsync("wawel", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Poi> { MakePoi(1) });
+            .ReturnsAsync((List<Poi>)[MakePoi(1)]);
 
         var vm = CreateVm();
         _navigation.SetUri("http://test/?search=wawel");

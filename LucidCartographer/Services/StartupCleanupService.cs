@@ -11,25 +11,13 @@ namespace LucidCartographer.Services;
 ///      when no secret is set; warn in Development).
 ///   3. Apply EF Core migrations (ARCH-CRIT-01: MigrateAsync, not EnsureCreatedAsync).
 /// </summary>
-public sealed class StartupCleanupService : IHostedService
+public sealed class StartupCleanupService(
+    IServiceProvider services,
+    IHostEnvironment environment,
+    ILoggerFactory loggerFactory,
+    IConfiguration configuration)
+    : IHostedService
 {
-    private readonly IServiceProvider _services;
-    private readonly IHostEnvironment _environment;
-    private readonly ILoggerFactory _loggerFactory;
-    private readonly IConfiguration _configuration;
-
-    public StartupCleanupService(
-        IServiceProvider services,
-        IHostEnvironment environment,
-        ILoggerFactory loggerFactory,
-        IConfiguration configuration)
-    {
-        _services = services;
-        _environment = environment;
-        _loggerFactory = loggerFactory;
-        _configuration = configuration;
-    }
-
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         SweepOrphanedTempFiles();
@@ -45,12 +33,12 @@ public sealed class StartupCleanupService : IHostedService
         // died between "file streamed to disk" and "Coravel invocable ran +
         // deleted it in finally". Cheap and safe: only files matching the specific
         // pattern we wrote ourselves, older than 1h, are removed.
-        var logger = _loggerFactory.CreateLogger("TempFileSweep");
+        var logger = loggerFactory.CreateLogger("TempFileSweep");
         try
         {
             var tempRoot = Path.GetTempPath();
             var cutoff = DateTime.UtcNow - TimeSpan.FromHours(1);
-            int swept = 0;
+            var swept = 0;
             foreach (var path in Directory.EnumerateFiles(tempRoot, "lucid-import-*"))
             {
                 try
@@ -67,7 +55,9 @@ public sealed class StartupCleanupService : IHostedService
                 }
             }
             if (swept > 0)
+            {
                 logger.LogInformation("Removed {Count} orphaned lucid-import-* temp files from {Path}", swept, tempRoot);
+            }
         }
         catch (Exception ex)
         {
@@ -80,10 +70,10 @@ public sealed class StartupCleanupService : IHostedService
         // In Production, refuse to start if no auth secret is configured — the app
         // will be exposed behind a Zero Trust proxy that does NOT authenticate, so
         // the app's own auth is the only gate. In Development, warn only.
-        var logger = _loggerFactory.CreateLogger<StartupCleanupService>();
-        if (string.IsNullOrEmpty(AuthSecretReader.GetConfiguredAuthSecret(_configuration)))
+        var logger = loggerFactory.CreateLogger<StartupCleanupService>();
+        if (string.IsNullOrEmpty(AuthSecretReader.GetConfiguredAuthSecret(configuration)))
         {
-            if (_environment.IsDevelopment())
+            if (environment.IsDevelopment())
             {
                 logger.LogWarning("Auth:Password/Auth:PasswordHash not set — authentication is DISABLED (Development only)");
             }
@@ -97,7 +87,7 @@ public sealed class StartupCleanupService : IHostedService
 
     private async Task ApplyMigrationsAsync(CancellationToken cancellationToken)
     {
-        using var scope = _services.CreateScope();
+        using var scope = services.CreateScope();
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         await db.Database.MigrateAsync(cancellationToken);

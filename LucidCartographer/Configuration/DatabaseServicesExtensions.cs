@@ -29,9 +29,14 @@ public static class DatabaseServicesExtensions
     {
         var raw = Environment.GetEnvironmentVariable("DB_PATH");
         if (string.IsNullOrWhiteSpace(raw))
+        {
             raw = cfg.GetValue<string>("Database:Path");
+        }
+
         if (string.IsNullOrWhiteSpace(raw))
+        {
             raw = Path.Combine("data", "cartographer.db");
+        }
 
         var full = Path.IsPathRooted(raw)
             ? raw
@@ -39,7 +44,10 @@ public static class DatabaseServicesExtensions
 
         var dir = Path.GetDirectoryName(full);
         if (!string.IsNullOrEmpty(dir))
+        {
             Directory.CreateDirectory(dir);
+        }
+
         return full;
     }
 }

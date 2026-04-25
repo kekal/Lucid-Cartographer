@@ -15,30 +15,18 @@ namespace LucidCartographer.Components.Pages;
 /// The <see cref="LeafletMap"/> reference is set by the component after first
 /// render via <see cref="AttachMap"/> because @ref capture lives on the component.
 /// </summary>
-public sealed class MapPageViewModel : IAsyncDisposable
+public sealed class MapPageViewModel(
+    IPoiService poiService,
+    NavigationManager navigation,
+    EnrichmentProgressService enrichmentProgress,
+    ILogger<MapPageViewModel> logger)
+    : IAsyncDisposable
 {
     public const int SearchLayerId = -1;
     public const string SearchMarkerColor = "#7B61FF";
 
-    private readonly IPoiService _poiService;
-    private readonly NavigationManager _navigation;
-    private readonly EnrichmentProgressService _enrichmentProgress;
-    private readonly ILogger<MapPageViewModel> _logger;
-
     private LeafletMap? _map;
     private IDisposable? _enrichmentSubscription;
-
-    public MapPageViewModel(
-        IPoiService poiService,
-        NavigationManager navigation,
-        EnrichmentProgressService enrichmentProgress,
-        ILogger<MapPageViewModel> logger)
-    {
-        _poiService = poiService;
-        _navigation = navigation;
-        _enrichmentProgress = enrichmentProgress;
-        _logger = logger;
-    }
 
     public event Action? StateChanged;
 
@@ -55,10 +43,10 @@ public sealed class MapPageViewModel : IAsyncDisposable
 
     // --- State ---
 
-    public IReadOnlyList<PoiCollection> Collections { get; private set; } = Array.Empty<PoiCollection>();
-    public List<CollectionDisplayState> CollectionStates { get; private set; } = new();
-    public IReadOnlyList<Poi> VisiblePois { get; private set; } = Array.Empty<Poi>();
-    public IReadOnlyList<Poi> FilteredPois { get; private set; } = Array.Empty<Poi>();
+    public IReadOnlyList<PoiCollection> Collections { get; private set; } = [];
+    public List<CollectionDisplayState> CollectionStates { get; private set; } = [];
+    public IReadOnlyList<Poi> VisiblePois { get; private set; } = [];
+    public IReadOnlyList<Poi> FilteredPois { get; private set; } = [];
     public Dictionary<int, IReadOnlyList<string>> PoiCollectionNames { get; private set; } = new();
     public Dictionary<int, IReadOnlyList<int>> PoiCollectionMemberships { get; private set; } = new();
     public Dictionary<int, int> PoiCollectionIds { get; private set; } = new();
@@ -76,7 +64,7 @@ public sealed class MapPageViewModel : IAsyncDisposable
 
     public async Task InitializeAsync()
     {
-        Collections = await _poiService.GetCollectionsAsync();
+        Collections = await poiService.GetCollectionsAsync();
         CollectionStates = Collections.Select(c => new CollectionDisplayState(c)).ToList();
         IsLoading = false;
 
@@ -84,7 +72,7 @@ public sealed class MapPageViewModel : IAsyncDisposable
         // flips Pois from placeholder (0,0) coords to real ones. Without
         // this, the user has to toggle collection visibility to see new
         // rows show up.
-        _enrichmentSubscription = _enrichmentProgress.Changes
+        _enrichmentSubscription = enrichmentProgress.Changes
             .Skip(1)
             .Subscribe(_ => OnEnrichmentChanged());
 
@@ -121,15 +109,19 @@ public sealed class MapPageViewModel : IAsyncDisposable
     /// </summary>
     public async Task OnNavigationChangedAsync()
     {
-        var uri = _navigation.ToAbsoluteUri(_navigation.Uri);
+        var uri = navigation.ToAbsoluteUri(navigation.Uri);
         if (QueryHelpers.ParseQuery(uri.Query).TryGetValue("search", out var searchValues))
         {
             var search = searchValues.FirstOrDefault();
             if (!string.IsNullOrWhiteSpace(search))
             {
-                if (search == PreviousSearchQuery) return;
+                if (search == PreviousSearchQuery)
+                {
+                    return;
+                }
+
                 PreviousSearchQuery = search;
-                VisiblePois = await _poiService.SearchAsync(search);
+                VisiblePois = await poiService.SearchAsync(search);
                 FilteredPois = VisiblePois;
                 SelectedCollectionName = $"Search: {search}";
                 PendingSearchMapUpdate = true;
@@ -159,7 +151,10 @@ public sealed class MapPageViewModel : IAsyncDisposable
         {
             // Search cleared — restore collection view
             if (_map is not null)
+            {
                 await _map.HideCollectionAsync(SearchLayerId);
+            }
+
             await LoadVisibleCollectionsAsync();
         }
     }
@@ -179,7 +174,7 @@ public sealed class MapPageViewModel : IAsyncDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Enrichment refresh failed");
+                logger.LogDebug(ex, "Enrichment refresh failed");
             }
         });
     }
@@ -196,7 +191,10 @@ public sealed class MapPageViewModel : IAsyncDisposable
 
     private async Task ShowSearchResultsOnMapAsync()
     {
-        if (_map == null) return;
+        if (_map == null)
+        {
+            return;
+        }
 
         foreach (var s in CollectionStates)
             await _map.HideCollectionAsync(s.Id);
@@ -213,11 +211,14 @@ public sealed class MapPageViewModel : IAsyncDisposable
 
     private async Task LoadVisibleCollectionsAsync()
     {
-        if (_map == null || !_map.IsInitialized) return;
+        if (_map is not { IsInitialized: true })
+        {
+            return;
+        }
 
         await _map.HideCollectionAsync(SearchLayerId);
 
-        var grouped = await _poiService.GetVisiblePoisGroupedAsync();
+        var grouped = await poiService.GetVisiblePoisGroupedAsync();
         // A POI can belong to multiple collections (import "links" existing POIs
         // via the M:N CollectionPoi join). When more than one of those collections
         // is visible the same Poi would appear in VisiblePois twice, which would
@@ -230,11 +231,7 @@ public sealed class MapPageViewModel : IAsyncDisposable
             if (s.IsVisible && grouped.ContainsKey(s.Id))
             {
                 await _map.ShowCollectionAsync(s.Id, grouped[s.Id], s.Color);
-                foreach (var poi in grouped[s.Id])
-                {
-                    if (seen.Add(poi.Id))
-                        newPois.Add(poi);
-                }
+                newPois.AddRange(grouped[s.Id].Where(poi => seen.Add(poi.Id)));
             }
             else
             {
@@ -251,9 +248,9 @@ public sealed class MapPageViewModel : IAsyncDisposable
     public async Task HandleVisibilityToggledAsync(int collectionId)
     {
         var s = CollectionStates.FirstOrDefault(c => c.Id == collectionId);
-        if (s != null) s.IsVisible = !s.IsVisible;
+        s?.IsVisible = !s.IsVisible;
 
-        await _poiService.ToggleVisibilityAsync(collectionId);
+        await poiService.ToggleVisibilityAsync(collectionId);
         await LoadVisibleCollectionsAsync();
     }
 
@@ -262,7 +259,7 @@ public sealed class MapPageViewModel : IAsyncDisposable
         SelectedCollectionId = collectionId;
         var s = CollectionStates.FirstOrDefault(c => c.Id == collectionId);
         SelectedCollectionName = s?.Name;
-        VisiblePois = await _poiService.GetPoisByCollectionAsync(collectionId);
+        VisiblePois = await poiService.GetPoisByCollectionAsync(collectionId);
         await RefreshPoiCollectionMapsAsync(VisiblePois);
         ApplyViewportFilter();
     }
@@ -281,8 +278,7 @@ public sealed class MapPageViewModel : IAsyncDisposable
     public async Task HandleFocusPoiAsync(int poiId)
     {
         await SelectPoiAsync(poiId);
-        if (_map != null && SelectedPoi != null
-            && SelectedPoi.Latitude.HasValue && SelectedPoi.Longitude.HasValue)
+        if (_map != null && SelectedPoi is { Latitude: not null, Longitude: not null })
         {
             await _map.FocusOnPoiAsync(SelectedPoi.Latitude.Value, SelectedPoi.Longitude.Value);
         }
@@ -291,7 +287,7 @@ public sealed class MapPageViewModel : IAsyncDisposable
     private async Task SelectPoiAsync(int poiId)
     {
         SelectedPoiId = poiId;
-        SelectedPoi = await _poiService.GetPoiAsync(poiId);
+        SelectedPoi = await poiService.GetPoiAsync(poiId);
     }
 
     public void CloseDetailPane()
@@ -328,8 +324,8 @@ public sealed class MapPageViewModel : IAsyncDisposable
         else
         {
             FilteredPois = VisiblePois
-                .Where(p => p.Latitude.HasValue && p.Longitude.HasValue
-                    && CurrentBounds.Contains(p.Latitude.Value, p.Longitude.Value))
+                .Where(p => p is { Latitude: not null, Longitude: not null }
+                            && CurrentBounds.Contains(p.Latitude.Value, p.Longitude.Value))
                 .ToList();
         }
         Notify();
@@ -344,29 +340,32 @@ public sealed class MapPageViewModel : IAsyncDisposable
             await _map.HideCollectionAsync(SearchLayerId);
             await LoadVisibleCollectionsAsync();
         }
-        _navigation.NavigateTo("/", replace: true);
+        navigation.NavigateTo("/", replace: true);
     }
 
     public async Task HandleDeletePoiAsync(int poiId)
     {
         if (PoiCollectionIds.TryGetValue(poiId, out var collectionId))
         {
-            await _poiService.RemovePoiFromCollectionAsync(poiId, collectionId);
+            await poiService.RemovePoiFromCollectionAsync(poiId, collectionId);
         }
         if (SelectedPoiId == poiId)
+        {
             CloseDetailPane();
+        }
+
         await RefreshAfterMutationAsync();
     }
 
     public async Task HandleMovePoiAsync((int PoiId, int TargetCollectionId) args)
     {
-        await _poiService.AddPoiToCollectionAsync(args.PoiId, args.TargetCollectionId);
+        await poiService.AddPoiToCollectionAsync(args.PoiId, args.TargetCollectionId);
 
         if (PoiCollectionMemberships.TryGetValue(args.PoiId, out var sourceCollectionIds))
         {
             foreach (var sourceCollectionId in sourceCollectionIds.Where(id => id != args.TargetCollectionId))
             {
-                await _poiService.RemovePoiFromCollectionAsync(args.PoiId, sourceCollectionId);
+                await poiService.RemovePoiFromCollectionAsync(args.PoiId, sourceCollectionId);
             }
         }
         await RefreshAfterMutationAsync();
@@ -374,14 +373,14 @@ public sealed class MapPageViewModel : IAsyncDisposable
 
     public async Task HandleMoveToNewCollectionAsync((int PoiId, string NewCollectionName) args)
     {
-        var newCol = await _poiService.CreateCollectionAsync(args.NewCollectionName);
-        await _poiService.AddPoiToCollectionAsync(args.PoiId, newCol.Id);
+        var newCol = await poiService.CreateCollectionAsync(args.NewCollectionName);
+        await poiService.AddPoiToCollectionAsync(args.PoiId, newCol.Id);
 
         if (PoiCollectionMemberships.TryGetValue(args.PoiId, out var sourceCollectionIds))
         {
             foreach (var sourceCollectionId in sourceCollectionIds)
             {
-                await _poiService.RemovePoiFromCollectionAsync(args.PoiId, sourceCollectionId);
+                await poiService.RemovePoiFromCollectionAsync(args.PoiId, sourceCollectionId);
             }
         }
         CollectionStates.Insert(0, new CollectionDisplayState(newCol));
@@ -390,14 +389,14 @@ public sealed class MapPageViewModel : IAsyncDisposable
 
     public async Task HandleCopyPoiAsync((int PoiId, int TargetCollectionId) args)
     {
-        await _poiService.AddPoiToCollectionAsync(args.PoiId, args.TargetCollectionId);
+        await poiService.AddPoiToCollectionAsync(args.PoiId, args.TargetCollectionId);
         await RefreshAfterMutationAsync();
     }
 
     public async Task HandleCopyToNewCollectionAsync((int PoiId, string NewCollectionName) args)
     {
-        var newCol = await _poiService.CreateCollectionAsync(args.NewCollectionName);
-        await _poiService.AddPoiToCollectionAsync(args.PoiId, newCol.Id);
+        var newCol = await poiService.CreateCollectionAsync(args.NewCollectionName);
+        await poiService.AddPoiToCollectionAsync(args.PoiId, newCol.Id);
         CollectionStates.Insert(0, new CollectionDisplayState(newCol));
         await RefreshAfterMutationAsync();
     }
@@ -413,12 +412,12 @@ public sealed class MapPageViewModel : IAsyncDisposable
             return;
         }
 
-        PoiCollectionNames = (await _poiService.GetPoiCollectionNamesAsync(poiIds))
-            .ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<string>)kvp.Value);
+        PoiCollectionNames = (await poiService.GetPoiCollectionNamesAsync(poiIds))
+            .ToDictionary(kvp => kvp.Key, IReadOnlyList<string> (kvp) => kvp.Value);
 
-        var memberships = await _poiService.GetPoiCollectionMembershipsAsync(poiIds);
+        var memberships = await poiService.GetPoiCollectionMembershipsAsync(poiIds);
         PoiCollectionMemberships = memberships
-            .ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<int>)kvp.Value);
+            .ToDictionary(kvp => kvp.Key, IReadOnlyList<int> (kvp) => kvp.Value);
 
         PoiCollectionIds = memberships
             .Where(kvp => kvp.Value.Count > 0)
@@ -427,11 +426,11 @@ public sealed class MapPageViewModel : IAsyncDisposable
 
     private async Task RefreshAfterMutationAsync()
     {
-        Collections = await _poiService.GetCollectionsAsync();
+        Collections = await poiService.GetCollectionsAsync();
         foreach (var col in Collections)
         {
             var s = CollectionStates.FirstOrDefault(c => c.Id == col.Id);
-            if (s != null) s.Collection.PoiCount = col.PoiCount;
+            s?.Collection.PoiCount = col.PoiCount;
         }
         await LoadVisibleCollectionsAsync();
     }

@@ -23,7 +23,7 @@ public class OperationsPageViewModelTests
     private OperationsPageViewModel CreateVm()
     {
         _exporter.SetupGet(e => e.FormatName).Returns("KML");
-        return new OperationsPageViewModel(_poi.Object, _ops.Object, new[] { _exporter.Object }, _js.Object);
+        return new OperationsPageViewModel(_poi.Object, _ops.Object, [_exporter.Object], _js.Object);
     }
 
     private static PoiCollection MakeCollection(int id, string name)
@@ -35,11 +35,11 @@ public class OperationsPageViewModelTests
     [Fact]
     public async Task Initialize_LoadsCollections_AndClearsLoadingFlag()
     {
-        var collections = new List<PoiCollection>
-        {
+        List<PoiCollection> collections =
+        [
             MakeCollection(1, "A"),
             MakeCollection(2, "B")
-        };
+        ];
         _poi.Setup(p => p.GetCollectionsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(collections);
 
         var vm = CreateVm();
@@ -52,7 +52,7 @@ public class OperationsPageViewModelTests
     [Fact]
     public async Task RunOperation_PopulatesResult_AndTogglesProcessingFlag()
     {
-        var pois = new List<Poi> { MakePoi(1, "P1") };
+        List<Poi> pois = [MakePoi(1, "P1")];
         _ops.Setup(s => s.ExecuteAsync(SetOperation.Subtract, 1, 2, 100, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new OperationResult { Description = "ok", Pois = pois });
 
@@ -73,7 +73,7 @@ public class OperationsPageViewModelTests
     public async Task RunOperation_Dedup_PassesNullForCollectionB()
     {
         _ops.Setup(s => s.ExecuteAsync(SetOperation.Dedup, 1, null, 100, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new OperationResult { Description = "deduped", Pois = Array.Empty<Poi>() });
+            .ReturnsAsync(new OperationResult { Description = "deduped", Pois = [] });
 
         var vm = CreateVm();
         vm.CollectionAId = 1;
@@ -114,11 +114,11 @@ public class OperationsPageViewModelTests
     [Fact]
     public async Task DoCommit_PassesNonDiscardedPois_AndUpdatesSuccessMessage()
     {
-        var pois = new List<Poi>
-        {
+        List<Poi> pois =
+        [
             MakePoi(1, "P1"),
             MakePoi(2, "P2")
-        };
+        ];
         _ops.Setup(s => s.ExecuteAsync(It.IsAny<SetOperation>(), It.IsAny<int>(), It.IsAny<int?>(),
                 It.IsAny<double>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new OperationResult { Description = "ok", Pois = pois });
@@ -152,7 +152,7 @@ public class OperationsPageViewModelTests
     {
         _ops.Setup(s => s.ExecuteAsync(It.IsAny<SetOperation>(), It.IsAny<int>(), It.IsAny<int?>(),
                 It.IsAny<double>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new OperationResult { Description = "ok", Pois = Array.Empty<Poi>() });
+            .ReturnsAsync(new OperationResult { Description = "ok", Pois = [] });
 
         var vm = CreateVm();
         vm.CollectionAId = 1; vm.CollectionBId = 2;

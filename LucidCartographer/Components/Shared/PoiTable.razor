@@ -48,7 +48,7 @@
                                 </div>
                             </td>
                             <td class="px-4 py-2.5 text-xs text-on-surface-variant font-mono">
-                                @(poi.Latitude.HasValue && poi.Longitude.HasValue ? $"{poi.Latitude.Value.ToString("F4")}, {poi.Longitude.Value.ToString("F4")}" : "—")
+                                @(poi is { Latitude: not null, Longitude: not null } ? $"{poi.Latitude.Value:F4}, {poi.Longitude.Value:F4}" : "—")
                             </td>
                             <td class="px-4 py-2.5">
                                 @{ var cns = GetCollectionNames(poi.Id); }
@@ -158,7 +158,7 @@
 }
 
 @code {
-    [Parameter, EditorRequired] public IReadOnlyList<Poi> Pois { get; set; } = Array.Empty<Poi>();
+    [Parameter, EditorRequired] public IReadOnlyList<Poi> Pois { get; set; } = [];
     [Parameter] public int? SelectedPoiId { get; set; }
     [Parameter] public string? CollectionName { get; set; }
     [Parameter] public IReadOnlyDictionary<int, IReadOnlyList<string>>? PoiCollectionNames { get; set; }
@@ -180,28 +180,38 @@
 
     private IReadOnlyList<string> GetCollectionNames(int poiId)
     {
-        if (CollectionName != null) return [CollectionName];
-        if (PoiCollectionNames != null && PoiCollectionNames.TryGetValue(poiId, out var names)) return names;
+        if (CollectionName != null)
+        {
+            return [CollectionName];
+        }
+
+        if (PoiCollectionNames != null && PoiCollectionNames.TryGetValue(poiId, out var names))
+        {
+            return names;
+        }
+
         return [];
     }
 
     private IReadOnlyList<int> GetCollectionMemberships(int poiId)
     {
-        if (PoiCollectionMemberships != null && PoiCollectionMemberships.TryGetValue(poiId, out var memberships)) return memberships;
+        if (PoiCollectionMemberships != null && PoiCollectionMemberships.TryGetValue(poiId, out var memberships))
+        {
+            return memberships;
+        }
+
         return [];
     }
 
     private IEnumerable<CollectionDisplayState> GetModalCollections(int poiId)
     {
-        if (Collections == null) return Enumerable.Empty<CollectionDisplayState>();
-
-        var memberships = GetCollectionMemberships(poiId);
-        if (_isCopy)
+        if (Collections == null)
         {
-            return Collections.Where(c => !memberships.Contains(c.Id));
+            return [];
         }
 
-        return Collections;
+        var memberships = GetCollectionMemberships(poiId);
+        return _isCopy ? Collections.Where(c => !memberships.Contains(c.Id)) : Collections;
     }
 
     private void OpenMoveModal(int poiId) { _modalPoiId = poiId; _isCopy = false; _showNewCollectionInput = false; _newCollectionName = ""; }
@@ -232,23 +242,39 @@
         _modalPoiId = null;
         try
         {
-            if (isCopy) await OnCopyClicked.InvokeAsync((poiId, targetCollectionId));
-            else await OnMoveClicked.InvokeAsync((poiId, targetCollectionId));
+            if (isCopy)
+            {
+                await OnCopyClicked.InvokeAsync((poiId, targetCollectionId));
+            }
+            else
+            {
+                await OnMoveClicked.InvokeAsync((poiId, targetCollectionId));
+            }
         }
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Error {(isCopy ? "copying" : "moving")} POI {poiId}: {ex.Message}"); }
     }
 
     private async Task HandleCreateAndTarget()
     {
-        if (_modalPoiId == null || string.IsNullOrWhiteSpace(_newCollectionName)) return;
+        if (_modalPoiId == null || string.IsNullOrWhiteSpace(_newCollectionName))
+        {
+            return;
+        }
+
         var poiId = _modalPoiId.Value;
         var name = _newCollectionName.Trim();
         var isCopy = _isCopy;
         CloseModal();
         try
         {
-            if (isCopy) await OnCopyToNewClicked.InvokeAsync((poiId, name));
-            else await OnMoveToNewClicked.InvokeAsync((poiId, name));
+            if (isCopy)
+            {
+                await OnCopyToNewClicked.InvokeAsync((poiId, name));
+            }
+            else
+            {
+                await OnMoveToNewClicked.InvokeAsync((poiId, name));
+            }
         }
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Error creating collection and {(isCopy ? "copying" : "moving")} POI {poiId}: {ex.Message}"); }
     }

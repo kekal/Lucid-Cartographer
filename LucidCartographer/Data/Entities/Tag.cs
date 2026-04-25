@@ -1,10 +1,9 @@
-namespace LucidCartographer.Data.Entities
-{
-    public class Tag
-    {
-        public int Id { get; set; }
-        public required string Name { get; set; }
+namespace LucidCartographer.Data.Entities;
 
-        public List<PoiTag> PoiTags { get; set; } = new();
-    }
+public class Tag
+{
+    public int Id { get; set; }
+    public required string Name { get; set; }
+
+    public List<PoiTag> PoiTags { get; set; } = [];
 }

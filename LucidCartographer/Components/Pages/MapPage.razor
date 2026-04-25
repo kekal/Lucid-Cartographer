@@ -1,12 +1,12 @@
 @page "/"
 @rendermode InteractiveServer
-@inject MapPageViewModel VM
-@inject IJSRuntime JS
+@inject MapPageViewModel Vm
+@inject IJSRuntime Js
 @implements IAsyncDisposable
 
 <PageTitle>@UiStrings.MapPageTitle</PageTitle>
 
-@if (VM.IsLoading)
+@if (Vm.IsLoading)
 {
     <div class="flex items-center justify-center h-full" aria-live="polite">
         <div class="text-center">
@@ -20,42 +20,42 @@ else
 <div class="flex h-full">
     @* Left Sidebar — Collections *@
     <div class="w-60 flex-shrink-0 bg-surface-container-low flex flex-col">
-        <CollectionSidebar Collections="VM.CollectionStates"
-                          SelectedCollectionId="VM.SelectedCollectionId"
-                          OnCollectionSelected="VM.HandleCollectionSelectedAsync"
-                          OnVisibilityToggled="VM.HandleVisibilityToggledAsync" />
+        <CollectionSidebar Collections="Vm.CollectionStates"
+                          SelectedCollectionId="Vm.SelectedCollectionId"
+                          OnCollectionSelected="Vm.HandleCollectionSelectedAsync"
+                          OnVisibilityToggled="Vm.HandleVisibilityToggledAsync" />
     </div>
 
     @* Center + Bottom *@
     <div class="flex-1 flex flex-col min-w-0">
         @* Active filter chips *@
         <div class="flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-sm z-10 flex-shrink-0">
-            @foreach (var s in VM.CollectionStates.Where(c => c.IsVisible))
+            @foreach (var s in Vm.CollectionStates.Where(c => c.IsVisible))
             {
                 <span @key="s.Id" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium text-white"
                       style="background-color: @s.Color">
                     @s.Name
-                    <button @onclick="() => VM.HandleVisibilityToggledAsync(s.Id)" class="hover:opacity-80"
+                    <button @onclick="() => Vm.HandleVisibilityToggledAsync(s.Id)" class="hover:opacity-80"
                             aria-label="@($"Hide {s.Name}")">
                         <span class="material-symbols-outlined text-xs" aria-hidden="true">close</span>
                     </button>
                 </span>
             }
-            @if (VM.PreviousSearchQuery != null)
+            @if (Vm.PreviousSearchQuery != null)
             {
                 <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium text-white"
                       style="background-color: @MapPageViewModel.SearchMarkerColor">
-                    Search: @VM.PreviousSearchQuery
-                    <button @onclick="VM.ResetSearchAsync" class="hover:opacity-80"
+                    Search: @Vm.PreviousSearchQuery
+                    <button @onclick="Vm.ResetSearchAsync" class="hover:opacity-80"
                             aria-label="Reset search">
                         <span class="material-symbols-outlined text-xs" aria-hidden="true">close</span>
                     </button>
                 </span>
             }
-            @if (VM.CollectionStates.Any(c => c.IsVisible))
+            @if (Vm.CollectionStates.Any(c => c.IsVisible))
             {
                 <button class="text-xs text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1"
-                        @onclick="VM.FitMapBoundsAsync"
+                        @onclick="Vm.FitMapBoundsAsync"
                         aria-label="@UiStrings.FitMapToVisible">
                     <span class="material-symbols-outlined text-sm" aria-hidden="true">fit_screen</span>
                     @UiStrings.FitAll
@@ -65,7 +65,7 @@ else
 
         @* Map *@
         <div style="flex: 1 1 0; min-height: 120px;" class="relative min-h-0">
-            <LeafletMap @ref="_leafletMap" OnMarkerSelected="VM.HandleMarkerSelectedAsync" OnBoundsChanged="VM.HandleBoundsChanged" />
+            <LeafletMap @ref="_leafletMap" OnMarkerSelected="Vm.HandleMarkerSelectedAsync" OnBoundsChanged="Vm.HandleBoundsChanged" />
         </div>
 
         @* Drag handle *@
@@ -74,30 +74,30 @@ else
 
         @* Bottom Table *@
         <div @ref="_tableContainer"
-             style="height: @(VM.TableHeight)px; min-height: 80px; max-height: 70vh;"
+             style="height: @(Vm.TableHeight)px; min-height: 80px; max-height: 70vh;"
              class="flex-shrink-0 bg-white shadow-inner overflow-hidden flex flex-col">
-            <PoiTable Pois="VM.FilteredPois"
-                     SelectedPoiId="VM.SelectedPoiId"
-                     CollectionName="@VM.SelectedCollectionName"
-                     PoiCollectionNames="VM.PoiCollectionNames"
-                     PoiCollectionMemberships="VM.PoiCollectionMemberships"
-                     PoiCollectionIds="VM.PoiCollectionIds"
-                     Collections="VM.CollectionStates"
-                     OnPoiSelected="VM.HandlePoiSelectedAsync"
-                     OnFocusClicked="VM.HandleFocusPoiAsync"
-                     OnDeleteClicked="VM.HandleDeletePoiAsync"
-                     OnMoveClicked="VM.HandleMovePoiAsync"
-                     OnMoveToNewClicked="VM.HandleMoveToNewCollectionAsync"
-                     OnCopyClicked="VM.HandleCopyPoiAsync"
-                     OnCopyToNewClicked="VM.HandleCopyToNewCollectionAsync" />
+            <PoiTable Pois="Vm.FilteredPois"
+                     SelectedPoiId="Vm.SelectedPoiId"
+                     CollectionName="@Vm.SelectedCollectionName"
+                     PoiCollectionNames="Vm.PoiCollectionNames"
+                     PoiCollectionMemberships="Vm.PoiCollectionMemberships"
+                     PoiCollectionIds="Vm.PoiCollectionIds"
+                     Collections="Vm.CollectionStates"
+                     OnPoiSelected="Vm.HandlePoiSelectedAsync"
+                     OnFocusClicked="Vm.HandleFocusPoiAsync"
+                     OnDeleteClicked="Vm.HandleDeletePoiAsync"
+                     OnMoveClicked="Vm.HandleMovePoiAsync"
+                     OnMoveToNewClicked="Vm.HandleMoveToNewCollectionAsync"
+                     OnCopyClicked="Vm.HandleCopyPoiAsync"
+                     OnCopyToNewClicked="Vm.HandleCopyToNewCollectionAsync" />
         </div>
     </div>
 
     @* Right Detail Pane — parent owns the null check *@
-    @if (VM.SelectedPoi != null)
+    @if (Vm.SelectedPoi != null)
     {
         <div class="w-80 flex-shrink-0 shadow-lg overflow-hidden border-l border-surface-container-high">
-            <PoiDetailPane Poi="VM.SelectedPoi" OnClose="VM.CloseDetailPane" />
+            <PoiDetailPane Poi="Vm.SelectedPoi" OnClose="Vm.CloseDetailPane" />
         </div>
     }
 </div>
@@ -111,28 +111,28 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        VM.StateChanged += OnVmChanged;
-        VM.RendererDispatch = InvokeAsync;
-        await VM.InitializeAsync();
+        Vm.StateChanged += OnVmChanged;
+        Vm.RendererDispatch = InvokeAsync;
+        await Vm.InitializeAsync();
     }
 
-    protected override Task OnParametersSetAsync() => VM.OnNavigationChangedAsync();
+    protected override Task OnParametersSetAsync() => Vm.OnNavigationChangedAsync();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender && _leafletMap != null)
         {
             await _leafletMap.WaitForInitAsync();
-            VM.AttachMap(_leafletMap);
+            Vm.AttachMap(_leafletMap);
 
-            _selfRef = DotNetObjectReference.Create(VM);
-            await JS.InvokeVoidAsync("leafletInterop.initSplitter", _splitterHandle, _tableContainer, _selfRef);
+            _selfRef = DotNetObjectReference.Create(Vm);
+            await Js.InvokeVoidAsync("leafletInterop.initSplitter", _splitterHandle, _tableContainer, _selfRef);
 
-            await VM.OnMapInitializedAsync();
+            await Vm.OnMapInitializedAsync();
         }
-        else if (VM.PendingSearchMapUpdate && _leafletMap is { IsInitialized: true })
+        else if (Vm.PendingSearchMapUpdate && _leafletMap is { IsInitialized: true })
         {
-            await VM.ResolvePendingSearchMapUpdateAsync();
+            await Vm.ResolvePendingSearchMapUpdateAsync();
         }
     }
 
@@ -140,8 +140,8 @@ else
 
     public async ValueTask DisposeAsync()
     {
-        VM.StateChanged -= OnVmChanged;
-        await VM.DisposeAsync();
+        Vm.StateChanged -= OnVmChanged;
+        await Vm.DisposeAsync();
         _selfRef?.Dispose();
         if (_leafletMap != null)
         {

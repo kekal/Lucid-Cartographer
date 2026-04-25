@@ -157,7 +157,7 @@
     [Parameter] public EventCallback<IReadOnlyList<SavedListInfo>> OnImportSelected { get; set; }
     [Parameter] public EventCallback OnResetProfile { get; set; }
 
-    private HashSet<string> _selectedUrls = new();
+    private readonly HashSet<string> _selectedUrls = [];
 
     private async Task HandleScrape()
     {
@@ -185,7 +185,9 @@
     private void ToggleSelection(string url)
     {
         if (!_selectedUrls.Remove(url))
+        {
             _selectedUrls.Add(url);
+        }
     }
 
     private void SelectAll()
@@ -204,9 +206,15 @@
 
     private async Task ImportSelected()
     {
-        if (SavedLists == null) return;
+        if (SavedLists == null)
+        {
+            return;
+        }
+
         var selected = SavedLists.Where(l => _selectedUrls.Contains(l.Url)).ToList();
         if (selected.Count > 0)
+        {
             await OnImportSelected.InvokeAsync(selected);
+        }
     }
 }
