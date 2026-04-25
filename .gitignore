@@ -26,3 +26,4 @@ scrape-diag.log
 *.diag.log
 
 
+.claude/
