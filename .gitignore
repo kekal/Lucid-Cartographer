@@ -21,4 +21,8 @@ wwwroot/css/tailwind.css
 *.db-wal
 LucidCartographer/wwwroot/css/tailwind.css
 
+# Diagnostic logs (DiagnosticLogging.TeeConsoleToFile output)
+scrape-diag.log
+*.diag.log
+
 

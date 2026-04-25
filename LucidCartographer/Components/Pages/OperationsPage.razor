@@ -1,17 +1,12 @@
 @page "/operations"
 @rendermode InteractiveServer
-@using LucidCartographer.Data.Entities
 @using LucidCartographer.Services.Operations
-@using LucidCartographer.Services.Export
-@inject IPoiService PoiService
-@inject IEnumerable<IFileExporter> Exporters
-@inject IJSRuntime JS
-@inject ISetOperationService SetOperationService
+@inject OperationsPageViewModel VM
 @implements IAsyncDisposable
 
 <PageTitle>@UiStrings.OperationsPageTitle</PageTitle>
 
-@if (_isLoading)
+@if (VM.IsLoading)
 {
     <div class="flex items-center justify-center h-full" aria-live="polite">
         <div class="text-center">
@@ -36,50 +31,50 @@ else
             <div class="space-y-4">
                 <div>
                     <label class="block text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-1.5">@UiStrings.SourceDatasetA</label>
-                    <select @bind="_collectionAId"
+                    <select @bind="VM.CollectionAId"
                             class="w-full px-3 py-2 rounded-lg bg-surface-container-highest border-0 text-on-surface text-sm focus:ring-2 focus:ring-primary">
                         <option value="0">@UiStrings.SelectCollection</option>
-                        @foreach (var col in _collections)
+                        @foreach (var col in VM.Collections)
                         {
                             <option value="@col.Id">@col.Name (@col.PoiCount pts)</option>
                         }
                     </select>
-                    @if (_collectionAId > 0)
+                    @if (VM.CollectionAId > 0)
                     {
                         <p class="text-xs text-on-surface-variant mt-1">
                             <span class="material-symbols-outlined text-xs align-middle">check_circle</span>
-                            @_collections.FirstOrDefault(c => c.Id == _collectionAId)?.PoiCount data points loaded
+                            @VM.Collections.FirstOrDefault(c => c.Id == VM.CollectionAId)?.PoiCount data points loaded
                         </p>
                     }
                 </div>
 
-                <div class="@(_isDedupMode ? "opacity-40 pointer-events-none" : "")">
+                <div class="@(VM.IsDedupMode ? "opacity-40 pointer-events-none" : "")">
                     <label class="block text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-1.5">
                         @UiStrings.SourceDatasetB
-                        @if (_isDedupMode)
+                        @if (VM.IsDedupMode)
                         {
                             <span class="text-outline normal-case tracking-normal"> — @UiStrings.NotUsedForDedup</span>
                         }
                     </label>
-                    <select @bind="_collectionBId"
-                            disabled="@_isDedupMode"
+                    <select @bind="VM.CollectionBId"
+                            disabled="@VM.IsDedupMode"
                             class="w-full px-3 py-2 rounded-lg bg-surface-container-highest border-0 text-on-surface text-sm focus:ring-2 focus:ring-primary disabled:cursor-not-allowed">
                         <option value="0">@UiStrings.SelectCollection</option>
-                        @foreach (var col in _collections)
+                        @foreach (var col in VM.Collections)
                         {
                             <option value="@col.Id">@col.Name (@col.PoiCount pts)</option>
                         }
                     </select>
-                    @if (_collectionBId > 0 && !_isDedupMode)
+                    @if (VM.CollectionBId > 0 && !VM.IsDedupMode)
                     {
                         <p class="text-xs text-on-surface-variant mt-1">
                             <span class="material-symbols-outlined text-xs align-middle">check_circle</span>
-                            @_collections.FirstOrDefault(c => c.Id == _collectionBId)?.PoiCount data points loaded
+                            @VM.Collections.FirstOrDefault(c => c.Id == VM.CollectionBId)?.PoiCount data points loaded
                         </p>
                     }
-                    @if (_selectBHint != null)
+                    @if (VM.SelectBHint != null)
                     {
-                        <p class="text-xs text-tertiary mt-1 font-medium">@_selectBHint</p>
+                        <p class="text-xs text-tertiary mt-1 font-medium">@VM.SelectBHint</p>
                     }
                 </div>
             </div>
@@ -92,38 +87,38 @@ else
                 @UiStrings.LogicalOperations
             </h3>
             <div class="grid grid-cols-2 gap-3">
-                <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(_activeOp == SetOperation.Subtract ? "ring-2 ring-primary" : "")"
+                <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(VM.ActiveOp == SetOperation.Subtract ? "ring-2 ring-primary" : "")"
                         aria-label="Subtract: A minus B (Difference)"
-                        @onclick="() => HandleBinaryOpClick(SetOperation.Subtract)"
-                        disabled="@(_collectionAId == 0)">
-                    <span class="material-symbols-outlined text-2xl @(_collectionAId > 0 ? "text-tertiary" : "text-outline")" aria-hidden="true">remove_circle</span>
+                        @onclick="() => VM.HandleBinaryOpClickAsync(SetOperation.Subtract)"
+                        disabled="@(VM.CollectionAId == 0)">
+                    <span class="material-symbols-outlined text-2xl @(VM.CollectionAId > 0 ? "text-tertiary" : "text-outline")" aria-hidden="true">remove_circle</span>
                     <span class="text-xs font-medium">A - B</span>
                     <span class="text-[10px] text-on-surface-variant">@UiStrings.Difference</span>
                 </button>
 
-                <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(_activeOp == SetOperation.Intersect ? "ring-2 ring-primary" : "")"
+                <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(VM.ActiveOp == SetOperation.Intersect ? "ring-2 ring-primary" : "")"
                         aria-label="Intersect: A intersect B"
-                        @onclick="() => HandleBinaryOpClick(SetOperation.Intersect)"
-                        disabled="@(_collectionAId == 0)">
-                    <span class="material-symbols-outlined text-2xl @(_collectionAId > 0 ? "text-secondary" : "text-outline")" aria-hidden="true">join_inner</span>
+                        @onclick="() => VM.HandleBinaryOpClickAsync(SetOperation.Intersect)"
+                        disabled="@(VM.CollectionAId == 0)">
+                    <span class="material-symbols-outlined text-2xl @(VM.CollectionAId > 0 ? "text-secondary" : "text-outline")" aria-hidden="true">join_inner</span>
                     <span class="text-xs font-medium">A n B</span>
                     <span class="text-[10px] text-on-surface-variant">@UiStrings.Intersection</span>
                 </button>
 
-                <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(_activeOp == SetOperation.Union ? "ring-2 ring-primary" : "")"
+                <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(VM.ActiveOp == SetOperation.Union ? "ring-2 ring-primary" : "")"
                         aria-label="Union: A union B"
-                        @onclick="() => HandleBinaryOpClick(SetOperation.Union)"
-                        disabled="@(_collectionAId == 0)">
-                    <span class="material-symbols-outlined text-2xl @(_collectionAId > 0 ? "text-primary" : "text-outline")" aria-hidden="true">join_full</span>
+                        @onclick="() => VM.HandleBinaryOpClickAsync(SetOperation.Union)"
+                        disabled="@(VM.CollectionAId == 0)">
+                    <span class="material-symbols-outlined text-2xl @(VM.CollectionAId > 0 ? "text-primary" : "text-outline")" aria-hidden="true">join_full</span>
                     <span class="text-xs font-medium">A u B</span>
                     <span class="text-[10px] text-on-surface-variant">@UiStrings.Union</span>
                 </button>
 
-                <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(_activeOp == SetOperation.Dedup ? "ring-2 ring-primary" : "")"
+                <button class="flex flex-col items-center gap-2 p-4 rounded-xl bg-white hover:bg-surface-container transition-colors @(VM.ActiveOp == SetOperation.Dedup ? "ring-2 ring-primary" : "")"
                         aria-label="Deduplicate collection A"
-                        @onclick="() => RunOperation(SetOperation.Dedup)"
-                        disabled="@(_collectionAId == 0)">
-                    <span class="material-symbols-outlined text-2xl @(_collectionAId > 0 ? "text-primary-container" : "text-outline")" aria-hidden="true">filter_alt</span>
+                        @onclick="() => VM.RunOperationAsync(SetOperation.Dedup)"
+                        disabled="@(VM.CollectionAId == 0)">
+                    <span class="material-symbols-outlined text-2xl @(VM.CollectionAId > 0 ? "text-primary-container" : "text-outline")" aria-hidden="true">filter_alt</span>
                     <span class="text-xs font-medium">Dedup</span>
                     <span class="text-[10px] text-on-surface-variant">@UiStrings.Deduplicate</span>
                 </button>
@@ -133,10 +128,10 @@ else
         @* Spatial Tolerance — LOW-09: auto-re-runs operation when changed *@
         <div>
             <label class="block text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-2">
-                @UiStrings.SpatialTolerance: @_toleranceMeters.ToString("F0")m
+                @UiStrings.SpatialTolerance: @VM.ToleranceMeters.ToString("F0")m
             </label>
             <input type="range" min="10" max="500" step="10"
-                   @bind="_toleranceMeters" @bind:event="oninput" @bind:after="OnToleranceChanged"
+                   @bind="VM.ToleranceMeters" @bind:event="oninput" @bind:after="VM.OnToleranceChanged"
                    id="tolerance-slider" aria-label="Spatial tolerance in meters"
                    class="w-full accent-primary" />
             <p class="text-[10px] text-on-surface-variant mt-1">
@@ -147,7 +142,7 @@ else
 
     @* Right Panel — Results *@
     <div class="flex-1 flex flex-col min-w-0 p-6" aria-live="polite">
-        @if (_isProcessing)
+        @if (VM.IsProcessing)
         {
             <div class="flex items-center justify-center h-full">
                 <div class="text-center">
@@ -156,7 +151,7 @@ else
                 </div>
             </div>
         }
-        else if (_result == null)
+        else if (VM.Result == null)
         {
             <div class="flex items-center justify-center h-full text-on-surface-variant">
                 <div class="text-center">
@@ -172,18 +167,18 @@ else
             <div class="flex items-center justify-between mb-4 flex-shrink-0">
                 <div>
                     <h3 class="text-lg font-bold font-headline">
-                        @UiStrings.ResultPreview: @GetOperationLabel()
+                        @UiStrings.ResultPreview: @VM.GetOperationLabel()
                     </h3>
-                    <p class="text-sm text-on-surface-variant">@_result.Description &bull; @_resultPois.Count points</p>
+                    <p class="text-sm text-on-surface-variant">@VM.Result.Description &bull; @VM.ResultPois.Count points</p>
                 </div>
                 <div class="flex items-center gap-2">
                     <button class="px-4 py-2 rounded-lg bg-surface-container-high text-on-surface text-sm font-medium hover:bg-surface-container-highest transition-colors flex items-center gap-2"
-                            @onclick="ExportResult" disabled="@(!_resultPois.Any())">
+                            @onclick="VM.ExportResultAsync" disabled="@(!VM.ResultPois.Any())">
                         <span class="material-symbols-outlined text-base">download</span>
                         @UiStrings.ExportResult
                     </button>
                     <button class="px-4 py-2 rounded-lg bg-gradient-to-r from-primary to-primary-container text-white text-sm font-medium hover:shadow-lg transition-all flex items-center gap-2"
-                            @onclick="CommitToLayer" disabled="@(!_resultPois.Any())">
+                            @onclick="VM.CommitToLayer" disabled="@(!VM.ResultPois.Any())">
                         <span class="material-symbols-outlined text-base">layers</span>
                         @UiStrings.CommitToLayer
                     </button>
@@ -191,26 +186,26 @@ else
             </div>
 
             @* Commit dialog *@
-            @if (_showCommitDialog)
+            @if (VM.ShowCommitDialog)
             {
                 <div class="mb-4 p-4 bg-surface-container-low rounded-xl flex-shrink-0">
                     <h4 class="font-bold font-headline text-sm mb-3">@UiStrings.SaveAsNewCollection</h4>
                     <div class="flex gap-3 items-end">
                         <div class="flex-1">
                             <label class="block text-xs text-on-surface-variant mb-1">Name</label>
-                            <input type="text" @bind="_commitName" placeholder="e.g., Filtered Places"
+                            <input type="text" @bind="VM.CommitName" placeholder="e.g., Filtered Places"
                                    class="w-full px-3 py-2 rounded-lg bg-surface-container-highest border-0 text-sm focus:ring-2 focus:ring-primary" />
                         </div>
                         <button class="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium"
-                                @onclick="DoCommit">@UiStrings.Save</button>
+                                @onclick="VM.DoCommitAsync">@UiStrings.Save</button>
                         <button class="px-4 py-2 rounded-lg bg-surface-container-high text-sm"
-                                @onclick="() => _showCommitDialog = false">@UiStrings.Cancel</button>
+                                @onclick="VM.HideCommitDialog">@UiStrings.Cancel</button>
                     </div>
-                    @if (_commitSuccess != null)
+                    @if (VM.CommitSuccess != null)
                     {
                         <p class="text-sm text-secondary mt-2 flex items-center gap-1">
                             <span class="material-symbols-outlined text-sm">check_circle</span>
-                            @_commitSuccess
+                            @VM.CommitSuccess
                         </p>
                     }
                 </div>
@@ -229,8 +224,8 @@ else
                         </tr>
                     </thead>
                     <tbody>
-                        <Virtualize Items="@_resultPois.ToList()" Context="poi" ItemSize="44">
-                            <tr @key="poi.Id" class="hover:bg-surface-container-low transition-colors @(_discardedIds.Contains(poi.Id) ? "opacity-30 line-through" : "")">
+                        <Virtualize Items="@VM.ResultPois.ToList()" Context="poi" ItemSize="44">
+                            <tr @key="poi.Id" class="hover:bg-surface-container-low transition-colors @(VM.DiscardedIds.Contains(poi.Id) ? "opacity-30 line-through" : "")">
                                 <td class="px-4 py-2.5">
                                     <div class="w-2.5 h-2.5 rounded-full bg-secondary" aria-hidden="true"></div>
                                 </td>
@@ -250,17 +245,17 @@ else
                                        target="_blank" rel="noopener"
                                        aria-label="@($"Open {poi.Name} in Google Maps")"
                                        class="text-primary hover:underline text-xs font-medium mr-3">Focus</a>
-                                    @if (!_discardedIds.Contains(poi.Id))
+                                    @if (!VM.DiscardedIds.Contains(poi.Id))
                                     {
                                         <button class="text-tertiary hover:underline text-xs font-medium"
                                                 aria-label="@($"Discard {poi.Name}")"
-                                                @onclick="() => DiscardPoi(poi.Id)">@UiStrings.Discard</button>
+                                                @onclick="() => VM.DiscardPoi(poi.Id)">@UiStrings.Discard</button>
                                     }
                                     else
                                     {
                                         <button class="text-secondary hover:underline text-xs font-medium"
                                                 aria-label="@($"Restore {poi.Name}")"
-                                                @onclick="() => RestorePoi(poi.Id)">@UiStrings.Restore</button>
+                                                @onclick="() => VM.RestorePoi(poi.Id)">@UiStrings.Restore</button>
                                     }
                                 </td>
                             </tr>
@@ -270,10 +265,10 @@ else
             </div>
 
             <div class="flex-shrink-0 pt-3 text-xs text-on-surface-variant text-right">
-                Showing @_resultPois.Count(p => !_discardedIds.Contains(p.Id)) of @_resultPois.Count result points
-                @if (_discardedIds.Any())
+                Showing @VM.ResultPois.Count(p => !VM.DiscardedIds.Contains(p.Id)) of @VM.ResultPois.Count result points
+                @if (VM.DiscardedIds.Any())
                 {
-                    <span> &bull; @_discardedIds.Count discarded</span>
+                    <span> &bull; @VM.DiscardedIds.Count discarded</span>
                 }
             </div>
         }
@@ -282,151 +277,17 @@ else
 }
 
 @code {
-    private IReadOnlyList<PoiCollection> _collections = Array.Empty<PoiCollection>();
-    private int _collectionAId;
-    private int _collectionBId;
-    private double _toleranceMeters = 100;
-    private SetOperation? _activeOp;
-    private OperationResult? _result;
-    private IReadOnlyList<Poi> _resultPois = Array.Empty<Poi>();
-    private HashSet<int> _discardedIds = new();
-    private bool _isProcessing;
-    private bool _isLoading = true;
-
-    private bool _showCommitDialog;
-    private string _commitName = string.Empty;
-    private string? _commitSuccess;
-    private bool _isDedupMode = false;
-    private CancellationTokenSource _cts = new();
-
-    // LOW-09: Debounce timer for tolerance slider auto-re-run
-    private System.Threading.Timer? _toleranceDebounce;
-
     protected override async Task OnInitializedAsync()
     {
-        _collections = await PoiService.GetCollectionsAsync();
-        _isLoading = false;
+        VM.StateChanged += OnVmChanged;
+        await VM.InitializeAsync();
     }
 
-    private string? _selectBHint;
+    private void OnVmChanged() => InvokeAsync(StateHasChanged);
 
-    private async Task HandleBinaryOpClick(SetOperation operation)
+    public async ValueTask DisposeAsync()
     {
-        _isDedupMode = false;
-        _selectBHint = null;
-        if (_collectionBId > 0)
-        {
-            await RunOperation(operation);
-        }
-        else
-        {
-            _selectBHint = UiStrings.SelectBFirst;
-            StateHasChanged();
-        }
-    }
-
-    private async Task RunOperation(SetOperation operation)
-    {
-        _isDedupMode = operation == SetOperation.Dedup;
-
-        _activeOp = operation;
-        _isProcessing = true;
-        _result = null;
-        _resultPois = Array.Empty<Poi>();
-        _discardedIds.Clear();
-        _showCommitDialog = false;
-        _commitSuccess = null;
-        StateHasChanged();
-
-        try
-        {
-            _result = await SetOperationService.ExecuteAsync(
-                operation,
-                _collectionAId,
-                operation == SetOperation.Dedup ? null : _collectionBId,
-                _toleranceMeters,
-                _cts.Token);
-            _resultPois = _result.Pois;
-        }
-        catch (Exception ex)
-        {
-            _result = new OperationResult { Description = $"Error: {ex.Message}" };
-        }
-        finally
-        {
-            _isProcessing = false;
-        }
-    }
-
-    // LOW-09: When tolerance changes and an operation was already run, re-run it with debounce
-    private void OnToleranceChanged()
-    {
-        if (_activeOp == null || _result == null) return;
-
-        _toleranceDebounce?.Dispose();
-        _toleranceDebounce = new System.Threading.Timer(async _ =>
-        {
-            await InvokeAsync(async () =>
-            {
-                if (_activeOp.HasValue)
-                    await RunOperation(_activeOp.Value);
-            });
-        }, null, 500, Timeout.Infinite);
-    }
-
-    private void DiscardPoi(int poiId)
-    {
-        _discardedIds.Add(poiId);
-    }
-
-    private void RestorePoi(int poiId)
-    {
-        _discardedIds.Remove(poiId);
-    }
-
-    private void CommitToLayer()
-    {
-        _showCommitDialog = true;
-        _commitSuccess = null;
-        var colAName = _collections.FirstOrDefault(c => c.Id == _collectionAId)?.Name ?? "A";
-        _commitName = $"{GetOperationLabel()} — {colAName}";
-    }
-
-    private async Task DoCommit()
-    {
-        var poisToSave = _resultPois.Where(p => !_discardedIds.Contains(p.Id)).ToList();
-        var saved = await SetOperationService.CommitResultAsync(poisToSave, _commitName);
-        _commitSuccess = $"Saved \"{saved.Name}\" with {saved.PoiCount} POIs";
-        _collections = await PoiService.GetCollectionsAsync();
-    }
-
-    private async Task ExportResult()
-    {
-        var poisToExport = _resultPois.Where(p => !_discardedIds.Contains(p.Id)).ToList();
-        if (!poisToExport.Any()) return;
-
-        var kmlExporter = Exporters.First(e => e.FormatName == "KML");
-        var exportTitle = string.IsNullOrEmpty(_commitName) ? GetOperationLabel() : _commitName;
-        var bytes = kmlExporter.Export(poisToExport, exportTitle);
-        var fileName = $"export_{DateTime.Now:yyyyMMdd_HHmmss}.kml";
-
-        await JS.InvokeVoidAsync("LucidCartographer.downloadFile", fileName, "application/vnd.google-earth.kml+xml", Convert.ToBase64String(bytes));
-    }
-
-    private string GetOperationLabel() => _activeOp switch
-    {
-        SetOperation.Subtract => "A - B",
-        SetOperation.Intersect => "A n B",
-        SetOperation.Union => "A u B",
-        SetOperation.Dedup => "Dedup",
-        _ => ""
-    };
-
-    public ValueTask DisposeAsync()
-    {
-        _toleranceDebounce?.Dispose();
-        _cts.Cancel();
-        _cts.Dispose();
-        return ValueTask.CompletedTask;
+        VM.StateChanged -= OnVmChanged;
+        await VM.DisposeAsync();
     }
 }

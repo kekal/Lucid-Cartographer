@@ -1,6 +1,4 @@
 using Microsoft.Playwright;
-using LucidCartographer.Services;
-using Microsoft.Extensions.Logging;
 
 namespace LucidCartographer.Services.Enrichment
 {

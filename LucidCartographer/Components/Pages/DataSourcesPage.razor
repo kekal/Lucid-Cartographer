@@ -1,17 +1,6 @@
 @page "/datasources"
 @rendermode InteractiveServer
-@using LucidCartographer.Services.Import
-@using LucidCartographer.Services.Export
-@using LucidCartographer.Data.Entities
-@using Microsoft.JSInterop
-@inject IImportJobQueue ImportJobQueue
-@inject ImportJobStatusService ImportJobStatus
-@inject IPoiService PoiService
-@inject IGoogleMapsListScraper Scraper
-@inject IEnumerable<IFileExporter> Exporters
-@inject IJSRuntime JS
-@inject LucidCartographer.Services.Enrichment.EnrichmentTrigger EnrichmentTrigger
-@inject IHttpClientFactory HttpClientFactory
+@inject DataSourcesPageViewModel Vm
 @implements IAsyncDisposable
 
 <PageTitle>@UiStrings.DataSourcesPageTitle</PageTitle>
@@ -27,8 +16,8 @@
     @* Import Cards *@
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         @* GPX/KML Upload Card *@
-        <div class="bg-surface-container-low rounded-xl p-5 cursor-pointer hover:bg-surface-container transition-colors @(_activeCard == "file" ? "ring-2 ring-primary" : "")"
-             @onclick='() => ShowUpload("file")'>
+        <div class="bg-surface-container-low rounded-xl p-5 cursor-pointer hover:bg-surface-container transition-colors @(Vm.ActiveCard == "file" ? "ring-2 ring-primary" : "")"
+             @onclick='() => Vm.ShowUploadFor("file")'>
             <div class="flex items-center gap-3 mb-3">
                 <div class="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
                     <span class="material-symbols-outlined text-primary">upload_file</span>
@@ -39,8 +28,8 @@
         </div>
 
         @* Google Takeout Card *@
-        <div class="bg-surface-container-low rounded-xl p-5 cursor-pointer hover:bg-surface-container transition-colors @(_activeCard == "takeout" ? "ring-2 ring-primary" : "")"
-             @onclick='() => ShowUpload("takeout")'>
+        <div class="bg-surface-container-low rounded-xl p-5 cursor-pointer hover:bg-surface-container transition-colors @(Vm.ActiveCard == "takeout" ? "ring-2 ring-primary" : "")"
+             @onclick='() => Vm.ShowUploadFor("takeout")'>
             <div class="flex items-center gap-3 mb-3">
                 <div class="w-10 h-10 rounded-lg bg-secondary/10 flex items-center justify-center">
                     <span class="material-symbols-outlined text-secondary">cloud_download</span>
@@ -51,8 +40,8 @@
         </div>
 
         @* Shared List Card *@
-        <div class="bg-surface-container-low rounded-xl p-5 cursor-pointer hover:bg-surface-container transition-colors @(_activeCard == "shared" ? "ring-2 ring-primary" : "")"
-             @onclick='() => ShowUpload("shared")'>
+        <div class="bg-surface-container-low rounded-xl p-5 cursor-pointer hover:bg-surface-container transition-colors @(Vm.ActiveCard == "shared" ? "ring-2 ring-primary" : "")"
+             @onclick='() => Vm.ShowUploadFor("shared")'>
             <div class="flex items-center gap-3 mb-3">
                 <div class="w-10 h-10 rounded-lg bg-primary-container/10 flex items-center justify-center">
                     <span class="material-symbols-outlined text-primary-container">public</span>
@@ -64,26 +53,26 @@
     </div>
 
     @* Upload Area (shown when active) — uses extracted FileUploadPanel *@
-    @if (_showUpload)
+    @if (Vm.ShowUpload)
     {
-        <FileUploadPanel Title="@_uploadTitle"
-                         AcceptExtensions="@_acceptExtensions"
-                         AcceptDescription="@_acceptDescription"
-                         AvailableColors="_availableColors"
-                         CollectionName="@_collectionName"
-                         CollectionNameChanged="(val) => _collectionName = val"
-                         SelectedColor="@_selectedColor"
-                         SelectedColorChanged="(val) => _selectedColor = val"
-                         OnClose="CloseUpload"
-                         OnFileSelected="HandleFileSelected"
-                         IsImporting="_isImporting"
-                         ImportingFileName="@_importingFileName"
-                         StatusMessage="@_queuedMessage"
-                         ImportResult="_importResult"
-                         ImportError="@_importError"
-                         ShowFileInput="@(_activeCard != "shared")">
+        <FileUploadPanel Title="@Vm.UploadTitle"
+                         AcceptExtensions="@Vm.AcceptExtensions"
+                         AcceptDescription="@Vm.AcceptDescription"
+                         AvailableColors="Vm.AvailableColors"
+                         CollectionName="@Vm.CollectionName"
+                         CollectionNameChanged="(val) => Vm.CollectionName = val"
+                         SelectedColor="@Vm.SelectedColor"
+                         SelectedColorChanged="(val) => Vm.SelectedColor = val"
+                         OnClose="Vm.CloseUpload"
+                         OnFileSelected="Vm.HandleFileSelectedAsync"
+                         IsImporting="Vm.IsImporting"
+                         ImportingFileName="@Vm.ImportingFileName"
+                         StatusMessage="@Vm.QueuedMessage"
+                         ImportResult="Vm.ImportResult"
+                         ImportError="@Vm.ImportError"
+                         ShowFileInput="@(Vm.ActiveCard != "shared")">
             @* Card-specific instructions *@
-            @if (_activeCard == "takeout")
+            @if (Vm.ActiveCard == "takeout")
             {
                 <div class="mb-4 p-4 rounded-lg bg-secondary/5">
                     <h4 class="font-bold text-sm mb-2 flex items-center gap-2">
@@ -98,22 +87,22 @@
                     </ol>
                 </div>
             }
-            else if (_activeCard == "shared")
+            else if (Vm.ActiveCard == "shared")
             {
-                <ScraperPanel Url="@_sharedListUrl"
-                              UrlChanged="(val) => _sharedListUrl = val"
-                              IsScraping="_isImporting"
+                <ScraperPanel Url="@Vm.SharedListUrl"
+                              UrlChanged="(val) => Vm.SharedListUrl = val"
+                              IsScraping="Vm.IsImporting"
                               ScrapeProgress="0"
-                              OnScrape="ScrapeSharedList"
-                              IsFetchingLists="_isFetchingLists"
-                              SavedLists="_savedLists"
-                              FetchListsError="@_fetchListsError"
-                              HasGoogleProfile="Scraper.HasBrowserProfile"
-                              OnFetchLists="HandleFetchMyLists"
-                              OnImportSelected="HandleImportSelectedLists"
-                              OnResetProfile="HandleResetProfile" />
+                              OnScrape="Vm.ScrapeSharedList"
+                              IsFetchingLists="Vm.IsFetchingLists"
+                              SavedLists="Vm.SavedLists"
+                              FetchListsError="@Vm.FetchListsError"
+                              HasGoogleProfile="Vm.HasGoogleProfile"
+                              OnFetchLists="Vm.HandleFetchMyListsAsync"
+                              OnImportSelected="Vm.HandleImportSelectedLists"
+                              OnResetProfile="Vm.HandleResetProfile" />
             }
-            else if (_activeCard == "file")
+            else if (Vm.ActiveCard == "file")
             {
                 <div class="mb-4 p-4 rounded-lg bg-primary/5">
                     <p class="text-sm text-on-surface-variant">
@@ -129,21 +118,21 @@
         <div class="flex items-center justify-between mb-4">
             <h3 class="text-lg font-bold font-headline">@UiStrings.ManagedSources</h3>
             <div class="flex items-center gap-3">
-                <span class="text-sm text-on-surface-variant">@_collections.Count dataset(s)</span>
+                <span class="text-sm text-on-surface-variant">@Vm.Collections.Count dataset(s)</span>
                 <button class="text-xs px-2.5 py-1.5 rounded-lg border border-outline-variant hover:bg-surface-container transition-colors disabled:opacity-50"
-                        disabled="@(_failedEnrichmentCount == 0)"
-                        @onclick="HandleResetFailedEnrichment">
-                    @UiStrings.ResetFailedEnrichment (@_failedEnrichmentCount)
+                        disabled="@(Vm.FailedEnrichmentCount == 0)"
+                        @onclick="Vm.HandleResetFailedEnrichmentAsync">
+                    @UiStrings.ResetFailedEnrichment (@Vm.FailedEnrichmentCount)
                 </button>
             </div>
         </div>
 
-        @if (!string.IsNullOrWhiteSpace(_maintenanceMessage))
+        @if (!string.IsNullOrWhiteSpace(Vm.MaintenanceMessage))
         {
-            <div class="mb-4 p-2 rounded-lg bg-primary/10 text-primary text-sm">@_maintenanceMessage</div>
+            <div class="mb-4 p-2 rounded-lg bg-primary/10 text-primary text-sm">@Vm.MaintenanceMessage</div>
         }
 
-        @if (_collections.Count == 0)
+        @if (Vm.Collections.Count == 0)
         {
             <div class="bg-surface-container-low rounded-xl p-8 text-center text-on-surface-variant">
                 <span class="material-symbols-outlined text-4xl mb-2 block">folder_open</span>
@@ -164,7 +153,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var col in _collections)
+                        @foreach (var col in Vm.Collections)
                         {
                             <tr @key="col.Id" class="hover:bg-surface-container transition-colors">
                                 <td class="px-4 py-3">
@@ -174,7 +163,7 @@
                                                 style="background-color: @col.Color"
                                                 aria-label="@($"Change color for {col.Name}")"
                                                 title="Change dataset color"
-                                                @onclick="() => OpenColorPicker(col)">
+                                                @onclick="() => Vm.OpenColorPicker(col)">
                                         </button>
                                         <span class="font-medium">@col.Name</span>
                                     </div>
@@ -183,17 +172,17 @@
                                 <td class="px-4 py-3 text-sm text-right">@col.PoiCount.ToString("N0")</td>
                                 <td class="px-4 py-3 text-sm text-on-surface-variant">@col.CreatedDate.ToString("MMM dd, yyyy")</td>
                                 <td class="px-4 py-3 text-right">
-                                    @if (_pendingDeleteId == col.Id)
+                                    @if (Vm.PendingDeleteId == col.Id)
                                     {
                                         <span class="text-xs text-tertiary font-medium mr-1">Delete?</span>
                                         <button class="text-tertiary hover:bg-tertiary/10 p-1 rounded-lg transition-colors text-xs font-medium"
                                                 aria-label="@($"Confirm delete {col.Name}")"
-                                                @onclick="() => ConfirmDelete(col.Id)">
+                                                @onclick="() => Vm.ConfirmDeleteAsync(col.Id)">
                                             @UiStrings.Yes
                                         </button>
                                         <button class="text-on-surface-variant hover:bg-surface-container-high p-1 rounded-lg transition-colors text-xs font-medium ml-1"
                                                 aria-label="@UiStrings.Cancel"
-                                                @onclick="CancelDelete">
+                                                @onclick="Vm.CancelDelete">
                                             @UiStrings.No
                                         </button>
                                     }
@@ -202,21 +191,21 @@
                                         <button class="text-primary hover:bg-primary/10 p-1 rounded-lg transition-colors"
                                                 aria-label="@($"Add POI to {col.Name}")"
                                                 title="Add POI"
-                                                @onclick="() => OpenAddPoi(col.Id)">
+                                                @onclick="() => Vm.OpenAddPoi(col.Id)">
                                             <span class="material-symbols-outlined text-sm" aria-hidden="true">add_location</span>
                                         </button>
                                         <button class="text-primary hover:bg-primary/10 p-1 rounded-lg transition-colors"
                                                 aria-label="@($"Export {col.Name} to Google My Maps")"
                                                 title="Export to Google My Maps"
-                                                disabled="@(_exportingId == col.Id)"
-                                                @onclick="() => HandleExportToMyMaps(col.Id)">
+                                                disabled="@(Vm.ExportingId == col.Id)"
+                                                @onclick="() => Vm.HandleExportToMyMapsAsync(col.Id)">
                                             <span class="material-symbols-outlined text-sm" aria-hidden="true">
-                                                @(_exportingId == col.Id ? "hourglass_empty" : "map")
+                                                @(Vm.ExportingId == col.Id ? "hourglass_empty" : "map")
                                             </span>
                                         </button>
                                         <button class="text-tertiary hover:bg-tertiary/10 p-1 rounded-lg transition-colors"
                                                 aria-label="@($"Delete {col.Name}")"
-                                                @onclick="() => RequestDelete(col.Id)">
+                                                @onclick="() => Vm.RequestDelete(col.Id)">
                                             <span class="material-symbols-outlined text-sm" aria-hidden="true">delete</span>
                                         </button>
                                     }
@@ -228,9 +217,9 @@
             </div>
 
             @* Add POI inline form *@
-            @if (_addPoiCollectionId != null)
+            @if (Vm.AddPoiCollectionId != null)
             {
-                var targetCol = _collections.FirstOrDefault(c => c.Id == _addPoiCollectionId);
+                var targetCol = Vm.Collections.FirstOrDefault(c => c.Id == Vm.AddPoiCollectionId);
                 <div class="mt-4 bg-surface-container rounded-xl p-5">
                     <div class="flex items-center justify-between mb-3">
                         <h4 class="font-bold font-headline text-sm flex items-center gap-2">
@@ -239,16 +228,16 @@
                         </h4>
                         <button class="p-1 rounded hover:bg-surface-container-high transition-colors"
                                 aria-label="Cancel"
-                                @onclick="CloseAddPoi">
+                                @onclick="Vm.CloseAddPoi">
                             <span class="material-symbols-outlined text-sm">close</span>
                         </button>
                     </div>
 
-                    @if (!string.IsNullOrEmpty(_addPoiError))
+                    @if (!string.IsNullOrEmpty(Vm.AddPoiError))
                     {
-                        <div class="mb-3 p-2 rounded-lg bg-tertiary/10 text-tertiary text-sm">@_addPoiError</div>
+                        <div class="mb-3 p-2 rounded-lg bg-tertiary/10 text-tertiary text-sm">@Vm.AddPoiError</div>
                     }
-                    @if (_addPoiSuccess)
+                    @if (Vm.AddPoiSuccess)
                     {
                         <div class="mb-3 p-2 rounded-lg bg-secondary/10 text-secondary text-sm flex items-center gap-1.5">
                             <span class="material-symbols-outlined text-sm">check_circle</span>
@@ -257,13 +246,13 @@
                     }
 
                     <div class="flex gap-2">
-                        <input type="text" @bind="_addPoiUrl" @bind:event="oninput"
+                        <input type="text" @bind="Vm.AddPoiUrl" @bind:event="oninput"
                                placeholder="Paste Google Maps link (e.g. https://maps.app.goo.gl/... or https://www.google.com/maps/place/...)"
                                class="flex-1 rounded-lg border border-outline-variant bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
                         <button class="px-4 py-2 text-sm rounded-lg bg-primary text-on-primary hover:bg-primary/90 transition-colors font-medium disabled:opacity-50 whitespace-nowrap"
-                                disabled="@(_addPoiSaving || string.IsNullOrWhiteSpace(_addPoiUrl))"
-                                @onclick="SaveNewPoi">
-                            @(_addPoiSaving ? "Adding…" : "Add")
+                                disabled="@(Vm.AddPoiSaving || string.IsNullOrWhiteSpace(Vm.AddPoiUrl))"
+                                @onclick="Vm.SaveNewPoiAsync">
+                            @(Vm.AddPoiSaving ? "Adding…" : "Add")
                         </button>
                     </div>
                     <p class="text-xs text-on-surface-variant mt-2">
@@ -275,9 +264,9 @@
     </div>
 </div>
 
-@if (_colorPickerCollectionId != null)
+@if (Vm.ColorPickerCollectionId != null)
 {
-    var targetCollection = _collections.FirstOrDefault(c => c.Id == _colorPickerCollectionId.Value);
+    var targetCollection = Vm.Collections.FirstOrDefault(c => c.Id == Vm.ColorPickerCollectionId.Value);
     <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="Change collection color">
         <div class="w-full max-w-md rounded-xl bg-surface-container p-5 shadow-xl">
             <div class="flex items-center justify-between mb-4">
@@ -285,14 +274,14 @@
                 <button type="button"
                         class="p-1 rounded hover:bg-surface-container-high transition-colors"
                         aria-label="Close color picker"
-                        @onclick="CloseColorPicker">
+                        @onclick="Vm.CloseColorPicker">
                     <span class="material-symbols-outlined text-sm">close</span>
                 </button>
             </div>
 
-            @if (!string.IsNullOrWhiteSpace(_colorPickerError))
+            @if (!string.IsNullOrWhiteSpace(Vm.ColorPickerError))
             {
-                <div class="mb-3 p-2 rounded-lg bg-tertiary/10 text-tertiary text-sm">@_colorPickerError</div>
+                <div class="mb-3 p-2 rounded-lg bg-tertiary/10 text-tertiary text-sm">@Vm.ColorPickerError</div>
             }
 
             <div class="mb-4">
@@ -300,15 +289,15 @@
                 <div class="flex items-center gap-3">
                     <input type="color"
                            class="h-10 w-14 rounded border border-outline-variant bg-surface"
-                           @bind="_colorPickerValue" />
-                    <span class="text-sm text-on-surface-variant">@_colorPickerValue</span>
+                           @bind="Vm.ColorPickerValue" />
+                    <span class="text-sm text-on-surface-variant">@Vm.ColorPickerValue</span>
                 </div>
             </div>
 
             <div class="flex flex-wrap gap-2 mb-4">
-                @foreach (var color in _availableColors)
+                @foreach (var color in Vm.AvailableColors)
                 {
-                    var isSelected = string.Equals(_colorPickerValue, color, StringComparison.OrdinalIgnoreCase);
+                    var isSelected = string.Equals(Vm.ColorPickerValue, color, StringComparison.OrdinalIgnoreCase);
                     var swatchStyle = $"background-color: {color}; width: 1.75rem; height: 1.75rem; border-radius: 9999px;";
                     if (isSelected)
                     {
@@ -318,7 +307,7 @@
                             class="border border-outline-variant p-0 flex-shrink-0"
                             style="@swatchStyle"
                             aria-label="@($"Use color {color}")"
-                            @onclick="() => _colorPickerValue = color">
+                            @onclick="() => Vm.ColorPickerValue = color">
                     </button>
                 }
             </div>
@@ -326,15 +315,15 @@
             <div class="flex justify-end gap-2">
                 <button type="button"
                         class="px-3 py-2 text-sm rounded-lg border border-outline-variant hover:bg-surface-container-high transition-colors"
-                        @onclick="CloseColorPicker"
-                        disabled="@_isSavingColorPicker">
+                        @onclick="Vm.CloseColorPicker"
+                        disabled="@Vm.IsSavingColorPicker">
                     Cancel
                 </button>
                 <button type="button"
                         class="px-3 py-2 text-sm rounded-lg bg-primary text-on-primary hover:bg-primary/90 transition-colors disabled:opacity-50"
-                        @onclick="SaveCollectionColor"
-                        disabled="@_isSavingColorPicker">
-                    @(_isSavingColorPicker ? "Saving..." : "Save")
+                        @onclick="Vm.SaveCollectionColorAsync"
+                        disabled="@Vm.IsSavingColorPicker">
+                    @(Vm.IsSavingColorPicker ? "Saving..." : "Save")
                 </button>
             </div>
         </div>
@@ -342,475 +331,17 @@
 }
 
 @code {
-    private IReadOnlyList<PoiCollection> _collections = Array.Empty<PoiCollection>();
-    private bool _showUpload = false;
-    private string _activeCard = "file";
-    private string _collectionName = string.Empty;
-    private string _selectedColor = "#005bbf";
-    private bool _isImporting = false;
-    private string? _importingFileName;
-    private ImportResult? _importResult;
-    private string? _importError;
-    private string _sharedListUrl = string.Empty;
-    private string? _queuedMessage;
-    private bool _isFetchingLists = false;
-    private IReadOnlyList<SavedListInfo>? _savedLists;
-    private string? _fetchListsError;
-    private CancellationTokenSource _cts = new();
-    private IDisposable? _statusSubscription;
-    private int _failedEnrichmentCount;
-    private string? _maintenanceMessage;
-    private int? _colorPickerCollectionId;
-    private string _colorPickerValue = "#005bbf";
-    private bool _isSavingColorPicker;
-    private string? _colorPickerError;
-
-    private string _uploadTitle => _activeCard switch
-    {
-        "takeout" => UiStrings.ImportFromTakeout,
-        "shared" => UiStrings.ImportSharedList,
-        _ => UiStrings.ImportFile
-    };
-
-    private string _acceptExtensions => _activeCard switch
-    {
-        "takeout" => ".geojson,.json",
-        "shared" => ".gpx",
-        _ => ".gpx,.kml,.kmz,.geojson,.json,.csv"
-    };
-
-    private string _acceptDescription => _activeCard switch
-    {
-        "takeout" => "Upload Saved Places.json from Google Takeout export",
-        "shared" => "Upload GPX file from the Firefox extension",
-        _ => "Supports GPX, KML, KMZ, GeoJSON, CSV"
-    };
-
-    private readonly string[] _availableColors = new[]
-    {
-        "#005bbf", "#006e2c", "#b81d17", "#7c3aed", "#ca8a04", "#0891b2", "#be185d", "#4b5563"
-    };
-
     protected override async Task OnInitializedAsync()
     {
-        await LoadCollections();
-
-        // Subscribe to background-import lifecycle events. BehaviorSubject
-        // replays the latest value on subscribe, so we pick up a job that
-        // was enqueued on another circuit / by an earlier visit and is
-        // still running. This is the whole point of the Coravel refactor:
-        // the user can navigate away and come back and still see status.
-        _statusSubscription = ImportJobStatus.Changes.Subscribe(status =>
-        {
-            _ = InvokeAsync(async () =>
-            {
-                switch (status.State)
-                {
-                    case ImportJobState.Queued:
-                        _isImporting = true;
-                        _queuedMessage = status.Message;
-                        _importError = null;
-                        _importResult = null;
-                        break;
-                    case ImportJobState.Running:
-                        _isImporting = true;
-                        _queuedMessage = status.Message;
-                        break;
-                    case ImportJobState.Completed:
-                        _isImporting = false;
-                        _importResult = status.Result;
-                        _queuedMessage = null;
-                        await LoadCollections();
-                        break;
-                    case ImportJobState.Failed:
-                        _isImporting = false;
-                        _importError = status.Error ?? status.Message;
-                        _queuedMessage = null;
-                        break;
-                }
-                StateHasChanged();
-            });
-        });
+        Vm.StateChanged += OnVmChanged;
+        await Vm.InitializeAsync();
     }
 
-    private async Task LoadCollections()
+    private void OnVmChanged() => InvokeAsync(StateHasChanged);
+
+    public async ValueTask DisposeAsync()
     {
-        _collections = await PoiService.GetCollectionsAsync();
-        _failedEnrichmentCount = await PoiService.GetFailedEnrichmentCountAsync();
-    }
-
-    private async Task HandleResetFailedEnrichment()
-    {
-        var reset = await PoiService.ResetFailedEnrichmentAsync(_cts.Token);
-        _maintenanceMessage = string.Format(UiStrings.FailedEnrichmentReset, reset);
-        await LoadCollections();
-        EnrichmentTrigger.Signal();
-    }
-
-    private void ShowUpload(string card)
-    {
-        _activeCard = card;
-        _showUpload = true;
-        _importResult = null;
-        _importError = null;
-    }
-
-    private void CloseUpload()
-    {
-        _showUpload = false;
-    }
-
-    private async Task HandleFileSelected(InputFileChangeEventArgs e)
-    {
-        var file = e.File;
-        if (file == null) return;
-
-        if (string.IsNullOrWhiteSpace(_collectionName))
-        {
-            _collectionName = Path.GetFileNameWithoutExtension(file.Name);
-        }
-
-        _isImporting = true;
-        _importingFileName = file.Name;
-        _importResult = null;
-        _importError = null;
-        StateHasChanged();
-
-        try
-        {
-            const long MaxUploadSizeBytes = 10 * 1024 * 1024; // 10MB max
-
-            // The browser-side stream only lives for the duration of this
-            // SignalR invocation, so we drop the bytes onto disk before
-            // enqueuing. The invocable owns the temp file afterwards and
-            // deletes it once the job completes (success OR failure).
-            var tempPath = Path.Combine(Path.GetTempPath(),
-                $"lucid-import-{Guid.NewGuid():N}{Path.GetExtension(file.Name)}");
-            await using (var tempStream = File.Create(tempPath))
-            await using (var upload = file.OpenReadStream(maxAllowedSize: MaxUploadSizeBytes))
-            {
-                await upload.CopyToAsync(tempStream, _cts.Token);
-            }
-
-            ImportJobQueue.Enqueue(new ImportJobPayload
-            {
-                TempFilePath = tempPath,
-                FileName = file.Name,
-                CollectionName = _collectionName,
-                Color = _selectedColor
-            });
-            _collectionName = string.Empty;
-            // _isImporting / _queuedMessage are driven by the status
-            // subscription from here on; leave them alone.
-        }
-        catch (Exception ex)
-        {
-            _importError = ex.Message;
-            _isImporting = false;
-        }
-    }
-
-    private void ScrapeSharedList()
-    {
-        if (string.IsNullOrWhiteSpace(_sharedListUrl)) return;
-
-        // The whole scrape-then-persist pipeline now runs inside the
-        // background job, so the user can navigate away during the 20–40s
-        // scrape without killing the circuit. The UI reacts to the
-        // ImportJobStatusService Rx stream (BehaviorSubject replays on
-        // subscribe, so returning to the page mid-job shows current state).
-        _importResult = null;
-        _importError = null;
-
-        try
-        {
-            ImportJobQueue.Enqueue(new ImportJobPayload
-            {
-                SharedListUrl = _sharedListUrl,
-                CollectionName = _collectionName, // may be empty — invocable fills a default from the scraped list name
-                Color = _selectedColor
-            });
-            _collectionName = string.Empty;
-            _sharedListUrl = string.Empty;
-        }
-        catch (Exception ex)
-        {
-            _importError = $"Failed to queue scrape: {ex.Message}";
-        }
-    }
-
-    private async Task HandleFetchMyLists()
-    {
-        _isFetchingLists = true;
-        _fetchListsError = null;
-        _savedLists = null;
-        StateHasChanged();
-
-        try
-        {
-            _savedLists = await Scraper.FetchSavedListsAsync(_cts.Token);
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            _fetchListsError = ex.Message;
-        }
-        finally
-        {
-            _isFetchingLists = false;
-            await InvokeAsync(StateHasChanged);
-        }
-    }
-
-    private void HandleImportSelectedLists(IReadOnlyList<SavedListInfo> selected)
-    {
-        foreach (var list in selected)
-        {
-            ImportJobQueue.Enqueue(new ImportJobPayload
-            {
-                SharedListUrl = list.Url,
-                CollectionName = list.Name,
-                Color = _selectedColor
-            });
-        }
-        _savedLists = null;
-    }
-
-    private void HandleResetProfile()
-    {
-        try
-        {
-            Scraper.ResetBrowserProfile();
-            _savedLists = null;
-            _fetchListsError = null;
-        }
-        catch (Exception ex)
-        {
-            _fetchListsError = $"Failed to reset profile: {ex.Message}";
-        }
-    }
-
-    // --- Add POI by URL ---
-    private int? _addPoiCollectionId;
-    private string _addPoiUrl = string.Empty;
-    private string? _addPoiError;
-    private bool _addPoiSuccess;
-    private bool _addPoiSaving;
-
-    private void OpenAddPoi(int collectionId)
-    {
-        _addPoiCollectionId = collectionId;
-        _addPoiUrl = string.Empty;
-        _addPoiError = null;
-        _addPoiSuccess = false;
-    }
-
-    private void CloseAddPoi()
-    {
-        _addPoiCollectionId = null;
-        _addPoiError = null;
-        _addPoiSuccess = false;
-    }
-
-    private async Task SaveNewPoi()
-    {
-        _addPoiError = null;
-        _addPoiSuccess = false;
-
-        var url = _addPoiUrl.Trim();
-        if (string.IsNullOrWhiteSpace(url))
-        {
-            _addPoiError = "Paste a Google Maps link.";
-            return;
-        }
-
-        // Basic URL validation
-        if (!url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-        {
-            _addPoiError = "Please paste a valid URL starting with http.";
-            return;
-        }
-
-        _addPoiSaving = true;
-        StateHasChanged();
-
-        try
-        {
-            // Resolve short URLs (maps.app.goo.gl/...) to full Google Maps URLs
-            // so we can extract place name and coordinates immediately.
-            if (url.Contains("goo.gl/", StringComparison.OrdinalIgnoreCase))
-            {
-                try
-                {
-                    using var http = HttpClientFactory.CreateClient();
-                    http.Timeout = TimeSpan.FromSeconds(10);
-                    // Don't follow redirects — just read the Location header
-                    using var req = new HttpRequestMessage(HttpMethod.Head, url);
-                    using var handler = new HttpClientHandler { AllowAutoRedirect = true };
-                    using var resolveClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
-                    var resp = await resolveClient.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, _cts.Token);
-                    var resolvedUrl = resp.RequestMessage?.RequestUri?.ToString();
-                    if (!string.IsNullOrEmpty(resolvedUrl) && resolvedUrl.Contains("google.com/maps"))
-                        url = resolvedUrl;
-                }
-                catch { /* best effort — fall back to original short URL */ }
-            }
-
-            // Only accept the place marker (!3d!4d) — never trust the
-            // `/@lat,lon` viewport-center fallback for Add-POI, otherwise
-            // a map that was panned elsewhere would bind the wrong coords
-            // to the new row. Enrichment will fill coords from the detail
-            // page if the URL has no place marker.
-            var coords = PoiUrlHelper.ExtractPlaceCoordinatesFromUrl(url);
-
-            // Derive a placeholder name from the URL
-            var placeholderName = "Pending enrichment";
-            if (url.Contains("/maps/place/"))
-            {
-                // Try to extract place name from URL: /maps/place/Place+Name/@...
-                var placeStart = url.IndexOf("/maps/place/", StringComparison.Ordinal) + "/maps/place/".Length;
-                var placeEnd = url.IndexOf('/', placeStart);
-                if (placeEnd < 0) placeEnd = url.IndexOf('?', placeStart);
-                if (placeEnd < 0) placeEnd = url.Length;
-                var rawName = url[placeStart..placeEnd];
-                rawName = Uri.UnescapeDataString(rawName).Replace('+', ' ');
-                if (!string.IsNullOrWhiteSpace(rawName))
-                    placeholderName = rawName;
-            }
-
-            var poi = new Poi
-            {
-                Name = placeholderName,
-                Latitude = coords?.lat,
-                Longitude = coords?.lon,
-                GoogleMapsUrl = url,
-                Status = PoiStatus.WantToGo,
-                IsEnriched = false  // enrichment service will fill details
-            };
-
-            await PoiService.CreatePoiAsync(poi, _addPoiCollectionId!.Value);
-
-            // Wake the enrichment service so it picks up the new POI immediately
-            EnrichmentTrigger.Signal();
-
-            _addPoiSuccess = true;
-            _addPoiUrl = string.Empty;
-            await LoadCollections();
-        }
-        catch (Exception ex)
-        {
-            _addPoiError = ex.Message;
-        }
-        finally
-        {
-            _addPoiSaving = false;
-        }
-    }
-
-    private int? _exportingId;
-
-    private async Task HandleExportToMyMaps(int collectionId)
-    {
-        var col = _collections.FirstOrDefault(c => c.Id == collectionId);
-        if (col == null) return;
-
-        _exportingId = collectionId;
-        StateHasChanged();
-
-        try
-        {
-            var pois = await PoiService.GetPoisByCollectionAsync(collectionId);
-            if (!pois.Any()) return;
-
-            var kmlExporter = Exporters.First(e => e.FormatName == "KML");
-            var bytes = kmlExporter.Export(pois, col.Name);
-
-            var exportDir = Path.Combine(AppContext.BaseDirectory, "data", "exports");
-            Directory.CreateDirectory(exportDir);
-            var filePath = Path.Combine(exportDir, $"{col.Name}.kml");
-            await File.WriteAllBytesAsync(filePath, bytes);
-
-            await JS.InvokeVoidAsync("navigator.clipboard.writeText", filePath);
-            await JS.InvokeVoidAsync("window.open", "https://www.google.com/maps/d/", "_blank");
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Error exporting collection {collectionId}: {ex.Message}");
-        }
-        finally
-        {
-            _exportingId = null;
-            StateHasChanged();
-        }
-    }
-
-    private int? _pendingDeleteId;
-
-    private void RequestDelete(int id)
-    {
-        _pendingDeleteId = id;
-    }
-
-    private void CancelDelete()
-    {
-        _pendingDeleteId = null;
-    }
-
-    private async Task ConfirmDelete(int id)
-    {
-        _pendingDeleteId = null;
-        await PoiService.DeleteCollectionAsync(id);
-        await LoadCollections();
-    }
-
-    private void OpenColorPicker(PoiCollection collection)
-    {
-        _colorPickerCollectionId = collection.Id;
-        _colorPickerValue = string.IsNullOrWhiteSpace(collection.Color) ? "#005bbf" : collection.Color;
-        _colorPickerError = null;
-    }
-
-    private void CloseColorPicker()
-    {
-        _colorPickerCollectionId = null;
-        _colorPickerError = null;
-    }
-
-    private async Task SaveCollectionColor()
-    {
-        if (_colorPickerCollectionId == null)
-        {
-            return;
-        }
-
-        _isSavingColorPicker = true;
-        _colorPickerError = null;
-
-        try
-        {
-            await PoiService.UpdateCollectionColorAsync(_colorPickerCollectionId.Value, _colorPickerValue, _cts.Token);
-            await LoadCollections();
-            CloseColorPicker();
-        }
-        catch (InvalidOperationException ex)
-        {
-            _colorPickerError = ex.Message;
-        }
-        catch (ArgumentException ex)
-        {
-            _colorPickerError = ex.Message;
-        }
-        finally
-        {
-            _isSavingColorPicker = false;
-        }
-    }
-
-    public ValueTask DisposeAsync()
-    {
-        _statusSubscription?.Dispose();
-        _cts.Cancel();
-        _cts.Dispose();
-        return ValueTask.CompletedTask;
+        Vm.StateChanged -= OnVmChanged;
+        await Vm.DisposeAsync();
     }
 }

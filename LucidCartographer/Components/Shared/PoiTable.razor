@@ -164,7 +164,7 @@
     [Parameter] public IReadOnlyDictionary<int, IReadOnlyList<string>>? PoiCollectionNames { get; set; }
     [Parameter] public IReadOnlyDictionary<int, IReadOnlyList<int>>? PoiCollectionMemberships { get; set; }
     [Parameter] public IReadOnlyDictionary<int, int>? PoiCollectionIds { get; set; }
-    [Parameter] public IReadOnlyList<CollectionViewModel>? Collections { get; set; }
+    [Parameter] public IReadOnlyList<CollectionDisplayState>? Collections { get; set; }
     [Parameter] public EventCallback<int> OnPoiSelected { get; set; }
     [Parameter] public EventCallback<int> OnFocusClicked { get; set; }
     [Parameter] public EventCallback<int> OnDeleteClicked { get; set; }
@@ -191,9 +191,9 @@
         return [];
     }
 
-    private IEnumerable<CollectionViewModel> GetModalCollections(int poiId)
+    private IEnumerable<CollectionDisplayState> GetModalCollections(int poiId)
     {
-        if (Collections == null) return Enumerable.Empty<CollectionViewModel>();
+        if (Collections == null) return Enumerable.Empty<CollectionDisplayState>();
 
         var memberships = GetCollectionMemberships(poiId);
         if (_isCopy)

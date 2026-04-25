@@ -1,5 +1,3 @@
-using System.Threading;
-
 namespace LucidCartographer.Services.Enrichment
 {
     public readonly record struct EnrichmentMetricsSnapshot(

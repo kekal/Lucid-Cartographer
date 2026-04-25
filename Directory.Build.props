@@ -1,0 +1,44 @@
+<Project>
+
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!--
+      Analyzer noise control. Two groups:
+
+      A. Permanently suppressed — opinionated rules that don't fit this codebase:
+        MA0004  ConfigureAwait(false) — Blazor Server needs the circuit's sync context
+        MA0006  ToString invariant — UI strings rely on culture
+        MA0011  IFormatProvider on int.Parse / decimal.Parse
+        MA0016  Prefer collection abstraction over List<T>
+        MA0048  File name must match type name (collides with Razor partials)
+        MA0051  Method too long
+        MA0053  Make class sealed — open by design in places
+        MA0076  Implicit culture-sensitive ToString
+        MA0009  Add timeout parameter to Regex (non-user input)
+        MA0136  Raw strings should not contain {} (Razor markup false positives)
+        MA0008  StructLayoutAttribute (perf micro-opt)
+        MA0023  RegexOptions.ExplicitCapture (minor perf)
+        VSTHRD103 Sync Read on async stream — CsvHelper's API is sync by design
+
+      B. Baseline-suppressed — existing legacy violations. New code MUST NOT add
+         these. Revisit during grumpy-review pass:
+        MA0002   IEqualityComparer<string> on string operations
+        MA0015   ArgumentException with parameter name
+        MA0046   Use EventHandler<T> for events — Action is fine for VM notifications
+        MA0047   Declare type in namespace
+        MA0074   StringComparison overload for StartsWith/EndsWith/IndexOf
+        VSTHRD200 Async suffix on awaitable-returning methods
+    -->
+    <NoWarn>$(NoWarn);MA0004;MA0006;MA0011;MA0016;MA0048;MA0051;MA0053;MA0076;MA0009;MA0136;MA0008;MA0023;VSTHRD103;MA0002;MA0015;MA0046;MA0047;MA0074;VSTHRD200</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="17.12.19" PrivateAssets="all" />
+    <PackageReference Include="Meziantou.Analyzer" Version="2.0.180" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

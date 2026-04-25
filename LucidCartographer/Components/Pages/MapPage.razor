@@ -1,18 +1,12 @@
 @page "/"
 @rendermode InteractiveServer
-@using LucidCartographer.Data.Entities
-@using Microsoft.AspNetCore.WebUtilities
-@using Microsoft.JSInterop
-@inject IPoiService PoiService
-@inject NavigationManager Navigation
-@inject LucidCartographer.Services.Enrichment.EnrichmentProgressService EnrichmentProgress
+@inject MapPageViewModel VM
 @inject IJSRuntime JS
-@inject ILogger<MapPage> Logger
 @implements IAsyncDisposable
 
 <PageTitle>@UiStrings.MapPageTitle</PageTitle>
 
-@if (_isLoading)
+@if (VM.IsLoading)
 {
     <div class="flex items-center justify-center h-full" aria-live="polite">
         <div class="text-center">
@@ -26,42 +20,42 @@ else
 <div class="flex h-full">
     @* Left Sidebar — Collections *@
     <div class="w-60 flex-shrink-0 bg-surface-container-low flex flex-col">
-        <CollectionSidebar Collections="_collectionVMs"
-                          SelectedCollectionId="_selectedCollectionId"
-                          OnCollectionSelected="HandleCollectionSelected"
-                          OnVisibilityToggled="HandleVisibilityToggled" />
+        <CollectionSidebar Collections="VM.CollectionStates"
+                          SelectedCollectionId="VM.SelectedCollectionId"
+                          OnCollectionSelected="VM.HandleCollectionSelectedAsync"
+                          OnVisibilityToggled="VM.HandleVisibilityToggledAsync" />
     </div>
 
     @* Center + Bottom *@
     <div class="flex-1 flex flex-col min-w-0">
         @* Active filter chips *@
         <div class="flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-sm z-10 flex-shrink-0">
-            @foreach (var vm in _collectionVMs.Where(c => c.IsVisible))
+            @foreach (var s in VM.CollectionStates.Where(c => c.IsVisible))
             {
-                <span @key="vm.Id" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium text-white"
-                      style="background-color: @vm.Color">
-                    @vm.Name
-                    <button @onclick="() => HandleVisibilityToggled(vm.Id)" class="hover:opacity-80"
-                            aria-label="@($"Hide {vm.Name}")">
+                <span @key="s.Id" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium text-white"
+                      style="background-color: @s.Color">
+                    @s.Name
+                    <button @onclick="() => VM.HandleVisibilityToggledAsync(s.Id)" class="hover:opacity-80"
+                            aria-label="@($"Hide {s.Name}")">
                         <span class="material-symbols-outlined text-xs" aria-hidden="true">close</span>
                     </button>
                 </span>
             }
-            @if (_previousSearchQuery != null)
+            @if (VM.PreviousSearchQuery != null)
             {
                 <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium text-white"
-                      style="background-color: @SearchMarkerColor">
-                    Search: @_previousSearchQuery
-                    <button @onclick="ResetSearch" class="hover:opacity-80"
+                      style="background-color: @MapPageViewModel.SearchMarkerColor">
+                    Search: @VM.PreviousSearchQuery
+                    <button @onclick="VM.ResetSearchAsync" class="hover:opacity-80"
                             aria-label="Reset search">
                         <span class="material-symbols-outlined text-xs" aria-hidden="true">close</span>
                     </button>
                 </span>
             }
-            @if (_collectionVMs.Any(c => c.IsVisible))
+            @if (VM.CollectionStates.Any(c => c.IsVisible))
             {
                 <button class="text-xs text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1"
-                        @onclick="FitMapBounds"
+                        @onclick="VM.FitMapBoundsAsync"
                         aria-label="@UiStrings.FitMapToVisible">
                     <span class="material-symbols-outlined text-sm" aria-hidden="true">fit_screen</span>
                     @UiStrings.FitAll
@@ -71,7 +65,7 @@ else
 
         @* Map *@
         <div style="flex: 1 1 0; min-height: 120px;" class="relative min-h-0">
-            <LeafletMap @ref="_leafletMap" OnMarkerSelected="HandleMarkerSelected" OnBoundsChanged="HandleBoundsChanged" />
+            <LeafletMap @ref="_leafletMap" OnMarkerSelected="VM.HandleMarkerSelectedAsync" OnBoundsChanged="VM.HandleBoundsChanged" />
         </div>
 
         @* Drag handle *@
@@ -80,30 +74,30 @@ else
 
         @* Bottom Table *@
         <div @ref="_tableContainer"
-             style="height: @(_tableHeight)px; min-height: 80px; max-height: 70vh;"
+             style="height: @(VM.TableHeight)px; min-height: 80px; max-height: 70vh;"
              class="flex-shrink-0 bg-white shadow-inner overflow-hidden flex flex-col">
-            <PoiTable Pois="_filteredPois"
-                     SelectedPoiId="_selectedPoiId"
-                     CollectionName="@_selectedCollectionName"
-                     PoiCollectionNames="_poiCollectionNames"
-                     PoiCollectionMemberships="_poiCollectionMemberships"
-                     PoiCollectionIds="_poiCollectionIds"
-                     Collections="_collectionVMs"
-                     OnPoiSelected="HandlePoiSelected"
-                     OnFocusClicked="HandleFocusPoi"
-                     OnDeleteClicked="HandleDeletePoi"
-                     OnMoveClicked="HandleMovePoi"
-                     OnMoveToNewClicked="HandleMoveToNewCollection"
-                     OnCopyClicked="HandleCopyPoi"
-                     OnCopyToNewClicked="HandleCopyToNewCollection" />
+            <PoiTable Pois="VM.FilteredPois"
+                     SelectedPoiId="VM.SelectedPoiId"
+                     CollectionName="@VM.SelectedCollectionName"
+                     PoiCollectionNames="VM.PoiCollectionNames"
+                     PoiCollectionMemberships="VM.PoiCollectionMemberships"
+                     PoiCollectionIds="VM.PoiCollectionIds"
+                     Collections="VM.CollectionStates"
+                     OnPoiSelected="VM.HandlePoiSelectedAsync"
+                     OnFocusClicked="VM.HandleFocusPoiAsync"
+                     OnDeleteClicked="VM.HandleDeletePoiAsync"
+                     OnMoveClicked="VM.HandleMovePoiAsync"
+                     OnMoveToNewClicked="VM.HandleMoveToNewCollectionAsync"
+                     OnCopyClicked="VM.HandleCopyPoiAsync"
+                     OnCopyToNewClicked="VM.HandleCopyToNewCollectionAsync" />
         </div>
     </div>
 
     @* Right Detail Pane — parent owns the null check *@
-    @if (_selectedPoi != null)
+    @if (VM.SelectedPoi != null)
     {
         <div class="w-80 flex-shrink-0 shadow-lg overflow-hidden border-l border-surface-container-high">
-            <PoiDetailPane Poi="_selectedPoi" OnClose="CloseDetailPane" />
+            <PoiDetailPane Poi="VM.SelectedPoi" OnClose="VM.CloseDetailPane" />
         </div>
     }
 </div>
@@ -111,384 +105,43 @@ else
 
 @code {
     private LeafletMap? _leafletMap;
-    private IReadOnlyList<PoiCollection> _collections = Array.Empty<PoiCollection>();
-    private List<CollectionViewModel> _collectionVMs = new();
-    private IReadOnlyList<Poi> _visiblePois = Array.Empty<Poi>();
-    private IReadOnlyList<Poi> _filteredPois = Array.Empty<Poi>();
-    private Dictionary<int, IReadOnlyList<string>> _poiCollectionNames = new();
-    private Dictionary<int, IReadOnlyList<int>> _poiCollectionMemberships = new();
-    private Dictionary<int, int> _poiCollectionIds = new();
-    private int? _selectedCollectionId;
-    private int? _selectedPoiId;
-    private string? _selectedCollectionName;
-    private Poi? _selectedPoi;
-    private bool _isLoading = true;
-    private string? _previousSearchQuery;
-
-    // Viewport filtering
-    private MapBounds? _currentBounds;
-
-    // Resizable splitter
-    private int _tableHeight = 256;
     private ElementReference _splitterHandle;
     private ElementReference _tableContainer;
-    private DotNetObjectReference<MapPage>? _selfRef;
+    private DotNetObjectReference<MapPageViewModel>? _selfRef;
 
     protected override async Task OnInitializedAsync()
     {
-        _collections = await PoiService.GetCollectionsAsync();
-        _collectionVMs = _collections.Select(c => new CollectionViewModel(c)).ToList();
-        _isLoading = false;
-
-        // Refresh the map + list when the background enrichment service
-        // flips Pois from placeholder (0,0) coords to real ones. Without
-        // this, the user has to toggle collection visibility to see new
-        // rows show up.
-        _enrichmentSubscription = System.Reactive.Linq.Observable
-            .Skip(EnrichmentProgress.Changes, 1)
-            .Subscribe(_ => OnEnrichmentChanged());
+        VM.StateChanged += OnVmChanged;
+        VM.RendererDispatch = InvokeAsync;
+        await VM.InitializeAsync();
     }
 
-    private IDisposable? _enrichmentSubscription;
-
-    private void OnEnrichmentChanged()
-    {
-        // LoadVisibleCollections touches the JS map and mutates state;
-        // marshal to the renderer thread and fire-and-forget.
-        _ = InvokeAsync(async () =>
-        {
-            try { await LoadVisibleCollections(); }
-            catch (Exception ex) { Logger.LogDebug(ex, "Enrichment refresh failed"); }
-        });
-    }
-
-    private const int SearchLayerId = -1;
-    private const string SearchMarkerColor = "#7B61FF";
-
-    // HIGH-01: Cache previous search term; skip if unchanged
-    protected override async Task OnParametersSetAsync()
-    {
-        var uri = Navigation.ToAbsoluteUri(Navigation.Uri);
-        if (QueryHelpers.ParseQuery(uri.Query).TryGetValue("search", out var searchValues))
-        {
-            var search = searchValues.FirstOrDefault();
-            if (!string.IsNullOrWhiteSpace(search))
-            {
-                if (search == _previousSearchQuery) return; // skip duplicate search
-                _previousSearchQuery = search;
-                _visiblePois = await PoiService.SearchAsync(search);
-                _filteredPois = _visiblePois;
-                _selectedCollectionName = $"Search: {search}";
-                _pendingSearchMapUpdate = true;
-                return;
-            }
-        }
-
-        // Search cleared — remove search markers if they were shown
-        if (_previousSearchQuery != null)
-        {
-            _previousSearchQuery = null;
-            _pendingSearchMapUpdate = true;
-        }
-    }
-
-    private bool _pendingSearchMapUpdate;
+    protected override Task OnParametersSetAsync() => VM.OnNavigationChangedAsync();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender && _leafletMap != null)
         {
             await _leafletMap.WaitForInitAsync();
+            VM.AttachMap(_leafletMap);
 
-            // Init resizable splitter via JS (smooth pointer capture)
-            _selfRef = DotNetObjectReference.Create(this);
+            _selfRef = DotNetObjectReference.Create(VM);
             await JS.InvokeVoidAsync("leafletInterop.initSplitter", _splitterHandle, _tableContainer, _selfRef);
 
-            if (_previousSearchQuery != null)
-            {
-                await ShowSearchResultsOnMap();
-            }
-            else
-            {
-                await LoadVisibleCollections();
-            }
-            _pendingSearchMapUpdate = false;
+            await VM.OnMapInitializedAsync();
         }
-        else if (_pendingSearchMapUpdate && _leafletMap is { IsInitialized: true })
+        else if (VM.PendingSearchMapUpdate && _leafletMap is { IsInitialized: true })
         {
-            _pendingSearchMapUpdate = false;
-            if (_previousSearchQuery != null)
-            {
-                await ShowSearchResultsOnMap();
-            }
-            else
-            {
-                // Search cleared — restore collection view
-                await _leafletMap.HideCollectionAsync(SearchLayerId);
-                await LoadVisibleCollections();
-            }
+            await VM.ResolvePendingSearchMapUpdateAsync();
         }
     }
 
-    private async Task ResetSearch()
-    {
-        _previousSearchQuery = null;
-        _selectedCollectionName = null;
-        if (_leafletMap is { IsInitialized: true })
-        {
-            await _leafletMap.HideCollectionAsync(SearchLayerId);
-            await LoadVisibleCollections();
-        }
-        Navigation.NavigateTo("/", replace: true);
-    }
-
-    private async Task ShowSearchResultsOnMap()
-    {
-        if (_leafletMap == null) return;
-
-        // Hide collection layers, show search results layer
-        foreach (var vm in _collectionVMs)
-            await _leafletMap.HideCollectionAsync(vm.Id);
-
-        var searchPois = _visiblePois.ToList();
-        await _leafletMap.ShowCollectionAsync(SearchLayerId, searchPois, SearchMarkerColor);
-
-        // Populate collection IDs/names for search results so move/delete work
-        await RefreshPoiCollectionMaps(searchPois);
-
-        _filteredPois = _visiblePois;
-        await _leafletMap.FitBoundsAsync();
-    }
-
-    [JSInvokable]
-    public async Task OnSplitterResizedJs(int height)
-    {
-        _tableHeight = height;
-        await InvokeAsync(StateHasChanged);
-    }
-
-    private async Task LoadVisibleCollections()
-    {
-        if (_leafletMap == null || !_leafletMap.IsInitialized) return;
-
-        // Clear any leftover search results layer
-        await _leafletMap.HideCollectionAsync(SearchLayerId);
-
-        var grouped = await PoiService.GetVisiblePoisGroupedAsync();
-        // A POI can belong to multiple collections (import "links" existing POIs
-        // via the M:N CollectionPoi join). When more than one of those collections
-        // is visible the same Poi would appear in _visiblePois twice, which would
-        // crash PoiTable with "More than one sibling of element 'tr' has the same
-        // key value". Dedup by Id while flattening.
-        var seen = new HashSet<int>();
-        var newPois = new List<Poi>();
-        foreach (var vm in _collectionVMs)
-        {
-            if (vm.IsVisible && grouped.ContainsKey(vm.Id))
-            {
-                await _leafletMap.ShowCollectionAsync(vm.Id, grouped[vm.Id], vm.Color);
-                foreach (var poi in grouped[vm.Id])
-                {
-                    if (seen.Add(poi.Id))
-                        newPois.Add(poi);
-                }
-            }
-            else
-            {
-                await _leafletMap.HideCollectionAsync(vm.Id);
-            }
-        }
-        _visiblePois = newPois;
-        await RefreshPoiCollectionMaps(newPois);
-        ApplyViewportFilter();
-    }
-
-    // HIGH-05: Toggle visibility on the ViewModel, then persist to DB
-    private async Task HandleVisibilityToggled(int collectionId)
-    {
-        var vm = _collectionVMs.FirstOrDefault(c => c.Id == collectionId);
-        if (vm != null) vm.IsVisible = !vm.IsVisible;
-
-        await PoiService.ToggleVisibilityAsync(collectionId);
-        await LoadVisibleCollections();
-    }
-
-    private async Task HandleCollectionSelected(int collectionId)
-    {
-        _selectedCollectionId = collectionId;
-        var vm = _collectionVMs.FirstOrDefault(c => c.Id == collectionId);
-        _selectedCollectionName = vm?.Name;
-        _visiblePois = await PoiService.GetPoisByCollectionAsync(collectionId);
-        await RefreshPoiCollectionMaps(_visiblePois);
-        ApplyViewportFilter();
-    }
-
-    private async Task HandleMarkerSelected(int poiId)
-    {
-        await SelectPoi(poiId);
-    }
-
-    private async Task HandlePoiSelected(int poiId)
-    {
-        await SelectPoi(poiId);
-        if (_leafletMap != null && _selectedPoi != null)
-        {
-            await _leafletMap.HighlightMarkerAsync(poiId);
-        }
-    }
-
-    private async Task HandleFocusPoi(int poiId)
-    {
-        await SelectPoi(poiId);
-        if (_leafletMap != null && _selectedPoi != null
-            && _selectedPoi.Latitude.HasValue && _selectedPoi.Longitude.HasValue)
-        {
-            await _leafletMap.FocusOnPoiAsync(_selectedPoi.Latitude.Value, _selectedPoi.Longitude.Value);
-        }
-    }
-
-    private async Task SelectPoi(int poiId)
-    {
-        _selectedPoiId = poiId;
-        _selectedPoi = await PoiService.GetPoiAsync(poiId);
-    }
-
-    private void CloseDetailPane()
-    {
-        _selectedPoi = null;
-        _selectedPoiId = null;
-    }
-
-    private async Task FitMapBounds()
-    {
-        if (_leafletMap != null)
-        {
-            // Show all immediately; the moveend after fitBounds will
-            // re-apply the viewport filter with the new (fitted) bounds,
-            // which will naturally include every visible POI.
-            _filteredPois = _visiblePois;
-            StateHasChanged();
-            await _leafletMap.FitBoundsAsync();
-        }
-    }
-
-    private void HandleBoundsChanged(MapBounds bounds)
-    {
-        _currentBounds = bounds;
-        ApplyViewportFilter();
-    }
-
-    private void ApplyViewportFilter()
-    {
-        if (_currentBounds == null)
-        {
-            _filteredPois = _visiblePois;
-        }
-        else
-        {
-            _filteredPois = _visiblePois
-                .Where(p => p.Latitude.HasValue && p.Longitude.HasValue
-                    && _currentBounds.Contains(p.Latitude.Value, p.Longitude.Value))
-                .ToList();
-        }
-        StateHasChanged();
-    }
-
-
-    private async Task HandleDeletePoi(int poiId)
-    {
-        if (_poiCollectionIds.TryGetValue(poiId, out var collectionId))
-        {
-            await PoiService.RemovePoiFromCollectionAsync(poiId, collectionId);
-        }
-        if (_selectedPoiId == poiId)
-            CloseDetailPane();
-        await RefreshAfterMutation();
-    }
-
-    private async Task HandleMovePoi((int PoiId, int TargetCollectionId) args)
-    {
-        await PoiService.AddPoiToCollectionAsync(args.PoiId, args.TargetCollectionId);
-
-        if (_poiCollectionMemberships.TryGetValue(args.PoiId, out var sourceCollectionIds))
-        {
-            foreach (var sourceCollectionId in sourceCollectionIds.Where(id => id != args.TargetCollectionId))
-            {
-                await PoiService.RemovePoiFromCollectionAsync(args.PoiId, sourceCollectionId);
-            }
-        }
-        await RefreshAfterMutation();
-    }
-
-    private async Task HandleMoveToNewCollection((int PoiId, string NewCollectionName) args)
-    {
-        var newCol = await PoiService.CreateCollectionAsync(args.NewCollectionName);
-        await PoiService.AddPoiToCollectionAsync(args.PoiId, newCol.Id);
-
-        if (_poiCollectionMemberships.TryGetValue(args.PoiId, out var sourceCollectionIds))
-        {
-            foreach (var sourceCollectionId in sourceCollectionIds)
-            {
-                await PoiService.RemovePoiFromCollectionAsync(args.PoiId, sourceCollectionId);
-            }
-        }
-        // Add the new collection to the VM list
-        _collectionVMs.Insert(0, new CollectionViewModel(newCol));
-        await RefreshAfterMutation();
-    }
-
-    private async Task RefreshPoiCollectionMaps(IEnumerable<Poi> pois)
-    {
-        var poiIds = pois.Select(p => p.Id).Distinct().ToList();
-        if (poiIds.Count == 0)
-        {
-            _poiCollectionNames = new();
-            _poiCollectionMemberships = new();
-            _poiCollectionIds = new();
-            return;
-        }
-
-        _poiCollectionNames = (await PoiService.GetPoiCollectionNamesAsync(poiIds))
-            .ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<string>)kvp.Value);
-
-        var memberships = await PoiService.GetPoiCollectionMembershipsAsync(poiIds);
-        _poiCollectionMemberships = memberships
-            .ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<int>)kvp.Value);
-
-        _poiCollectionIds = memberships
-            .Where(kvp => kvp.Value.Count > 0)
-            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value[0]);
-    }
-
-    private async Task HandleCopyPoi((int PoiId, int TargetCollectionId) args)
-    {
-        await PoiService.AddPoiToCollectionAsync(args.PoiId, args.TargetCollectionId);
-        await RefreshAfterMutation();
-    }
-
-    private async Task HandleCopyToNewCollection((int PoiId, string NewCollectionName) args)
-    {
-        var newCol = await PoiService.CreateCollectionAsync(args.NewCollectionName);
-        await PoiService.AddPoiToCollectionAsync(args.PoiId, newCol.Id);
-        _collectionVMs.Insert(0, new CollectionViewModel(newCol));
-        await RefreshAfterMutation();
-    }
-
-    private async Task RefreshAfterMutation()
-    {
-        // Refresh sidebar counts
-        _collections = await PoiService.GetCollectionsAsync();
-        foreach (var col in _collections)
-        {
-            var vm = _collectionVMs.FirstOrDefault(c => c.Id == col.Id);
-            if (vm != null) vm.Collection.PoiCount = col.PoiCount;
-        }
-        await LoadVisibleCollections();
-    }
+    private void OnVmChanged() => InvokeAsync(StateHasChanged);
 
     public async ValueTask DisposeAsync()
     {
-        _enrichmentSubscription?.Dispose();
+        VM.StateChanged -= OnVmChanged;
+        await VM.DisposeAsync();
         _selfRef?.Dispose();
         if (_leafletMap != null)
         {

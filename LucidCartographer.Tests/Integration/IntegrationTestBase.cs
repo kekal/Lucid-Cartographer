@@ -12,7 +12,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
 using Polly;
 using Polly.Retry;
-using Polly.Timeout;
 using LucidCartographer.Components;
 
 namespace LucidCartographer.Tests.Integration;

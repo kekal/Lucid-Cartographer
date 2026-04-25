@@ -10,17 +10,17 @@ namespace LucidCartographer.Tests.Components
 {
     public class CollectionSidebarTests : BunitTestContext
     {
-        private static CollectionViewModel MakeVm(int id, string name, string color, int poiCount = 0, bool isVisible = true)
+        private static CollectionDisplayState MakeVm(int id, string name, string color, int poiCount = 0, bool isVisible = true)
         {
             var col = new PoiCollection { Id = id, Name = name, Color = color, PoiCount = poiCount, IsVisible = isVisible };
-            return new CollectionViewModel(col);
+            return new CollectionDisplayState(col);
         }
 
         [Fact]
         public void Renders_EmptyStateMessage_WhenNoCollections()
         {
             var cut = RenderComponent<CollectionSidebar>(parameters => parameters
-                .Add(p => p.Collections, new List<CollectionViewModel>()));
+                .Add(p => p.Collections, new List<CollectionDisplayState>()));
 
             cut.Markup.Should().Contain("No collections yet.");
             cut.Markup.Should().Contain("Import data via Data Sources tab.");
@@ -29,7 +29,7 @@ namespace LucidCartographer.Tests.Components
         [Fact]
         public void Renders_CollectionNames_WithCorrectCount()
         {
-            var vms = new List<CollectionViewModel>
+            var vms = new List<CollectionDisplayState>
             {
                 MakeVm(1, "Restaurants", "#ff0000", 12),
                 MakeVm(2, "Hotels", "#00ff00", 5)
@@ -47,7 +47,7 @@ namespace LucidCartographer.Tests.Components
         [Fact]
         public void Renders_ColorDot_ForEachCollection_WithCorrectStyle()
         {
-            var vms = new List<CollectionViewModel> { MakeVm(1, "Parks", "#22cc44", 3) };
+            var vms = new List<CollectionDisplayState> { MakeVm(1, "Parks", "#22cc44", 3) };
 
             var cut = RenderComponent<CollectionSidebar>(parameters => parameters
                 .Add(p => p.Collections, vms));
@@ -60,7 +60,7 @@ namespace LucidCartographer.Tests.Components
         public void ClickingCollection_Fires_OnCollectionSelected_WithCorrectId()
         {
             int? selectedId = null;
-            var vms = new List<CollectionViewModel> { MakeVm(7, "Cafes", "#aabbcc", 2) };
+            var vms = new List<CollectionDisplayState> { MakeVm(7, "Cafes", "#aabbcc", 2) };
 
             var cut = RenderComponent<CollectionSidebar>(parameters => parameters
                 .Add(p => p.Collections, vms)
@@ -76,7 +76,7 @@ namespace LucidCartographer.Tests.Components
         public void ClickingVisibilityIcon_Fires_OnVisibilityToggled_WithCorrectId()
         {
             int? toggledId = null;
-            var vms = new List<CollectionViewModel> { MakeVm(3, "Museums", "#112233", 1, true) };
+            var vms = new List<CollectionDisplayState> { MakeVm(3, "Museums", "#112233", 1, true) };
 
             var cut = RenderComponent<CollectionSidebar>(parameters => parameters
                 .Add(p => p.Collections, vms)
@@ -91,7 +91,7 @@ namespace LucidCartographer.Tests.Components
         [Fact]
         public void Highlights_SelectedCollection_WithBgClass()
         {
-            var vms = new List<CollectionViewModel>
+            var vms = new List<CollectionDisplayState>
             {
                 MakeVm(1, "Selected", "#000000"),
                 MakeVm(2, "Other", "#ffffff")
@@ -109,7 +109,7 @@ namespace LucidCartographer.Tests.Components
         [Fact]
         public void VisibilityIcon_ShowsFilledVsOutline_BasedOnIsVisible()
         {
-            var vms = new List<CollectionViewModel>
+            var vms = new List<CollectionDisplayState>
             {
                 MakeVm(1, "Visible", "#000000", isVisible: true),
                 MakeVm(2, "Hidden", "#ffffff", isVisible: false)

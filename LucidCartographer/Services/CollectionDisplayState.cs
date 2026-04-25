@@ -7,7 +7,7 @@ namespace LucidCartographer.Services
     /// Visibility toggling modifies this wrapper, not the entity directly,
     /// avoiding shared mutable state between the UI and EF Core change tracking.
     /// </summary>
-    public class CollectionViewModel
+    public class CollectionDisplayState
     {
         public PoiCollection Collection { get; }
 
@@ -16,7 +16,7 @@ namespace LucidCartographer.Services
         /// </summary>
         public bool IsVisible { get; set; }
 
-        public CollectionViewModel(PoiCollection collection)
+        public CollectionDisplayState(PoiCollection collection)
         {
             Collection = collection;
             IsVisible = collection.IsVisible;

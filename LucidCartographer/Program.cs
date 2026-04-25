@@ -1,223 +1,29 @@
-using System.Security.Claims;
-using System.Text;
-using System.Threading.RateLimiting;
-using Coravel;
 using LucidCartographer.Components;
-using LucidCartographer.Data;
-using LucidCartographer.Services.Auth;
+using LucidCartographer.Configuration;
+using LucidCartographer.Endpoints;
 using LucidCartographer.Services;
-using LucidCartographer.Services.Enrichment;
-using LucidCartographer.Services.Export;
-using LucidCartographer.Services.Import;
-using LucidCartographer.Services.Operations;
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.RateLimiting;
-using Microsoft.AspNetCore.ResponseCompression;
-using Microsoft.EntityFrameworkCore;
-using Polly;
-using Polly.Retry;
+using LucidCartographer.Services.Diagnostics;
 
-// DIAG: tee Console to a log file so scrape logs are readable from outside preview_start
-try
-{
-    var _diagLog = new StreamWriter(@"C:\backup\maps_editor\LucidCartographer\scrape-diag.log", append: false) { AutoFlush = true };
-    Console.SetOut(new MultiTextWriter(Console.Out, _diagLog));
-    Console.SetError(new MultiTextWriter(Console.Error, _diagLog));
-}
-catch { }
+// Diagnostic console tee — defaults under the app's bin directory so the path
+// is portable across machines. Override via SCRAPE_DIAG_LOG env var if needed.
+DiagnosticLogging.TeeConsoleToFile(
+    Environment.GetEnvironmentVariable("SCRAPE_DIAG_LOG")
+        ?? Path.Combine(AppContext.BaseDirectory, "scrape-diag.log"));
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents();
-
-// MED-04: Response compression for Blazor SignalR and static files
-builder.Services.AddResponseCompression(opts =>
-{
-    opts.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(
-        new[] { "application/octet-stream" }); // SignalR uses octet-stream
-});
-
-// MED-06 / OS-independent DB path resolution.
-// Precedence:
-//   1. DB_PATH environment variable (simple override for Docker/cloud)
-//   2. Database:Path from configuration (also honours Database__Path env var)
-//   3. Default "data/cartographer.db" relative to ContentRootPath
-// Relative paths are resolved against ContentRootPath so the process does not depend
-// on the current working directory. The containing directory is created if missing.
-var dbPath = ResolveDbPath(builder.Configuration, builder.Environment);
-builder.Services.AddDbContextFactory<AppDbContext>(options =>
-    options.UseSqlite($"Data Source={dbPath}"));
-
-static string ResolveDbPath(IConfiguration cfg, IHostEnvironment env)
-{
-    var raw = Environment.GetEnvironmentVariable("DB_PATH");
-    if (string.IsNullOrWhiteSpace(raw))
-        raw = cfg.GetValue<string>("Database:Path");
-    if (string.IsNullOrWhiteSpace(raw))
-        raw = Path.Combine("data", "cartographer.db");
-
-    var full = Path.IsPathRooted(raw)
-        ? raw
-        : Path.GetFullPath(Path.Combine(env.ContentRootPath, raw));
-
-    var dir = Path.GetDirectoryName(full);
-    if (!string.IsNullOrEmpty(dir))
-        Directory.CreateDirectory(dir);
-    return full;
-}
-builder.Services.AddScoped<IPoiService, PoiService>();
-// ARCH-HIGH-02: Importers are stateless parsers — register as Singleton (consistent with exporters)
-builder.Services.AddSingleton<IFileImporter, GpxImporter>();
-builder.Services.AddSingleton<IFileImporter, KmlImporter>();
-builder.Services.AddSingleton<IFileImporter, GeoJsonImporter>();
-builder.Services.AddSingleton<IFileImporter, CsvImporter>();
-builder.Services.AddScoped<IImportOrchestrator, ImportOrchestrator>();
-// Background import pipeline (Coravel). User clicks Import -> job is enqueued
-// via IImportJobQueue -> Coravel's scheduler runs it on a background thread
-// inside its own DI scope, decoupled from the Blazor circuit. The user is
-// free to navigate away; ImportJobStatusService publishes lifecycle events
-// the UI subscribes to.
-builder.Services.AddQueue();
-builder.Services.AddSingleton<ImportJobStatusService>();
-builder.Services.AddTransient<ImportInvocable>();
-builder.Services.AddSingleton<IImportJobQueue, CoravelImportJobQueue>();
-builder.Services.AddSingleton<IFileExporter, KmlExporter>();
-builder.Services.AddSingleton<IFileExporter, GpxExporter>();
-// ARCH-HIGH-01: Removed duplicate concrete KmlExporter registration — use IEnumerable<IFileExporter> instead
-builder.Services.AddScoped<IPoiMatcher, PoiMatcher>();
-builder.Services.AddScoped<ISetOperationService, SetOperationService>();
-// HIGH-07: Scraper registered as Singleton with internal SemaphoreSlim to limit concurrency
-builder.Services.AddSingleton<IGoogleMapsListScraper, GoogleMapsListScraper>();
-// Background enrichment: fills address/website/phone for Google-scraped Pois
-// by opening each place URL in a headless tab. Runs continuously, polling the
-// DB for IsEnriched=false rows. Progress service is a singleton the MapPage
-// subscribes to for its "N pending" counter.
-builder.Services.AddSingleton<EnrichmentProgressService>();
-builder.Services.AddSingleton<EnrichmentTrigger>();
-builder.Services.AddHttpClient();
-// Tunable via the "Enrichment" section of appsettings.json — Concurrency,
-// BatchSize, IdlePollSeconds. Defaults match the hard-coded values the
-// service used before extraction, so an upgrade without config changes
-// behaves identically.
-builder.Services.Configure<EnrichmentOptions>(builder.Configuration.GetSection("Enrichment"));
-builder.Services.AddHostedService<PoiEnrichmentBackgroundService>();
-builder.Services.AddScoped<IMapService, LeafletMapService>();
-builder.Services.AddSingleton<SessionStore>();
-
 builder.Services
-    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-    .AddCookie(options =>
-    {
-        options.LoginPath = "/login";
-        options.AccessDeniedPath = "/login";
-        options.Cookie.Name = "cartographer_auth";
-        options.Cookie.HttpOnly = true;
-        options.Cookie.SameSite = SameSiteMode.Strict;
-        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
-        options.SlidingExpiration = true;
-        options.ExpireTimeSpan = TimeSpan.FromDays(30);
-        options.Events = new CookieAuthenticationEvents
-        {
-            OnValidatePrincipal = async context =>
-            {
-                var sessionToken = context.Principal?.FindFirstValue("session_token");
-                if (string.IsNullOrWhiteSpace(sessionToken))
-                {
-                    context.RejectPrincipal();
-                    await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-                    return;
-                }
-
-                var store = context.HttpContext.RequestServices.GetRequiredService<SessionStore>();
-                if (!await store.IsActiveAsync(sessionToken, context.HttpContext.RequestAborted))
-                {
-                    context.RejectPrincipal();
-                    await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-                }
-            }
-        };
-    });
-builder.Services.AddAuthorization();
-
-// Polly v8 resilience pipelines.
-// Replaces hand-rolled SemaphoreSlim in GoogleMapsListScraper and adds
-// retry/timeout to Playwright-based scraping + enrichment. Pipelines are
-// registered by name and resolved via ResiliencePipelineProvider<string>.
-//   - "scraper": single-flight (concurrency=1) + timeout + retry. Used for
-//     list scrapes so at most one Chromium instance runs at a time.
-//   - "enrichment": retry + timeout for per-POI enrichment work.
-builder.Services.AddResiliencePipeline("scraper", pipeline =>
-{
-    pipeline
-        .AddConcurrencyLimiter(new ConcurrencyLimiterOptions
-        {
-            PermitLimit = 1,
-            QueueLimit = int.MaxValue
-        })
-        .AddRetry(new RetryStrategyOptions
-        {
-            MaxRetryAttempts = 2,
-            BackoffType = DelayBackoffType.Exponential,
-            UseJitter = true,
-            Delay = TimeSpan.FromSeconds(2)
-        })
-        .AddTimeout(TimeSpan.FromMinutes(10));
-});
-
-builder.Services.AddResiliencePipeline("enrichment", pipeline =>
-{
-    pipeline
-        .AddRetry(new RetryStrategyOptions
-        {
-            MaxRetryAttempts = 3,
-            BackoffType = DelayBackoffType.Exponential,
-            UseJitter = true,
-            Delay = TimeSpan.FromSeconds(1)
-        })
-        .AddTimeout(TimeSpan.FromMinutes(2));
-});
-
-// BCL rate limiter — replaces hand-rolled ConcurrentDictionary counter.
-// 5 attempts per minute per client IP, partitioned fixed window.
-// Semantic drift: counts ALL attempts (success + fail), not just failures.
-// Acceptable for a single-user app — brute-force protection still holds.
-builder.Services.AddRateLimiter(options =>
-{
-    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.OnRejected = async (context, ct) =>
-    {
-        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-        await context.HttpContext.Response.WriteAsync(
-            "Too many login attempts. Try again later.", ct);
-    };
-    options.AddPolicy("login", httpContext =>
-    {
-        var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-        return RateLimitPartition.GetFixedWindowLimiter(ip, _ => new FixedWindowRateLimiterOptions
-        {
-            PermitLimit = 5,
-            Window = TimeSpan.FromMinutes(1),
-            QueueLimit = 0,
-            AutoReplenishment = true
-        });
-    });
-});
-
-// Health checks endpoint
-builder.Services.AddHealthChecks();
-
-// ARCH-CRIT-03: Refuse to start with default insecure password
-var configuredPassword = builder.Configuration["Auth:Password"];
-var configuredPasswordHash = builder.Configuration["Auth:PasswordHash"];
-if (string.Equals(configuredPassword, "changeme", StringComparison.Ordinal)
-    || string.Equals(configuredPasswordHash, "changeme", StringComparison.Ordinal))
-{
-    throw new InvalidOperationException(
-        "Auth:Password/Auth:PasswordHash is still set to 'changeme'. Set a strong secret before starting the application.");
-}
+    .AddRazorAndCompression()
+    .AddAppDatabase(builder.Configuration, builder.Environment)
+    .AddPoiServices()
+    .AddImportPipeline()
+    .AddEnrichmentPipeline(builder.Configuration)
+    .AddExportPipeline()
+    .AddAppAuthentication(builder.Configuration)
+    .AddAppResiliencePipelines()
+    .AddPageViewModels()
+    .AddHealthChecks().Services
+    .AddHostedService<StartupCleanupService>();
 
 var app = builder.Build();
 
@@ -229,104 +35,23 @@ TaskScheduler.UnobservedTaskException += (_, e) =>
     e.SetObserved();
 };
 
-// Sweep orphaned lucid-import-* temp files left by a previous crash that
-// died between "file streamed to disk" and "Coravel invocable ran + deleted
-// it in finally". Cheap and safe: only files matching the specific pattern
-// we wrote ourselves, older than 1h, are removed.
-{
-    var sweepLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("TempFileSweep");
-    try
-    {
-        var tempRoot = Path.GetTempPath();
-        var cutoff = DateTime.UtcNow - TimeSpan.FromHours(1);
-        int swept = 0;
-        foreach (var path in Directory.EnumerateFiles(tempRoot, "lucid-import-*"))
-        {
-            try
-            {
-                if (File.GetLastWriteTimeUtc(path) < cutoff)
-                {
-                    File.Delete(path);
-                    swept++;
-                }
-            }
-            catch (Exception ex)
-            {
-                sweepLogger.LogDebug(ex, "Could not remove orphaned temp file {Path}", path);
-            }
-        }
-        if (swept > 0)
-            sweepLogger.LogInformation("Removed {Count} orphaned lucid-import-* temp files from {Path}", swept, tempRoot);
-    }
-    catch (Exception ex)
-    {
-        sweepLogger.LogWarning(ex, "Startup temp-file sweep failed; continuing");
-    }
-}
-
-// Auth secret enforcement.
-// In Production, refuse to start if no auth secret is configured — the app
-// will be exposed behind a Zero Trust proxy that does NOT authenticate, so
-// the app's own auth is the only gate. In Development, warn only.
-{
-    var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger<Program>();
-    if (string.IsNullOrEmpty(GetConfiguredAuthSecret(app.Configuration)))
-    {
-        if (app.Environment.IsDevelopment())
-        {
-            logger.LogWarning("Auth:Password/Auth:PasswordHash not set — authentication is DISABLED (Development only)");
-        }
-        else
-        {
-            throw new InvalidOperationException(
-                "Auth:Password/Auth:PasswordHash is not set. Configure an auth secret before starting the application in a non-Development environment.");
-        }
-    }
-}
-
-// ARCH-CRIT-01: Use MigrateAsync instead of EnsureCreatedAsync to support schema evolution.
-using (var scope = app.Services.CreateScope())
-{
-    var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
-    using var db = await factory.CreateDbContextAsync();
-    await db.Database.MigrateAsync();
-}
-
-// Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
     // HSTS: instruct browsers to only connect over HTTPS. Safe behind the
     // TLS-terminating proxy (Cloudflare / Zero Trust) since the edge is HTTPS.
     app.UseHsts();
-    // ARCH-HIGH-05: Defense-in-depth — app runs behind Cloudflare which terminates TLS,
-    // but UseHttpsRedirection ensures direct-access requests are also redirected.
+    // ARCH-HIGH-05: Defense-in-depth — UseHttpsRedirection ensures
+    // direct-access requests are also redirected even though Cloudflare
+    // already terminates TLS at the edge.
     app.UseHttpsRedirection();
 }
 
-// ARCH-CRIT-04: Tightened CSP — removed 'unsafe-eval', specified CDN domains explicitly.
-// 'unsafe-inline' for script-src is required by Blazor Server — its SignalR bootstrapper
-// injects inline scripts that cannot use nonces/hashes with the current Blazor runtime.
-app.Use(async (context, next) =>
-{
-    context.Response.Headers.Append("Content-Security-Policy",
-        "default-src 'self'; " +
-        "script-src 'self' 'unsafe-inline'; " +
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-        "font-src 'self' https://fonts.gstatic.com; " +
-        "img-src 'self' data: https://*.tile.openstreetmap.org https://*.googleapis.com https://*.gstatic.com; " +
-        "connect-src 'self' ws: wss:; " +
-        "frame-ancestors 'none';");
-    context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
-    context.Response.Headers.Append("X-Frame-Options", "DENY");
-    context.Response.Headers.Append("Referrer-Policy", "strict-origin-when-cross-origin");
-    await next();
-});
+app.UseSecurityHeaders();
 
 // ARCH-HIGH-06: Response compression placed AFTER security headers to avoid BREACH issues.
-// Skipped in Development so `dotnet watch` browser-refresh and BrowserLink can inject
-// their hot-reload script into uncompressed HTML responses — compressed responses cause
-// "Unable to configure browser refresh script injection ... Content-Encoding: 'br'" warnings.
+// Skipped in Development so `dotnet watch` browser-refresh / BrowserLink can inject
+// their hot-reload script into uncompressed HTML responses.
 if (!app.Environment.IsDevelopment())
 {
     app.UseResponseCompression();
@@ -334,150 +59,19 @@ if (!app.Environment.IsDevelopment())
 
 app.UseAuthentication();
 app.UseAuthorization();
-
-// Guard routes behind authenticated principal when auth is configured.
-app.Use(async (context, next) =>
-{
-    var path = context.Request.Path.Value ?? "";
-
-    // Allow: login page, static assets, health check, Blazor framework
-    if (path == "/login" ||
-        path.StartsWith("/_framework") ||
-        path.StartsWith("/css") ||
-        path.StartsWith("/js") ||
-        path.StartsWith("/lib") ||
-        path == "/health" ||
-        path.StartsWith("/_blazor"))
-    {
-        await next();
-        return;
-    }
-
-    // Enforce auth only when a password secret is configured.
-    var configuredSecret = GetConfiguredAuthSecret(context.RequestServices.GetRequiredService<IConfiguration>());
-    if (!string.IsNullOrEmpty(configuredSecret)
-        && !(context.User.Identity?.IsAuthenticated ?? false))
-    {
-        context.Response.Redirect("/login");
-        return;
-    }
-
-    await next();
-});
-
+app.UseAuthRouteGuard();
 app.UseAntiforgery();
-
 app.UseRateLimiter();
-
 app.UseStaticFiles();
 
-// Health check endpoint (MED-01)
-app.MapHealthChecks("/health");
-
-// Login endpoint with rate limiting + CSRF validation.
-app.MapPost("/login", async (HttpContext context) =>
-{
-    // ARCH-CRIT-03: Validate antiforgery token on login POST
-    var antiforgery = context.RequestServices.GetRequiredService<Microsoft.AspNetCore.Antiforgery.IAntiforgery>();
-    try
-    {
-        await antiforgery.ValidateRequestAsync(context);
-    }
-    catch (Microsoft.AspNetCore.Antiforgery.AntiforgeryValidationException)
-    {
-        context.Response.Redirect("/login?error=1");
-        return;
-    }
-
-    var form = await context.Request.ReadFormAsync();
-    var password = form["password"].ToString();
-    var configuredSecret = GetConfiguredAuthSecret(context.RequestServices.GetRequiredService<IConfiguration>());
-    var passwordMatch = !string.IsNullOrEmpty(configuredSecret)
-        && PasswordHasher.VerifyConfiguredSecret(password, configuredSecret);
-
-    if (passwordMatch)
-    {
-        var store = context.RequestServices.GetRequiredService<SessionStore>();
-        var sessionToken = await store.CreateAsync(context.RequestAborted);
-
-        var claims = new List<Claim>
-        {
-            new(ClaimTypes.Name, "lucid-user"),
-            new("session_token", sessionToken)
-        };
-        var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
-        var principal = new ClaimsPrincipal(identity);
-
-        await context.SignInAsync(
-            CookieAuthenticationDefaults.AuthenticationScheme,
-            principal,
-            new AuthenticationProperties
-            {
-                IsPersistent = true,
-                ExpiresUtc = DateTimeOffset.UtcNow.AddDays(30)
-            });
-        context.Response.Redirect("/");
-    }
-    else
-    {
-        context.Response.Redirect("/login?error=1");
-    }
-}).RequireRateLimiting("login");
-
-// Logout endpoint
-app.MapGet("/logout", async (HttpContext context) =>
-{
-    var sessionToken = context.User.FindFirstValue("session_token");
-    if (!string.IsNullOrWhiteSpace(sessionToken))
-    {
-        var store = context.RequestServices.GetRequiredService<SessionStore>();
-        await store.RevokeAsync(sessionToken, context.RequestAborted);
-    }
-
-    await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-    context.Response.Redirect("/login");
-});
-
-// Serves image bytes stored in the Poi.ImageData column. Used by
-// PoiDetailPane to render scraped Google Maps thumbnails — we persist the
-// bytes rather than hotlinking the signed googleusercontent URLs (which
-// Google blocks cross-origin and expires in ~minutes). Auth middleware
-// above gates this endpoint behind the same cookie as the rest of the app.
-app.MapGet("/api/poi-image/{id:int}", async (int id, IDbContextFactory<AppDbContext> dbFactory) =>
-{
-    await using var db = await dbFactory.CreateDbContextAsync();
-    var image = await db.PoiImages
-        .AsNoTracking()
-        .FirstOrDefaultAsync(i => i.PoiId == id);
-    if (image is null || image.Data.Length == 0)
-        return Results.NotFound();
-    return Results.File(image.Data, image.ContentType ?? "image/jpeg");
-});
+app.MapHealthChecks("/health"); // MED-01
+app.MapAuthEndpoints();
+app.MapPoiImageEndpoints();
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
 
-static string? GetConfiguredAuthSecret(IConfiguration configuration)
-{
-    var hash = configuration["Auth:PasswordHash"];
-    if (!string.IsNullOrWhiteSpace(hash))
-        return hash;
-
-    return configuration["Auth:Password"];
-}
-
 // Make Program accessible for WebApplicationFactory in integration tests
 public partial class Program { }
-
-internal sealed class MultiTextWriter : System.IO.TextWriter
-{
-    private readonly System.IO.TextWriter[] _writers;
-    public MultiTextWriter(params System.IO.TextWriter[] writers) { _writers = writers; }
-    public override System.Text.Encoding Encoding => System.Text.Encoding.UTF8;
-    public override void Write(char value) { foreach (var w in _writers) w.Write(value); }
-    public override void Write(string? value) { foreach (var w in _writers) w.Write(value); }
-    public override void WriteLine(string? value) { foreach (var w in _writers) w.WriteLine(value); }
-    public override void Flush() { foreach (var w in _writers) w.Flush(); }
-}

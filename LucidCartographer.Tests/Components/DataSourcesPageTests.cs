@@ -39,6 +39,10 @@ namespace LucidCartographer.Tests.Components
             // instead of awaiting IImportOrchestrator directly.
             Services.AddSingleton<ImportJobStatusService>();
             Services.AddSingleton<IImportJobQueue>(_ => Mock.Of<IImportJobQueue>());
+
+            // Page-scoped ViewModel — page now @injects this instead of
+            // individual services (Stage 2 ViewModel discipline).
+            Services.AddTransient<DataSourcesPageViewModel>();
         }
 
         // ── Initial Render ──────────────────────────────────────────────────

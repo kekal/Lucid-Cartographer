@@ -23,34 +23,25 @@ namespace LucidCartographer.Tests.Components
 
         // Under bUnit, the <Virtualize> component inside OperationsPage renders zero
         // <tr> rows because there is no real viewport. Tests that need to inspect
-        // result contents read the underlying state via reflection instead.
-        private static IList<Poi> GetResultPois(IRenderedComponent<OperationsPage> cut)
+        // result contents read the VM state via the page's injected property.
+        private static OperationsPageViewModel GetVm(IRenderedComponent<OperationsPage> cut)
         {
-            var f = typeof(OperationsPage).GetField("_resultPois",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            return ((IEnumerable<Poi>)f!.GetValue(cut.Instance)!).ToList();
+            var prop = typeof(OperationsPage).GetProperty("VM",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            return (OperationsPageViewModel)prop!.GetValue(cut.Instance)!;
         }
+
+        private static IList<Poi> GetResultPois(IRenderedComponent<OperationsPage> cut)
+            => GetVm(cut).ResultPois.ToList();
 
         private static HashSet<int> GetDiscardedIds(IRenderedComponent<OperationsPage> cut)
-        {
-            var f = typeof(OperationsPage).GetField("_discardedIds",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            return (HashSet<int>)f!.GetValue(cut.Instance)!;
-        }
+            => GetVm(cut).DiscardedIds;
 
         private static void InvokeDiscard(IRenderedComponent<OperationsPage> cut, int poiId)
-        {
-            var m = typeof(OperationsPage).GetMethod("DiscardPoi",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            m!.Invoke(cut.Instance, new object[] { poiId });
-        }
+            => GetVm(cut).DiscardPoi(poiId);
 
         private static void InvokeRestore(IRenderedComponent<OperationsPage> cut, int poiId)
-        {
-            var m = typeof(OperationsPage).GetMethod("RestorePoi",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            m!.Invoke(cut.Instance, new object[] { poiId });
-        }
+            => GetVm(cut).RestorePoi(poiId);
 
         public OperationsPageTests()
         {
@@ -61,7 +52,12 @@ namespace LucidCartographer.Tests.Components
             Services.AddScoped<IPoiMatcher, PoiMatcher>();
             Services.AddScoped<ISetOperationService, SetOperationService>();
             Services.AddSingleton<KmlExporter>();
+            // The VM injects IEnumerable<IFileExporter>; satisfy with the test's KmlExporter.
+            Services.AddSingleton<IFileExporter>(sp => sp.GetRequiredService<KmlExporter>());
             Services.AddSingleton(new Mock<IJSRuntime>().Object);
+
+            // Page-scoped ViewModel — Stage 2 ViewModel discipline.
+            Services.AddScoped<OperationsPageViewModel>();
         }
 
         private void SeedData()

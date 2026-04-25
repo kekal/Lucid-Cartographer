@@ -49,7 +49,7 @@
 </div>
 
 @code {
-    [Parameter, EditorRequired] public IReadOnlyList<CollectionViewModel> Collections { get; set; } = Array.Empty<CollectionViewModel>();
+    [Parameter, EditorRequired] public IReadOnlyList<CollectionDisplayState> Collections { get; set; } = Array.Empty<CollectionDisplayState>();
     [Parameter] public int? SelectedCollectionId { get; set; }
     [Parameter] public EventCallback<int> OnCollectionSelected { get; set; }
     [Parameter] public EventCallback<int> OnVisibilityToggled { get; set; }

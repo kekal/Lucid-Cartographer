@@ -174,7 +174,7 @@ namespace LucidCartographer.Tests.Components
         public void CopyModal_ShowsOnlyCollections_ThatDoNotContainPoi()
         {
             var pois = new List<Poi> { CreatePoi(1, "Test Place") };
-            var collections = new List<CollectionViewModel>
+            var collections = new List<CollectionDisplayState>
             {
                 new(new PoiCollection { Id = 1, Name = "Alpha", Color = "#005bbf" }),
                 new(new PoiCollection { Id = 2, Name = "Beta", Color = "#006e2c" }),
@@ -199,7 +199,7 @@ namespace LucidCartographer.Tests.Components
         public void MoveModal_ShowsAllCollections()
         {
             var pois = new List<Poi> { CreatePoi(1, "Test Place") };
-            var collections = new List<CollectionViewModel>
+            var collections = new List<CollectionDisplayState>
             {
                 new(new PoiCollection { Id = 1, Name = "Alpha", Color = "#005bbf" }),
                 new(new PoiCollection { Id = 2, Name = "Beta", Color = "#006e2c" }),
