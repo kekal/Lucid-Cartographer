@@ -36,6 +36,13 @@ public static class UiStrings
     public const string LocationDetails = "Location Details";
     public const string CloseDetailPane = "Close detail pane";
     public const string OpenInGoogleMaps = "Open in Google Maps";
+    public const string EnrichDetails = "Enrich Details";
+    public const string EnrichDetailsAria = "Re-fetch address, website, phone, and image for this location";
+    public const string EnrichFallbackTitle = "Couldn't find details for {0}";
+    public const string EnrichFallbackBody = "Open Google Maps, locate the correct place, then paste its URL below to enrich this POI.";
+    public const string EnrichFallbackSearchLink = "Search on Google Maps";
+    public const string EnrichFallbackUrlLabel = "Google Maps place URL";
+    public const string EnrichFallbackInvalidUrl = "Please paste a Google Maps URL (google.com/maps/... or maps.app.goo.gl).";
     public const string Collections = "Collections";
     public const string NoCollectionsYet = "No collections yet.";
     public const string ImportDataHint = "Import data via Data Sources tab.";

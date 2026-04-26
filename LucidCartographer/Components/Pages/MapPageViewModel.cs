@@ -19,6 +19,7 @@ public sealed class MapPageViewModel(
     IPoiService poiService,
     NavigationManager navigation,
     EnrichmentProgressService enrichmentProgress,
+    EnrichmentTrigger enrichmentTrigger,
     ILogger<MapPageViewModel> logger)
     : IAsyncDisposable
 {
@@ -60,6 +61,12 @@ public sealed class MapPageViewModel(
     public int TableHeight { get; private set; } = 256;
     public bool PendingSearchMapUpdate { get; private set; }
 
+    // Set when the user clicks Enrich; cleared after the BG queue drains and
+    // we either confirm success or open the fallback dialog. Used to scope
+    // the post-enrichment "did it work?" check to the POI the user asked about.
+    private int? _pendingEnrichPoiId;
+    public Poi? EnrichFallbackPoi { get; private set; }
+
     // --- Lifecycle ---
 
     public async Task InitializeAsync()
@@ -74,7 +81,7 @@ public sealed class MapPageViewModel(
         // rows show up.
         _enrichmentSubscription = enrichmentProgress.Changes
             .Skip(1)
-            .Subscribe(_ => OnEnrichmentChanged());
+            .Subscribe(remaining => OnEnrichmentChanged(remaining));
 
         Notify();
     }
@@ -159,7 +166,7 @@ public sealed class MapPageViewModel(
         }
     }
 
-    private void OnEnrichmentChanged()
+    private void OnEnrichmentChanged(int remaining)
     {
         // Rx fires from a background thread. LoadVisibleCollectionsAsync
         // makes JS interop calls (LeafletMap.Show/HideCollectionAsync) which
@@ -170,6 +177,11 @@ public sealed class MapPageViewModel(
             try
             {
                 await LoadVisibleCollectionsAsync();
+                if (remaining == 0 && _pendingEnrichPoiId is { } pendingId)
+                {
+                    _pendingEnrichPoiId = null;
+                    await CheckEnrichOutcomeAsync(pendingId);
+                }
                 Notify();
             }
             catch (Exception ex)
@@ -177,6 +189,43 @@ public sealed class MapPageViewModel(
                 logger.LogDebug(ex, "Enrichment refresh failed");
             }
         });
+    }
+
+    private async Task CheckEnrichOutcomeAsync(int poiId)
+    {
+        var fresh = await poiService.GetPoiAsync(poiId);
+        if (fresh is null)
+        {
+            return;
+        }
+
+        var stillEmpty = string.IsNullOrWhiteSpace(fresh.Address)
+                         && string.IsNullOrWhiteSpace(fresh.Website)
+                         && string.IsNullOrWhiteSpace(fresh.Phone);
+        if (stillEmpty)
+        {
+            EnrichFallbackPoi = fresh;
+        }
+    }
+
+    public void CloseEnrichFallback()
+    {
+        EnrichFallbackPoi = null;
+        Notify();
+    }
+
+    public async Task SubmitEnrichFallbackAsync(string googleMapsUrl)
+    {
+        if (EnrichFallbackPoi is null)
+        {
+            return;
+        }
+        var poiId = EnrichFallbackPoi.Id;
+        await poiService.ReplacePoiGoogleMapsUrlAsync(poiId, googleMapsUrl);
+        EnrichFallbackPoi = null;
+        _pendingEnrichPoiId = poiId;
+        enrichmentTrigger.Signal();
+        Notify();
     }
 
     [JSInvokable]
@@ -341,6 +390,13 @@ public sealed class MapPageViewModel(
             await LoadVisibleCollectionsAsync();
         }
         navigation.NavigateTo("/", replace: true);
+    }
+
+    public async Task HandleEnrichPoiAsync(int poiId)
+    {
+        await poiService.MarkPoiForReEnrichmentAsync(poiId);
+        _pendingEnrichPoiId = poiId;
+        enrichmentTrigger.Signal();
     }
 
     public async Task HandleDeletePoiAsync(int poiId)

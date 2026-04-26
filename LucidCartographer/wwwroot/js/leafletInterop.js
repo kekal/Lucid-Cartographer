@@ -232,6 +232,32 @@
     // MED-08: downloadFile moved from inline script in App.razor to this module.
     // Callable via JS interop as window.LucidCartographer.downloadFile.
     window.LucidCartographer = window.LucidCartographer || {};
+    // Scrolls a virtualized list container so the row at `index` (with fixed
+    // `itemSize` px) becomes visible. Used by PoiTable to follow map-driven
+    // selection — Virtualize doesn't render the row until it's in view, so
+    // scrollIntoView on the row element won't work.
+    // Scrolls a Virtualize-backed list so the row with data-poi-id=poiId
+    // sits flush under the sticky thead. Two-pass:
+    //   1. Rough jump to index*itemSize so Virtualize materialises the row.
+    //   2. After paint, look up the actual <tr> and snap to its real offsetTop
+    //      minus the sticky header height — robust against varying row heights.
+    window.LucidCartographer.scrollListToPoi = function (container, poiId, index, itemSize) {
+        if (!container || index < 0) return;
+        var thead = container.querySelector('thead');
+        var headerH = thead ? thead.offsetHeight : 0;
+        container.scrollTop = index * itemSize;
+        var snap = function () {
+            var row = container.querySelector('tr[data-poi-id="' + poiId + '"]');
+            if (!row) return;
+            container.scrollTop = row.offsetTop - headerH;
+        };
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(function () { requestAnimationFrame(snap); });
+        } else {
+            setTimeout(snap, 16);
+        }
+    };
+
     window.LucidCartographer.downloadFile = function (filename, contentType, base64Data) {
         var link = document.createElement('a');
         link.download = filename;

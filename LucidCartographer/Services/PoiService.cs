@@ -457,6 +457,62 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
         return failed.Count;
     }
 
+    public async Task ReplacePoiGoogleMapsUrlAsync(int poiId, string googleMapsUrl, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(googleMapsUrl))
+        {
+            throw new ArgumentException("Google Maps URL is required", nameof(googleMapsUrl));
+        }
+
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var poi = await db.Pois.FirstOrDefaultAsync(p => p.Id == poiId, cancellationToken);
+        if (poi is null)
+        {
+            logger.LogWarning("ReplacePoiGoogleMapsUrlAsync: POI {PoiId} not found", poiId);
+            return;
+        }
+        // Drop the stale coords so the BG service treats this as a fresh
+        // place — otherwise the wrong (lat,lon) would still be on the row
+        // until enrichment overwrote it.
+        poi.GoogleMapsUrl = googleMapsUrl.Trim();
+        poi.Latitude = null;
+        poi.Longitude = null;
+        poi.IsEnriched = false;
+        poi.EnrichmentFailureCount = 0;
+        poi.LastEnrichmentAttemptAt = null;
+        poi.ImageUrl = null;
+        var existingImage = await db.PoiImages.FindAsync([poiId], cancellationToken);
+        if (existingImage is not null)
+        {
+            db.PoiImages.Remove(existingImage);
+        }
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task MarkPoiForReEnrichmentAsync(int poiId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var poi = await db.Pois.FirstOrDefaultAsync(p => p.Id == poiId, cancellationToken);
+        if (poi is null)
+        {
+            logger.LogWarning("MarkPoiForReEnrichmentAsync: POI {PoiId} not found", poiId);
+            return;
+        }
+        poi.IsEnriched = false;
+        poi.EnrichmentFailureCount = 0;
+        poi.LastEnrichmentAttemptAt = null;
+        // Drop the cached thumbnail so the BG service re-downloads at the
+        // upscaled size (the existing-image short-circuit at
+        // BackfillImageAsync would otherwise keep the small copy).
+        poi.ImageUrl = null;
+        var existingImage = await db.PoiImages.FindAsync([poiId], cancellationToken);
+        if (existingImage is not null)
+        {
+            db.PoiImages.Remove(existingImage);
+        }
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
     /// <summary>
     /// Validates a POI entity before persistence.
     /// [REVIEW-3] Validates Status against PoiStatus.IsValid and Category against PoiCategory.All.

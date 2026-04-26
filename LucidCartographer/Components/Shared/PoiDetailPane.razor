@@ -165,8 +165,16 @@
         </div>
     </div>
 
-    @* Footer: Google Maps button *@
-    <div class="p-4 flex-shrink-0">
+    @* Footer: Enrich + Google Maps buttons *@
+    <div class="p-4 flex-shrink-0 space-y-2">
+        <button type="button"
+                @onclick="HandleEnrichClick"
+                disabled="@(_enrichRequested || !Poi.IsEnriched)"
+                aria-label="@UiStrings.EnrichDetailsAria"
+                class="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg border border-surface-container-high bg-surface text-on-surface font-medium text-sm hover:bg-surface-container-low transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+            <span class="material-symbols-outlined text-base" aria-hidden="true">auto_fix_high</span>
+            @(_enrichRequested ? "Queued…" : UiStrings.EnrichDetails)
+        </button>
         <a href="@PoiUrlHelper.GetGoogleMapsUrl(Poi)"
            target="_blank" rel="noopener"
            class="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg bg-gradient-to-r from-primary to-primary-container text-white font-medium text-sm hover:shadow-lg transition-all">
@@ -181,6 +189,27 @@
 
     [Parameter, EditorRequired] public Poi Poi { get; set; } = null!;
     [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<int> OnEnrichRequested { get; set; }
+
+    private int _lastSeenPoiId;
+    private bool _enrichRequested;
+
+    protected override void OnParametersSet()
+    {
+        // Reset the queued state when the user opens a different POI, or when
+        // the BG service finishes and flips IsEnriched back to true.
+        if (Poi.Id != _lastSeenPoiId || Poi.IsEnriched)
+        {
+            _lastSeenPoiId = Poi.Id;
+            _enrichRequested = false;
+        }
+    }
+
+    private async Task HandleEnrichClick()
+    {
+        _enrichRequested = true;
+        await OnEnrichRequested.InvokeAsync(Poi.Id);
+    }
 
     private static string TruncateUrl(string url)
     {

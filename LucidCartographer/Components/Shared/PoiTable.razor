@@ -1,4 +1,5 @@
 @using LucidCartographer.Data.Entities
+@inject IJSRuntime Js
 
 <div class="flex flex-col h-full">
     @* Table Header *@
@@ -10,7 +11,7 @@
     </div>
 
     @* Table Content *@
-    <div class="flex-1 overflow-y-auto">
+    <div class="flex-1 overflow-y-auto" @ref="_scrollContainer">
         @if (!Pois.Any())
         {
             <div class="p-8 text-center text-on-surface-variant text-sm">
@@ -33,6 +34,7 @@
                 <tbody>
                     <Virtualize Items="@Pois.ToList()" Context="poi" ItemSize="44">
                         <tr @key="poi.Id"
+                            data-poi-id="@poi.Id"
                             class="hover:bg-surface-container-low transition-colors cursor-pointer @(SelectedPoiId == poi.Id ? "bg-surface-container" : "")"
                             @onclick="() => HandlePoiClick(poi.Id)">
                             <td class="px-4 py-2.5">
@@ -177,6 +179,25 @@
     private bool _isCopy;
     private bool _showNewCollectionInput;
     private string _newCollectionName = "";
+    private ElementReference _scrollContainer;
+    private int? _lastScrolledPoiId;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (SelectedPoiId is not int id || id == _lastScrolledPoiId || Pois.Count == 0)
+        {
+            return;
+        }
+        var index = -1;
+        for (var i = 0; i < Pois.Count; i++)
+        {
+            if (Pois[i].Id == id) { index = i; break; }
+        }
+        if (index < 0) return;
+        _lastScrolledPoiId = id;
+        try { await Js.InvokeVoidAsync("LucidCartographer.scrollListToPoi", _scrollContainer, id, index, 44); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"scrollListToIndex failed: {ex.Message}"); }
+    }
 
     private IReadOnlyList<string> GetCollectionNames(int poiId)
     {
@@ -220,6 +241,7 @@
 
     private async Task HandlePoiClick(int poiId)
     {
+        _lastScrolledPoiId = poiId;
         try { await OnPoiSelected.InvokeAsync(poiId); }
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Error selecting POI {poiId}: {ex.Message}"); }
     }

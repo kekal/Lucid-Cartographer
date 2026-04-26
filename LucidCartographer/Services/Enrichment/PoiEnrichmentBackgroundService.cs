@@ -247,7 +247,12 @@ public class PoiEnrichmentBackgroundService : BackgroundService
             // the next idle poll cycle re-picks the row.
             var details = await _pipeline.ExecuteAsync(async innerCt =>
             {
-                if (!string.IsNullOrEmpty(poi.GoogleMapsUrl) && poi.GoogleMapsUrl.Contains("/maps/place/"))
+                // Any URL the row has — canonical /maps/place/, a /maps/search/
+                // result page, or a maps.app.goo.gl shortlink — gets navigated
+                // directly. Playwright follows redirects and the place-URL wait
+                // loop in EnrichCoreAsync handles the post-redirect hydration.
+                // Only fall back to a name search when we have no URL at all.
+                if (!string.IsNullOrEmpty(poi.GoogleMapsUrl))
                 {
                     return await PoiDetailEnricher.EnrichAsync(page, poi.GoogleMapsUrl!, innerCt, _logger);
                 }
@@ -488,6 +493,8 @@ public class PoiEnrichmentBackgroundService : BackgroundService
                     ContentType = contentType
                 });
                 poi.ImageUrl = candidateUrl;
+                _logger.LogInformation("Image fetched for Poi {PoiId}: {Bytes} bytes from {ImageUrl}",
+                    poi.Id, bytes.Length, candidateUrl);
                 return;
             }
             catch (Exception ex)
@@ -499,8 +506,9 @@ public class PoiEnrichmentBackgroundService : BackgroundService
 
     private static IEnumerable<string> BuildImageFetchCandidates(string imageUrl)
     {
-        yield return imageUrl;
-
+        // Google Maps' DOM <img src> is a tiny thumbnail (e.g. =w86-h86-k-no).
+        // Swap the size suffix to ask the CDN for the full-size photo first;
+        // fall back to the original only if the upscaled URL 404s.
         var equalsIdx = imageUrl.LastIndexOf('=');
         if (equalsIdx > 0)
         {
@@ -510,6 +518,8 @@ public class PoiEnrichmentBackgroundService : BackgroundService
                 yield return upscaled;
             }
         }
+
+        yield return imageUrl;
     }
 
     private static bool IsLikelyPlacePhotoUrl(string url)

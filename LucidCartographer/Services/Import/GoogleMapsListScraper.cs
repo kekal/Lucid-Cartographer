@@ -695,14 +695,19 @@ public class GoogleMapsListScraper(
                     coords = ExtractCoordinates(href);
                 }
 
-                // Click-through fallback: when the card has no place anchor
-                // (common on personal / shared lists whose cards are anchor-less
-                // `<button jsaction>` elements), click the card to navigate to
-                // the place page, read the URL (which contains coords + place ID),
-                // then go back to the list.
-                if (coords == null)
+                // Click-through fallback: when the harvested href isn't a
+                // canonical /maps/place/ URL — either the card had no anchor
+                // (common on personal / shared lists with `<button jsaction>`
+                // tiles) or the JS selector matched a generic maps link
+                // (e.g. an `/@lat,lon,17z` viewport anchor) — click the card to
+                // navigate to the place page, read the URL (which embeds the
+                // place ID + coords), then go back to the list. Without this
+                // upgrade the row would be saved with only viewport coords and
+                // enrichment couldn't resolve the right place later.
+                var hrefIsPlaceUrl = !string.IsNullOrEmpty(href) && href.Contains("/maps/place/");
+                if (!hrefIsPlaceUrl)
                 {
-                    logger.LogInformation("[{Idx}/{Total}] '{Name}' — no href, trying click-through", i + 1, totalItems, name);
+                    logger.LogInformation("[{Idx}/{Total}] '{Name}' — href '{Href}' is not a place URL, trying click-through", i + 1, totalItems, name, href ?? "(none)");
                     try
                     {
                         var cardSelector = $"[data-scraper-idx=\"{idx}\"]";

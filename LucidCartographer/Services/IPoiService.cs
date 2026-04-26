@@ -41,4 +41,6 @@ public interface IPoiService
     /// Resets enrichment failure tracking for non-enriched POIs so they can be retried.
     /// </summary>
     Task<int> ResetFailedEnrichmentAsync(CancellationToken cancellationToken = default);
+    Task MarkPoiForReEnrichmentAsync(int poiId, CancellationToken cancellationToken = default);
+    Task ReplacePoiGoogleMapsUrlAsync(int poiId, string googleMapsUrl, CancellationToken cancellationToken = default);
 }

@@ -97,10 +97,19 @@ else
     @if (Vm.SelectedPoi != null)
     {
         <div class="w-80 flex-shrink-0 shadow-lg overflow-hidden border-l border-surface-container-high">
-            <PoiDetailPane Poi="Vm.SelectedPoi" OnClose="Vm.CloseDetailPane" />
+            <PoiDetailPane Poi="Vm.SelectedPoi"
+                           OnClose="Vm.CloseDetailPane"
+                           OnEnrichRequested="Vm.HandleEnrichPoiAsync" />
         </div>
     }
 </div>
+
+@if (Vm.EnrichFallbackPoi is not null)
+{
+    <EnrichFallbackDialog Poi="Vm.EnrichFallbackPoi"
+                          OnClose="Vm.CloseEnrichFallback"
+                          OnSubmit="Vm.SubmitEnrichFallbackAsync" />
+}
 }
 
 @code {
