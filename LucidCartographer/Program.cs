@@ -47,6 +47,7 @@ if (!app.Environment.IsDevelopment())
     app.UseHttpsRedirection();
 }
 
+app.UseForwardedHeaders();
 app.UseSecurityHeaders();
 
 // ARCH-HIGH-06: Response compression placed AFTER security headers to avoid BREACH issues.
@@ -59,7 +60,7 @@ if (!app.Environment.IsDevelopment())
 
 app.UseAuthentication();
 app.UseAuthorization();
-app.UseAuthRouteGuard();
+app.UseLanBypassOrAuth();
 app.UseAntiforgery();
 app.UseRateLimiter();
 app.UseStaticFiles();

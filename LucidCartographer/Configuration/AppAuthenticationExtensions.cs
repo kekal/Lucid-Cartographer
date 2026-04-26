@@ -1,31 +1,39 @@
 using System.Security.Claims;
+using System.Net;
 using System.Threading.RateLimiting;
 using LucidCartographer.Services.Auth;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.HttpOverrides;
 
 namespace LucidCartographer.Configuration;
 
 public static class AppAuthenticationExtensions
 {
     /// <summary>
-    /// Cookie auth + session-token validation, login rate limiter, and the
-    /// startup-time refusal to run with the literal "changeme" secret.
+    /// Cookie auth + session-token validation, login rate limiter, and
+    /// forwarded-header trust configuration for reverse proxies.
     /// Sliding 30-day expiration; HttpOnly + SameSite=Strict + Secure.
     /// </summary>
     public static IServiceCollection AddAppAuthentication(
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        // ARCH-CRIT-03: Refuse to start with default insecure password
-        var configuredPassword = configuration["Auth:Password"];
-        var configuredPasswordHash = configuration["Auth:PasswordHash"];
-        if (string.Equals(configuredPassword, "changeme", StringComparison.Ordinal)
-            || string.Equals(configuredPasswordHash, "changeme", StringComparison.Ordinal))
+        services.Configure<ForwardedHeadersOptions>(options =>
         {
-            throw new InvalidOperationException(
-                "Auth:Password/Auth:PasswordHash is still set to 'changeme'. Set a strong secret before starting the application.");
-        }
+            options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+            options.KnownProxies.Clear();
+            options.KnownNetworks.Clear();
+
+            var trustedProxies = configuration.GetSection("Auth:TrustedProxies").Get<string[]>() ?? [];
+            foreach (var trustedProxy in trustedProxies)
+            {
+                if (IPAddress.TryParse(trustedProxy, out var parsedAddress))
+                {
+                    options.KnownProxies.Add(parsedAddress);
+                }
+            }
+        });
 
         services.AddSingleton<SessionStore>();
 

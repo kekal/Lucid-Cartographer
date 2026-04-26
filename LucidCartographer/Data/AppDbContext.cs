@@ -12,6 +12,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Tag> Tags => Set<Tag>();
     public DbSet<PoiTag> PoiTags => Set<PoiTag>();
     public DbSet<Session> Sessions => Set<Session>();
+    public DbSet<User> Users => Set<User>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -119,6 +120,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.Property(e => e.TokenHash).HasMaxLength(64);
             entity.HasIndex(e => e.TokenHash).IsUnique();
             entity.HasIndex(e => e.ExpiresAt);
+        });
+
+        modelBuilder.Entity<User>(entity =>
+        {
+            entity.Property(e => e.Username).HasMaxLength(200);
+            entity.Property(e => e.PasswordHash).HasMaxLength(512);
+            entity.HasIndex(e => e.Username).IsUnique();
         });
     }
 

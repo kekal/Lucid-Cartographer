@@ -5,7 +5,7 @@
     <div class="w-full max-w-sm">
         <div class="text-center mb-8">
             <h1 class="text-2xl font-extrabold tracking-tight font-headline text-on-surface">@UiStrings.AppTitle</h1>
-            <p class="text-sm text-on-surface-variant mt-1">@UiStrings.EnterPassword</p>
+            <p class="text-sm text-on-surface-variant mt-1">@UiStrings.EnterCredentials</p>
         </div>
 
         <div class="bg-white rounded-2xl shadow-lg p-8">
@@ -15,19 +15,28 @@
                 @if (!string.IsNullOrEmpty(Error))
                 {
                     <div class="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm" role="alert">
-                        @UiStrings.IncorrectPassword
+                        @UiStrings.IncorrectCredentials
                     </div>
                 }
 
-                <label for="password" class="block text-sm font-medium text-on-surface mb-2">@UiStrings.Password</label>
+                <label for="username" class="block text-sm font-medium text-on-surface mb-2">@UiStrings.Username</label>
+                <input type="text"
+                       id="username"
+                       name="username"
+                       required
+                       autofocus
+                       autocomplete="username"
+                       class="w-full px-4 py-2.5 rounded-lg border border-outline bg-surface-container-low text-on-surface placeholder:text-outline focus:ring-2 focus:ring-primary focus:border-primary transition-colors text-sm"
+                       placeholder="@UiStrings.Username" />
+
+                <label for="password" class="block text-sm font-medium text-on-surface mt-4 mb-2">@UiStrings.Password</label>
                 <input type="password"
                        id="password"
                        name="password"
                        required
-                       autofocus
                        autocomplete="current-password"
                        class="w-full px-4 py-2.5 rounded-lg border border-outline bg-surface-container-low text-on-surface placeholder:text-outline focus:ring-2 focus:ring-primary focus:border-primary transition-colors text-sm"
-                       placeholder="@UiStrings.EnterPassword" />
+                       placeholder="@UiStrings.Password" />
 
                 <button type="submit"
                         class="w-full mt-6 px-4 py-2.5 rounded-lg bg-primary text-white text-sm font-semibold hover:shadow-lg transition-all">

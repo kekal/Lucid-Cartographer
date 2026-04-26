@@ -1,8 +1,10 @@
 using System.Security.Claims;
+using LucidCartographer.Data;
 using LucidCartographer.Services.Auth;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.EntityFrameworkCore;
 
 namespace LucidCartographer.Endpoints;
 
@@ -26,20 +28,28 @@ public static class AuthEndpoints
             }
 
             var form = await context.Request.ReadFormAsync();
+            var username = form["username"].ToString();
             var password = form["password"].ToString();
-            var configuredSecret = AuthSecretReader.GetConfiguredAuthSecret(
-                context.RequestServices.GetRequiredService<IConfiguration>());
-            var passwordMatch = !string.IsNullOrEmpty(configuredSecret)
-                && PasswordHasher.VerifyConfiguredSecret(password, configuredSecret);
+            var dbFactory = context.RequestServices.GetRequiredService<IDbContextFactory<AppDbContext>>();
+
+            await using var db = await dbFactory.CreateDbContextAsync(context.RequestAborted);
+            var user = await db.Users.FirstOrDefaultAsync(
+                u => u.Username == username,
+                context.RequestAborted);
+
+            var passwordMatch = user is not null && PasswordHasher.Verify(password, user.PasswordHash);
 
             if (passwordMatch)
             {
+                user!.LastLoginAt = DateTime.UtcNow;
+                await db.SaveChangesAsync(context.RequestAborted);
+
                 var store = context.RequestServices.GetRequiredService<SessionStore>();
                 var sessionToken = await store.CreateAsync(context.RequestAborted);
 
                 List<Claim> claims =
                 [
-                    new(ClaimTypes.Name, "lucid-user"),
+                    new(ClaimTypes.Name, user.Username),
                     new("session_token", sessionToken)
                 ];
                 var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Globalization;
 
 namespace LucidCartographer.Services.Auth;
 
@@ -10,27 +11,43 @@ namespace LucidCartographer.Services.Auth;
 public static class PasswordHasher
 {
     private const string Scheme = "pbkdf2";
+    private const int DefaultIterations = 100000;
+    private const int SaltSize = 16;
+    private const int HashSize = 32;
 
     /// <summary>
-    /// Verifies a plaintext password against configured hash input.
-    /// Accepts either pbkdf2 hash format or legacy plaintext value.
+    /// Creates a PBKDF2 password hash using the encoded format
+    /// pbkdf2$iterations$saltBase64$hashBase64.
     /// </summary>
-    public static bool VerifyConfiguredSecret(string password, string configuredSecret)
+    public static string HashPassword(string password)
     {
-        if (string.IsNullOrEmpty(configuredSecret))
+        ArgumentException.ThrowIfNullOrWhiteSpace(password);
+
+        var salt = RandomNumberGenerator.GetBytes(SaltSize);
+        var hash = Rfc2898DeriveBytes.Pbkdf2(
+            Encoding.UTF8.GetBytes(password),
+            salt,
+            DefaultIterations,
+            HashAlgorithmName.SHA256,
+            HashSize);
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"{Scheme}${DefaultIterations}${Convert.ToBase64String(salt)}${Convert.ToBase64String(hash)}");
+    }
+
+    /// <summary>
+    /// Verifies a plaintext password against a PBKDF2 encoded password hash.
+    /// </summary>
+    public static bool Verify(string password, string passwordHash)
+    {
+        if (string.IsNullOrWhiteSpace(password) || string.IsNullOrWhiteSpace(passwordHash))
         {
             return false;
         }
 
-        if (configuredSecret.StartsWith($"{Scheme}$", StringComparison.OrdinalIgnoreCase))
-        {
-            return VerifyPbkdf2(password, configuredSecret);
-        }
-
-        var inputBytes = Encoding.UTF8.GetBytes(password);
-        var expectedBytes = Encoding.UTF8.GetBytes(configuredSecret);
-        return inputBytes.Length == expectedBytes.Length
-               && CryptographicOperations.FixedTimeEquals(inputBytes, expectedBytes);
+        return passwordHash.StartsWith($"{Scheme}$", StringComparison.OrdinalIgnoreCase)
+            && VerifyPbkdf2(password, passwordHash);
     }
 
     private static bool VerifyPbkdf2(string password, string encoded)

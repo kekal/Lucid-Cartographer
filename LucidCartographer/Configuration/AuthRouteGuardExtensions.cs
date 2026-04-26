@@ -1,15 +1,16 @@
-using LucidCartographer.Services.Auth;
+using System.Net;
+using System.Net.Sockets;
+using System.Security.Claims;
 
 namespace LucidCartographer.Configuration;
 
 public static class AuthRouteGuardExtensions
 {
     /// <summary>
-    /// Redirects unauthenticated requests to /login when an auth secret is
-    /// configured. Allowed unauthenticated paths: /login, static assets,
-    /// /health, Blazor framework + circuit endpoints.
+    /// Bypasses authentication for local-network requests when enabled,
+    /// otherwise redirects unauthenticated requests to /login.
     /// </summary>
-    public static IApplicationBuilder UseAuthRouteGuard(this IApplicationBuilder app)
+    public static IApplicationBuilder UseLanBypassOrAuth(this IApplicationBuilder app)
     {
         app.Use(async (context, next) =>
         {
@@ -27,10 +28,19 @@ public static class AuthRouteGuardExtensions
                 return;
             }
 
-            var configuredSecret = AuthSecretReader.GetConfiguredAuthSecret(
-                context.RequestServices.GetRequiredService<IConfiguration>());
-            if (!string.IsNullOrEmpty(configuredSecret)
-                && !(context.User.Identity?.IsAuthenticated ?? false))
+            var configuration = context.RequestServices.GetRequiredService<IConfiguration>();
+            var bypassLocalAddresses = configuration.GetValue<bool>("Auth:BypassLocalAddresses");
+            if (bypassLocalAddresses && IsLocalNetwork(context.Connection.RemoteIpAddress))
+            {
+                context.User = new ClaimsPrincipal(
+                    new ClaimsIdentity(
+                        [new Claim(ClaimTypes.Name, "lan")],
+                        "lan-bypass"));
+                await next();
+                return;
+            }
+
+            if (!(context.User.Identity?.IsAuthenticated ?? false))
             {
                 context.Response.Redirect("/login");
                 return;
@@ -39,5 +49,45 @@ public static class AuthRouteGuardExtensions
             await next();
         });
         return app;
+    }
+
+    private static bool IsLocalNetwork(IPAddress? address)
+    {
+        if (address is null)
+        {
+            return false;
+        }
+
+        if (IPAddress.IsLoopback(address))
+        {
+            return true;
+        }
+
+        if (address.IsIPv4MappedToIPv6)
+        {
+            address = address.MapToIPv4();
+        }
+
+        if (address.AddressFamily == AddressFamily.InterNetwork)
+        {
+            var bytes = address.GetAddressBytes();
+            return bytes[0] == 10
+                   || (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)
+                   || (bytes[0] == 192 && bytes[1] == 168)
+                   || bytes[0] == 127;
+        }
+
+        if (address.AddressFamily != AddressFamily.InterNetworkV6)
+        {
+            return false;
+        }
+
+        if (address.Equals(IPAddress.IPv6Loopback))
+        {
+            return true;
+        }
+
+        var v6 = address.GetAddressBytes();
+        return v6[0] == 0xFE && (v6[1] & 0xC0) == 0x80;
     }
 }

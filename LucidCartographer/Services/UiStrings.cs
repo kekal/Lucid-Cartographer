@@ -101,10 +101,11 @@ public static class UiStrings
     public const string GoToMap = "Go to Map";
 
     // Login
-    public const string EnterPassword = "Enter your password to continue";
+    public const string EnterCredentials = "Enter your username and password to continue";
+    public const string Username = "Username";
     public const string Password = "Password";
     public const string Login = "Login";
-    public const string IncorrectPassword = "Incorrect password. Please try again.";
+    public const string IncorrectCredentials = "Incorrect username or password.";
 
     // Error
     public const string ErrorTitle = "Error.";

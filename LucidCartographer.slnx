@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="docs/auth-rework-proposal.md" />
+  </Folder>
   <Project Path="LucidCartographer.Tests/LucidCartographer.Tests.csproj" />
   <Project Path="LucidCartographer/LucidCartographer.csproj" />
 </Solution>
