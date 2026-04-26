@@ -42,5 +42,10 @@ public interface IPoiService
     /// </summary>
     Task<int> ResetFailedEnrichmentAsync(CancellationToken cancellationToken = default);
     Task MarkPoiForReEnrichmentAsync(int poiId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Resets enrichment state for every POI in a collection so the BG service
+    /// re-runs enrichment on all of them. Returns the count queued.
+    /// </summary>
+    Task<int> MarkCollectionForReEnrichmentAsync(int collectionId, CancellationToken cancellationToken = default);
     Task ReplacePoiGoogleMapsUrlAsync(int poiId, string googleMapsUrl, CancellationToken cancellationToken = default);
 }

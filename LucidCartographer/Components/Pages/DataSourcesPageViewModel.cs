@@ -157,6 +157,29 @@ public sealed class DataSourcesPageViewModel(
 
     // --- Commands ---
 
+    public int? EnrichingCollectionId { get; private set; }
+
+    public async Task HandleEnrichCollectionAsync(int collectionId)
+    {
+        EnrichingCollectionId = collectionId;
+        Notify();
+        try
+        {
+            var count = await poiService.MarkCollectionForReEnrichmentAsync(collectionId, _cts.Token);
+            MaintenanceMessage = $"Queued {count} POIs for re-enrichment.";
+            enrichmentTrigger.Signal();
+            await LoadCollectionsAsync();
+        }
+        catch (Exception ex)
+        {
+            MaintenanceMessage = $"Failed to queue re-enrichment: {ex.Message}";
+        }
+        finally
+        {
+            EnrichingCollectionId = null;
+        }
+    }
+
     public async Task HandleResetFailedEnrichmentAsync()
     {
         var reset = await poiService.ResetFailedEnrichmentAsync(_cts.Token);

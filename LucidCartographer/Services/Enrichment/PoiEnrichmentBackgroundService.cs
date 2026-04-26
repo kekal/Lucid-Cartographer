@@ -302,10 +302,18 @@ public class PoiEnrichmentBackgroundService : BackgroundService
 
             await BackfillImageAsync(context, db, poi, details.ImageUrl, ct);
 
-            var hasCoordinates = poi is { Latitude: not null, Longitude: not null };
-            poi.IsEnriched = hasCoordinates;
+            // Success criterion: we extracted real data from the place
+            // panel, OR landed on a canonical /maps/place/ URL. Coordinates
+            // alone don't count — file imports always have coords, so a
+            // coords-only check makes every import look "enriched" even
+            // when the scraper got nothing.
+            var hasUsefulData = !string.IsNullOrWhiteSpace(poi.Address)
+                                || !string.IsNullOrWhiteSpace(poi.Website)
+                                || !string.IsNullOrWhiteSpace(poi.Phone)
+                                || (poi.GoogleMapsUrl?.Contains("/maps/place/", StringComparison.OrdinalIgnoreCase) == true);
+            poi.IsEnriched = hasUsefulData;
             poi.LastEnrichmentAttemptAt = DateTime.UtcNow;
-            if (hasCoordinates)
+            if (hasUsefulData)
             {
                 poi.EnrichmentFailureCount = 0;
             }
@@ -321,11 +329,11 @@ public class PoiEnrichmentBackgroundService : BackgroundService
                 details.Website is null ? "-" : "y",
                 details.Phone is null ? "-" : "y");
 
-            if (!hasCoordinates)
+            if (!hasUsefulData)
             {
                 var retryDelay = GetRetryDelay(poi.EnrichmentFailureCount);
                 _logger.LogWarning(
-                    "Enrichment fetched metadata for Poi {Id} '{Name}' but no coordinates were resolved (attempt {Attempt}/{MaxRetries}); retry after {RetryDelay}",
+                    "Enrichment for Poi {Id} '{Name}' produced no address/website/phone/place URL (attempt {Attempt}/{MaxRetries}); retry after {RetryDelay}",
                     poi.Id,
                     poi.Name,
                     poi.EnrichmentFailureCount,

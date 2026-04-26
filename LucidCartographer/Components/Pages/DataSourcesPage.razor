@@ -195,6 +195,15 @@
                                             <span class="material-symbols-outlined text-sm" aria-hidden="true">add_location</span>
                                         </button>
                                         <button class="text-primary hover:bg-primary/10 p-1 rounded-lg transition-colors"
+                                                aria-label="@($"Re-enrich all POIs in {col.Name}")"
+                                                title="Re-enrich all POIs"
+                                                disabled="@(Vm.EnrichingCollectionId == col.Id)"
+                                                @onclick="() => Vm.HandleEnrichCollectionAsync(col.Id)">
+                                            <span class="material-symbols-outlined text-sm" aria-hidden="true">
+                                                @(Vm.EnrichingCollectionId == col.Id ? "hourglass_empty" : "auto_fix_high")
+                                            </span>
+                                        </button>
+                                        <button class="text-primary hover:bg-primary/10 p-1 rounded-lg transition-colors"
                                                 aria-label="@($"Export {col.Name} to Google My Maps")"
                                                 title="Export to Google My Maps"
                                                 disabled="@(Vm.ExportingId == col.Id)"

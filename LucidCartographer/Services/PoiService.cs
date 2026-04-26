@@ -489,6 +489,39 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<int> MarkCollectionForReEnrichmentAsync(int collectionId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var poiIds = await db.PoiCollectionItems
+            .Where(ci => ci.PoiCollectionId == collectionId)
+            .Select(ci => ci.PoiId)
+            .ToListAsync(cancellationToken);
+
+        if (poiIds.Count == 0)
+        {
+            return 0;
+        }
+
+        var pois = await db.Pois.Where(p => poiIds.Contains(p.Id)).ToListAsync(cancellationToken);
+        foreach (var poi in pois)
+        {
+            poi.IsEnriched = false;
+            poi.EnrichmentFailureCount = 0;
+            poi.LastEnrichmentAttemptAt = null;
+            poi.ImageUrl = null;
+        }
+
+        var images = await db.PoiImages.Where(i => poiIds.Contains(i.PoiId)).ToListAsync(cancellationToken);
+        if (images.Count > 0)
+        {
+            db.PoiImages.RemoveRange(images);
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        logger.LogInformation("Queued {Count} POIs in collection {CollectionId} for re-enrichment", pois.Count, collectionId);
+        return pois.Count;
+    }
+
     public async Task MarkPoiForReEnrichmentAsync(int poiId, CancellationToken cancellationToken = default)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
