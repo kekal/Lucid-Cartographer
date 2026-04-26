@@ -79,23 +79,60 @@ public class ImportOrchestrator(
             return EmptyImportResult(parsed.Count, collectionName);
         }
 
-        await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var persister = new ImportPersister(
-            db, logger, validParsed, parsed.Count,
-            collectionName, color, sourceType, sourceFileName, cancellationToken);
+        // KML files can group Placemarks under <Folder> elements. When the
+        // importer surfaces FolderName on any row, split into one collection
+        // per folder so the user gets the same structure they see in My Maps.
+        // Rows with no FolderName fall back to the user-provided collection name.
+        var groups = validParsed
+            .GroupBy(p => string.IsNullOrWhiteSpace(p.FolderName) ? collectionName : p.FolderName!)
+            .ToList();
 
-        var result = await persister.RunAsync();
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var anyAdded = false;
+        ImportResult? lastResult = null;
+        var totalAdded = 0;
+        var totalSkipped = 0;
+
+        foreach (var group in groups)
+        {
+            var groupRows = group.ToList();
+            var persister = new ImportPersister(
+                db, logger, groupRows, groupRows.Count,
+                group.Key, color, sourceType, sourceFileName, cancellationToken);
+            var groupResult = await persister.RunAsync();
+            anyAdded |= persister.AddedAny;
+            totalAdded += groupResult.AddedCount;
+            totalSkipped += groupResult.SkippedCount;
+            lastResult = groupResult;
+        }
 
         // Wake the background enrichment service immediately instead of
         // making the user wait for its next poll tick. New rows land with
         // IsEnriched=false, so the BG loop picks them up as soon as it
         // observes the signal.
-        if (persister.AddedAny)
+        if (anyAdded)
         {
             enrichmentTrigger.Signal();
         }
 
-        return result;
+        // For multi-folder imports return an aggregate; the per-collection
+        // breakdown is in the logs. Single-group case keeps the original
+        // collection id so the UI can navigate to it.
+        if (groups.Count == 1 && lastResult is not null)
+        {
+            return lastResult;
+        }
+
+        return new ImportResult
+        {
+            AddedCount = totalAdded,
+            SkippedCount = totalSkipped,
+            TotalParsed = parsed.Count,
+            CollectionId = lastResult?.CollectionId ?? 0,
+            CollectionName = groups.Count > 1
+                ? $"{collectionName} ({groups.Count} folders)"
+                : collectionName
+        };
     }
 
     private static List<ImportedPoi> FilterValidCoordinates(IReadOnlyList<ImportedPoi> parsed)

@@ -63,18 +63,44 @@ public partial class KmlImporter(ILogger<KmlImporter> logger) : IFileImporter
             var googleUrl = ExtractGoogleMapsUrl(desc);
             var effectiveName = string.IsNullOrWhiteSpace(name) ? $"Point ({lat:F4}, {lon:F4})" : name.Trim();
 
+            // Climb ancestors to find the nearest <Folder>'s <name>. Used by
+            // the orchestrator to split one KML into multiple collections —
+            // one per folder — when the file uses Folder grouping.
+            var folderName = FindAncestorFolderName(pm, ns);
+
             results.Add(new ImportedPoi(
                 Name: effectiveName,
                 Latitude: lat,
                 Longitude: lon,
                 GoogleMapsUrl: googleUrl,
-                Description: StripHtml(desc)
+                Description: StripHtml(desc),
+                FolderName: folderName
             ));
         }
 
         logger.LogInformation("KML parse complete: {FileName} — {Count} POIs parsed, {Skipped} skipped",
             fileName, results.Count, skipped);
         return results;
+    }
+
+    private static string? FindAncestorFolderName(XElement placemark, XNamespace ns)
+    {
+        for (var ancestor = placemark.Parent; ancestor != null; ancestor = ancestor.Parent)
+        {
+            var isFolder = ancestor.Name == ns + "Folder" || ancestor.Name.LocalName == "Folder";
+            if (!isFolder)
+            {
+                continue;
+            }
+
+            var nameEl = XmlParsingHelpers.FindElement(ancestor, ns, "name");
+            var folderName = nameEl?.Value?.Trim();
+            if (!string.IsNullOrWhiteSpace(folderName))
+            {
+                return folderName;
+            }
+        }
+        return null;
     }
 
     // IE-04: FindElement/FindDescendant moved to XmlParsingHelpers

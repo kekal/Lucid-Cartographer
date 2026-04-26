@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
 using LucidCartographer.Services.Import;
@@ -90,13 +91,28 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         using var playwright = await Playwright.CreateAsync();
         await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
         {
-            Headless = true
+            Headless = !_options.Headed,
+            SlowMo = _options.SlowMoMs > 0 ? _options.SlowMoMs : null
         });
+        if (_options.Headed)
+        {
+            _logger.LogWarning("Playwright launched in HEADED mode (Enrichment:Headed=true). Disable in production.");
+        }
         await using var context = await browser.NewContextAsync(new BrowserNewContextOptions
         {
             Locale = "en-US",
             UserAgent = UserAgent
         });
+
+        // In headed mode Chromium closes the window when its last page goes
+        // away. Workers open and close pages per POI, so between batches the
+        // window would flash closed and re-open. An always-open anchor page
+        // (about:blank) keeps the window count >= 1 for the whole session.
+        if (_options.Headed)
+        {
+            var anchorPage = await context.NewPageAsync();
+            await anchorPage.GotoAsync("about:blank");
+        }
 
         _logger.LogInformation("PoiEnrichmentBackgroundService started");
 
@@ -180,17 +196,29 @@ public class PoiEnrichmentBackgroundService : BackgroundService
 
             var metricsBefore = EnrichmentMetrics.Snapshot();
 
-            await Parallel.ForEachAsync(
-                batchIds,
-                new ParallelOptions
-                {
-                    MaxDegreeOfParallelism = Math.Max(1, _options.Concurrency),
-                    CancellationToken = ct
-                },
-                async (poiId, innerCt) =>
-                {
-                    await EnrichOneAsync(context, poiId, innerCt, ct);
-                });
+            // Per-worker tab pool. Each worker owns a long-lived IPage and
+            // pulls IDs off a channel until drained, so we pay the tab
+            // open/close cost once per batch instead of per POI. GotoAsync
+            // does a cross-document navigation, which tears down the previous
+            // document — no state leaks between rows.
+            var workerCount = Math.Max(1, _options.Concurrency);
+            var queue = Channel.CreateUnbounded<int>(new UnboundedChannelOptions
+            {
+                SingleReader = false,
+                SingleWriter = true
+            });
+            foreach (var id in batchIds)
+            {
+                queue.Writer.TryWrite(id);
+            }
+            queue.Writer.Complete();
+
+            var workers = new Task[workerCount];
+            for (var i = 0; i < workerCount; i++)
+            {
+                workers[i] = RunWorkerAsync(context, queue.Reader, ct);
+            }
+            await Task.WhenAll(workers);
 
             var metricsAfter = EnrichmentMetrics.Snapshot();
             var batchMetrics = EnrichmentMetrics.Diff(metricsBefore, metricsAfter);
@@ -218,11 +246,42 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         return processed;
     }
 
-    private async Task EnrichOneAsync(IBrowserContext context, int poiId, CancellationToken workerCt, CancellationToken serviceCt)
+    private async Task RunWorkerAsync(IBrowserContext context, ChannelReader<int> reader, CancellationToken ct)
     {
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(workerCt, serviceCt);
-        var ct = linked.Token;
+        await _pageConcurrencyLock.WaitAsync(ct);
+        IPage? page = null;
+        try
+        {
+            page = await context.NewPageAsync();
+            await foreach (var poiId in reader.ReadAllAsync(ct))
+            {
+                try
+                {
+                    await EnrichOneAsync(context, page, poiId, ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Worker crashed enriching Poi {PoiId}; continuing", poiId);
+                }
+            }
+        }
+        finally
+        {
+            if (page != null)
+            {
+                try { await page.CloseAsync(); }
+                catch (Exception ex) { _logger.LogDebug(ex, "Failed to close worker page"); }
+            }
+            _pageConcurrencyLock.Release();
+        }
+    }
 
+    private async Task EnrichOneAsync(IBrowserContext context, IPage page, int poiId, CancellationToken ct)
+    {
         await using var db = await _factory.CreateDbContextAsync(ct);
         var poi = await db.Pois.FirstOrDefaultAsync(p => p.Id == poiId, ct);
         if (poi == null || poi.IsEnriched || poi.EnrichmentFailureCount >= _options.MaxRetries)
@@ -230,11 +289,8 @@ public class PoiEnrichmentBackgroundService : BackgroundService
             return;
         }
 
-        await _pageConcurrencyLock.WaitAsync(ct);
-        IPage? page = null;
         try
         {
-            page = await context.NewPageAsync();
 
             // Pick entry point based on what the scraper captured:
             //   - if GoogleMapsUrl already contains /maps/place/, open it directly;
@@ -371,22 +427,6 @@ public class PoiEnrichmentBackgroundService : BackgroundService
                     poi.Id, poi.Name, poi.EnrichmentFailureCount, _options.MaxRetries, retryDelay);
             }
             return;
-        }
-        finally
-        {
-            if (page != null)
-            {
-                try
-                {
-                    await page.CloseAsync();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Failed to close Playwright page for Poi {PoiId}", poiId);
-                }
-            }
-
-            _pageConcurrencyLock.Release();
         }
 
         try

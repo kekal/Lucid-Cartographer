@@ -98,6 +98,7 @@ else
     {
         <div class="w-80 flex-shrink-0 shadow-lg overflow-hidden border-l border-surface-container-high">
             <PoiDetailPane Poi="Vm.SelectedPoi"
+                           CollectionNames="@(Vm.SelectedPoiId is { } sid && Vm.PoiCollectionNames.TryGetValue(sid, out var cn) ? cn : null)"
                            OnClose="Vm.CloseDetailPane"
                            OnEnrichRequested="Vm.HandleEnrichPoiAsync" />
         </div>

@@ -53,4 +53,17 @@ public sealed class EnrichmentOptions
     /// Default: 30.
     /// </summary>
     public int BackoffBaseSeconds { get; set; } = 30;
+
+    /// <summary>
+    /// Run Playwright with a visible browser window instead of headless.
+    /// Useful for debugging selector misses and consent walls.
+    /// Default: false.
+    /// </summary>
+    public bool Headed { get; set; }
+
+    /// <summary>
+    /// Slow down each Playwright action by this many milliseconds.
+    /// Only meaningful with <see cref="Headed"/> = true. Default: 0.
+    /// </summary>
+    public int SlowMoMs { get; set; }
 }

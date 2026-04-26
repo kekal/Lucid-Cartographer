@@ -43,9 +43,13 @@
             </p>
         }
 
-        @* Status & Category chips *@
+        @* Status, Category & Collection chips. "imported" is an
+           internal flag rather than a real status, so we suppress it
+           and surface the actual collection memberships instead — the
+           user wanted to know which collection a POI belongs to,
+           not that it came from a file import. *@
         <div class="flex flex-wrap gap-2 mb-4">
-            @if (!string.IsNullOrEmpty(Poi.Status))
+            @if (!string.IsNullOrEmpty(Poi.Status) && Poi.Status != "imported")
             {
                 <span class="text-xs px-2.5 py-1 rounded-full font-medium
                     @(Poi.Status switch
@@ -62,6 +66,15 @@
                 <span class="text-xs px-2.5 py-1 rounded-full bg-surface-container-high text-on-surface-variant">
                     @Poi.Category
                 </span>
+            }
+            @if (CollectionNames is { Count: > 0 })
+            {
+                @foreach (var name in CollectionNames)
+                {
+                    <span class="text-xs px-2.5 py-1 rounded-full bg-primary/10 text-primary font-medium">
+                        @name
+                    </span>
+                }
             }
         </div>
 
@@ -188,6 +201,7 @@
     private const int MaxUrlDisplayLength = 35;
 
     [Parameter, EditorRequired] public Poi Poi { get; set; } = null!;
+    [Parameter] public IReadOnlyList<string>? CollectionNames { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback<int> OnEnrichRequested { get; set; }
 

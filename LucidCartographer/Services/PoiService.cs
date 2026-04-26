@@ -52,15 +52,17 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
     public async Task<Dictionary<int, List<Poi>>> GetVisiblePoisGroupedAsync(CancellationToken cancellationToken = default)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        // Hide Pois that are still waiting for background enrichment.
-        // Scraped rows are created with IsEnriched=false and NULL
-        // coords; the background service flips the flag once it has
-        // pulled real coords + address/website/phone. Showing them
-        // on the map before enrichment has nowhere to place them.
+        // Visibility = "has coordinates we can plot". The earlier IsEnriched
+        // gate hid file-imported rows whose enrichment failed (KML supplies
+        // coords up front, so they're plottable even without an address);
+        // the user couldn't find them in their collection and had to fall
+        // back to search. Plottable now means lat+lon present, full stop —
+        // pending scrape rows still get filtered out by the NULL-coord check
+        // because the scraper leaves coords null until enrichment fills them.
         var items = await db.PoiCollectionItems
             .AsNoTracking()
-            .Where(ci => ci.PoiCollection.IsVisible && ci.Poi.IsEnriched
-                                                    && ci.Poi.Latitude != null && ci.Poi.Longitude != null)
+            .Where(ci => ci.PoiCollection.IsVisible
+                         && ci.Poi.Latitude != null && ci.Poi.Longitude != null)
             .Select(ci => new { ci.PoiCollectionId, ci.Poi })
             .ToListAsync(cancellationToken);
 

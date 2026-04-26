@@ -14,5 +14,6 @@ public record ImportedPoi(
     string? Phone = null,
     string? ImageUrl = null,
     byte[]? ImageData = null,
-    string? ImageContentType = null
+    string? ImageContentType = null,
+    string? FolderName = null
 );

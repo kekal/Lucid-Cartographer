@@ -22,6 +22,7 @@ public sealed class StartupCleanupService(
         SweepOrphanedTempFiles();
         await ApplyMigrationsAsync(cancellationToken);
         await EnsureAdminUserAsync(cancellationToken);
+        await ReviveStuckImportedPoisAsync(cancellationToken);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
@@ -70,6 +71,62 @@ public sealed class StartupCleanupService(
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         await db.Database.MigrateAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// One-time recovery for the bug where file-imported POIs that hit the
+    /// enrichment retry cap (or were marked enriched without any extracted
+    /// data, before the success criterion was tightened) ended up hidden
+    /// from their collection. Resets the failure counter on rows with valid
+    /// coords so the BG service tries them again with the current selectors.
+    /// Idempotent — runs every startup but is a no-op once everything's clean.
+    /// </summary>
+    private async Task ReviveStuckImportedPoisAsync(CancellationToken cancellationToken)
+    {
+        var logger = loggerFactory.CreateLogger("ReviveStuckImportedPois");
+        try
+        {
+            using var scope = services.CreateScope();
+            var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using var db = await factory.CreateDbContextAsync(cancellationToken);
+
+            // Two cohorts to revive:
+            //  (a) failure cap reached but coords are valid — the row is
+            //      visible now but enrichment has given up.
+            //  (b) marked enriched yet has no address / website / phone /
+            //      canonical place URL — symptom of the old coords-only
+            //      success check; flip back to unenriched so BG retries.
+            var stuck = await db.Pois
+                .Where(p => p.Latitude != null && p.Longitude != null
+                            && (
+                                (!p.IsEnriched && p.EnrichmentFailureCount > 0)
+                                || (p.IsEnriched
+                                    && (p.Address == null || p.Address == "")
+                                    && (p.Website == null || p.Website == "")
+                                    && (p.Phone == null || p.Phone == "")
+                                    && (p.GoogleMapsUrl == null || !p.GoogleMapsUrl.Contains("/maps/place/")))
+                            ))
+                .ToListAsync(cancellationToken);
+
+            if (stuck.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var poi in stuck)
+            {
+                poi.IsEnriched = false;
+                poi.EnrichmentFailureCount = 0;
+                poi.LastEnrichmentAttemptAt = null;
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+            logger.LogWarning("Revived {Count} stuck POIs (failed enrichment or pseudo-enriched) for re-enrichment", stuck.Count);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "ReviveStuckImportedPois failed; continuing startup");
+        }
     }
 
     private async Task EnsureAdminUserAsync(CancellationToken cancellationToken)
