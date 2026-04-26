@@ -160,9 +160,8 @@ public class PoiEnrichmentBackgroundService : BackgroundService
             return 0;
         }
 
-        _logger.LogInformation("Enriching queue: {Remaining} Pois pending", remaining);
-
         var processed = 0;
+        var loggedQueueDepth = false;
 
         // Pull a batch of pending IDs, fan them out across
         // `_options.Concurrency` parallel Playwright tabs (all sharing
@@ -192,6 +191,12 @@ public class PoiEnrichmentBackgroundService : BackgroundService
             if (batchIds.Count == 0)
             {
                 break;
+            }
+
+            if (!loggedQueueDepth)
+            {
+                _logger.LogInformation("Enriching queue: {Remaining} Pois pending", remaining);
+                loggedQueueDepth = true;
             }
 
             var metricsBefore = EnrichmentMetrics.Snapshot();
@@ -250,6 +255,12 @@ public class PoiEnrichmentBackgroundService : BackgroundService
     {
         await _pageConcurrencyLock.WaitAsync(ct);
         IPage? page = null;
+        // Persist phase (image download, DB writes, dedup) doesn't need the
+        // tab. Fire-and-forget into this list so the worker immediately
+        // starts the next POI's GotoAsync while the previous POI's
+        // housekeeping runs in parallel. We await the list before the
+        // worker closes its tab so nothing is lost on shutdown.
+        var persistTasks = new List<Task>();
         try
         {
             page = await context.NewPageAsync();
@@ -257,7 +268,8 @@ public class PoiEnrichmentBackgroundService : BackgroundService
             {
                 try
                 {
-                    await EnrichOneAsync(context, page, poiId, ct);
+                    var persistTask = await EnrichOneAsync(context, page, poiId, ct);
+                    persistTasks.Add(persistTask);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
@@ -271,6 +283,9 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         }
         finally
         {
+            try { await Task.WhenAll(persistTasks); }
+            catch (Exception ex) { _logger.LogDebug(ex, "A background persist task failed"); }
+
             if (page != null)
             {
                 try { await page.CloseAsync(); }
@@ -280,15 +295,31 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         }
     }
 
-    private async Task EnrichOneAsync(IBrowserContext context, IPage page, int poiId, CancellationToken ct)
+    /// <summary>
+    /// Page phase: navigates the worker's tab and extracts EnrichedDetails.
+    /// Returns a Task representing the persist phase (image backfill,
+    /// DB write, dedup) which the worker accumulates and awaits at exit.
+    /// The persist phase doesn't touch the tab, so the worker can start
+    /// the next POI's GotoAsync as soon as this method returns.
+    /// </summary>
+    private async Task<Task> EnrichOneAsync(IBrowserContext context, IPage page, int poiId, CancellationToken ct)
     {
-        await using var db = await _factory.CreateDbContextAsync(ct);
-        var poi = await db.Pois.FirstOrDefaultAsync(p => p.Id == poiId, ct);
-        if (poi == null || poi.IsEnriched || poi.EnrichmentFailureCount >= _options.MaxRetries)
+        // Snapshot the row's pre-enrichment state — we only need a few
+        // fields for the page-phase entry-point decision plus the failure
+        // counter for the early-out check. The persist phase reloads its
+        // own copy from a fresh DbContext.
+        Poi snapshot;
+        await using (var db = await _factory.CreateDbContextAsync(ct))
         {
-            return;
+            var poi = await db.Pois.AsNoTracking().FirstOrDefaultAsync(p => p.Id == poiId, ct);
+            if (poi == null || poi.IsEnriched || poi.EnrichmentFailureCount >= _options.MaxRetries)
+            {
+                return Task.CompletedTask;
+            }
+            snapshot = poi;
         }
 
+        EnrichedDetails details;
         try
         {
 
@@ -301,7 +332,7 @@ public class PoiEnrichmentBackgroundService : BackgroundService
             // timeout. Transient Playwright failures are retried
             // in-place; terminal failures leave IsEnriched=false so
             // the next idle poll cycle re-picks the row.
-            var details = await _pipeline.ExecuteAsync(async innerCt =>
+            details = await _pipeline.ExecuteAsync(async innerCt =>
             {
                 // Any URL the row has — canonical /maps/place/, a /maps/search/
                 // result page, or a maps.app.goo.gl shortlink — gets navigated
@@ -314,12 +345,35 @@ public class PoiEnrichmentBackgroundService : BackgroundService
                 // to e.g. termymaltanskie.com.pl — no place selectors, all
                 // fields empty, fallback modal. Treat anything else as missing
                 // and route through the coord-anchored name search.
-                if (!string.IsNullOrEmpty(poi.GoogleMapsUrl) && IsGoogleMapsUrl(poi.GoogleMapsUrl!))
+                if (!string.IsNullOrEmpty(snapshot.GoogleMapsUrl) && IsGoogleMapsUrl(snapshot.GoogleMapsUrl!))
                 {
-                    return await PoiDetailEnricher.EnrichAsync(page, poi.GoogleMapsUrl!, innerCt, _logger);
+                    return await PoiDetailEnricher.EnrichAsync(page, snapshot.GoogleMapsUrl!, innerCt, _logger);
                 }
-                return await PoiDetailEnricher.EnrichByNameAsync(page, poi.Name, poi.Category, poi.Latitude, poi.Longitude, innerCt, _logger);
+                return await PoiDetailEnricher.EnrichByNameAsync(page, snapshot.Name, snapshot.Category, snapshot.Latitude, snapshot.Longitude, innerCt, _logger);
             }, ct);
+        }
+        catch (Exception ex)
+        {
+            // Hard failure (exception during page work). The browser is now
+            // free to move on; persist the failure counter in the background.
+            return PersistFailureAsync(poiId, ex, ct);
+        }
+
+        // Page is done — return a Task for the persist phase so the worker
+        // can immediately start the next POI's GotoAsync.
+        return PersistSuccessAsync(context, poiId, details, ct);
+    }
+
+    private async Task PersistSuccessAsync(IBrowserContext context, int poiId, EnrichedDetails details, CancellationToken ct)
+    {
+        try
+        {
+            await using var db = await _factory.CreateDbContextAsync(ct);
+            var poi = await db.Pois.FirstOrDefaultAsync(p => p.Id == poiId, ct);
+            if (poi is null)
+            {
+                return;
+            }
 
             // Fill empty fields only — never overwrite user edits.
             if (string.IsNullOrEmpty(poi.Address))
@@ -338,9 +392,7 @@ public class PoiEnrichmentBackgroundService : BackgroundService
             }
 
             // Enrichment's !3d!4d coords are always more authoritative
-            // than whatever we had (user input, viewport-center fallback,
-            // or nothing at all). Overwrite unconditionally when the
-            // enricher produced coords.
+            // than whatever we had.
             if (details is { Latitude: not null, Longitude: not null })
             {
                 poi.Latitude = details.Latitude.Value;
@@ -348,8 +400,6 @@ public class PoiEnrichmentBackgroundService : BackgroundService
             }
 
             // Upgrade to a proper /maps/place/ URL when the enricher found one.
-            // The scraper may have stored null (anchor-less card) or a non-place
-            // URL; always prefer the canonical place URL from enrichment.
             if (!string.IsNullOrEmpty(details.GoogleMapsUrl)
                 && (string.IsNullOrEmpty(poi.GoogleMapsUrl) || !poi.GoogleMapsUrl.Contains("/maps/place/")))
             {
@@ -358,61 +408,72 @@ public class PoiEnrichmentBackgroundService : BackgroundService
 
             await BackfillImageAsync(context, db, poi, details.ImageUrl, ct);
 
-            // Success criterion: we extracted real data from the place
-            // panel, OR landed on a canonical /maps/place/ URL. Coordinates
-            // alone don't count — file imports always have coords, so a
-            // coords-only check makes every import look "enriched" even
-            // when the scraper got nothing.
             var hasUsefulData = !string.IsNullOrWhiteSpace(poi.Address)
                                 || !string.IsNullOrWhiteSpace(poi.Website)
                                 || !string.IsNullOrWhiteSpace(poi.Phone)
                                 || (poi.GoogleMapsUrl?.Contains("/maps/place/", StringComparison.OrdinalIgnoreCase) == true);
-            poi.IsEnriched = hasUsefulData;
             poi.LastEnrichmentAttemptAt = DateTime.UtcNow;
             if (hasUsefulData)
             {
+                poi.IsEnriched = true;
                 poi.EnrichmentFailureCount = 0;
+                poi.EnrichmentNeedsManualUrl = false;
             }
             else
             {
-                poi.EnrichmentFailureCount++;
+                // Soft failure: page loaded fine, no place data. No retries —
+                // flip the manual-URL flag so the UI prompts the user.
+                poi.IsEnriched = true;
+                poi.EnrichmentNeedsManualUrl = true;
+                poi.EnrichmentFailureCount = 0;
             }
 
             _logger.LogInformation(
-                "Enriched Poi {Id} '{Name}' (addr={Addr} web={Web} phone={Phone})",
+                "Enriched Poi {Id} '{Name}' (addr={Addr} web={Web} phone={Phone}{ManualHint})",
                 poi.Id, poi.Name,
                 details.Address is null ? "-" : "y",
                 details.Website is null ? "-" : "y",
-                details.Phone is null ? "-" : "y");
+                details.Phone is null ? "-" : "y",
+                hasUsefulData ? "" : " — needs manual URL");
 
-            if (!hasUsefulData)
+            await SaveChangesWithWriteLockAsync(db, ct);
+
+            var merged = await PoiPostEnrichmentDedup.MergeIfDuplicateAsync(db, poi, ct, _sqliteWriteLock);
+            if (merged)
             {
-                var retryDelay = GetRetryDelay(poi.EnrichmentFailureCount);
-                _logger.LogWarning(
-                    "Enrichment for Poi {Id} '{Name}' produced no address/website/phone/place URL (attempt {Attempt}/{MaxRetries}); retry after {RetryDelay}",
-                    poi.Id,
-                    poi.Name,
-                    poi.EnrichmentFailureCount,
-                    _options.MaxRetries,
-                    retryDelay);
+                _logger.LogInformation(
+                    "Post-enrich dedup: Poi {Id} '{Name}' merged into an older canonical row",
+                    poi.Id, poi.Name);
             }
+
+            var newRemaining = await db.Pois.CountAsync(
+                p => !p.IsEnriched && p.EnrichmentFailureCount < _options.MaxRetries,
+                ct);
+            _progress.Set(newRemaining);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
         catch (Exception ex)
         {
+            _logger.LogWarning(ex,
+                "Persisting enrichment for Poi {PoiId} failed — will retry next cycle", poiId);
+        }
+    }
+
+    private async Task PersistFailureAsync(int poiId, Exception ex, CancellationToken ct)
+    {
+        try
+        {
+            await using var db = await _factory.CreateDbContextAsync(ct);
+            var poi = await db.Pois.FirstOrDefaultAsync(p => p.Id == poiId, ct);
+            if (poi is null)
+            {
+                return;
+            }
+
             poi.EnrichmentFailureCount++;
             poi.LastEnrichmentAttemptAt = DateTime.UtcNow;
             var retryDelay = GetRetryDelay(poi.EnrichmentFailureCount);
-            try
-            {
-                await SaveChangesWithWriteLockAsync(db, ct);
-            }
-            catch (Exception saveEx)
-            {
-                _logger.LogError(saveEx,
-                    "Failed to persist enrichment failure tracking for Poi {Id} '{Name}'",
-                    poi.Id, poi.Name);
-                return;
-            }
+            await SaveChangesWithWriteLockAsync(db, ct);
 
             if (poi.EnrichmentFailureCount >= _options.MaxRetries)
             {
@@ -426,39 +487,12 @@ public class PoiEnrichmentBackgroundService : BackgroundService
                     "Enrichment failed for Poi {Id} '{Name}' (attempt {Attempt}/{MaxRetries}); retry after {RetryDelay}",
                     poi.Id, poi.Name, poi.EnrichmentFailureCount, _options.MaxRetries, retryDelay);
             }
-            return;
         }
-
-        try
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (Exception saveEx)
         {
-            await SaveChangesWithWriteLockAsync(db, ct);
-
-            // Post-enrichment dedup against the enriched cohort.
-            // The just-enriched row now has real coords + (usually)
-            // a real Google Maps URL, so it becomes dedup-eligible.
-            // If an older enriched row already represents this place,
-            // fold collection links onto it and delete this row.
-            // "Smaller Id wins" so parallel workers can't race.
-            var merged = await PoiPostEnrichmentDedup.MergeIfDuplicateAsync(db, poi, ct, _sqliteWriteLock);
-            if (merged)
-            {
-                _logger.LogInformation(
-                    "Post-enrich dedup: Poi {Id} '{Name}' merged into an older canonical row",
-                    poi.Id, poi.Name);
-            }
-
-            // Per-POI tick: re-read the counter so the map page
-            // header updates as each worker finishes.
-            var newRemaining = await db.Pois.CountAsync(
-                p => !p.IsEnriched && p.EnrichmentFailureCount < _options.MaxRetries,
-                ct);
-            _progress.Set(newRemaining);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "Persisting enrichment for Poi {Id} '{Name}' failed — will retry next cycle",
-                poi.Id, poi.Name);
+            _logger.LogError(saveEx,
+                "Failed to persist enrichment failure tracking for Poi {PoiId}", poiId);
         }
     }
 

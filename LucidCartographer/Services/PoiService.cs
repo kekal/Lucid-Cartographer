@@ -482,6 +482,7 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
         poi.IsEnriched = false;
         poi.EnrichmentFailureCount = 0;
         poi.LastEnrichmentAttemptAt = null;
+        poi.EnrichmentNeedsManualUrl = false;
         poi.ImageUrl = null;
         var existingImage = await db.PoiImages.FindAsync([poiId], cancellationToken);
         if (existingImage is not null)
@@ -536,6 +537,7 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
         poi.IsEnriched = false;
         poi.EnrichmentFailureCount = 0;
         poi.LastEnrichmentAttemptAt = null;
+        poi.EnrichmentNeedsManualUrl = false;
         // Drop the cached thumbnail so the BG service re-downloads at the
         // upscaled size (the existing-image short-circuit at
         // BackfillImageAsync would otherwise keep the small copy).

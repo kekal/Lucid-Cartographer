@@ -75,6 +75,16 @@ public class Poi
     /// </summary>
     public DateTime? LastEnrichmentAttemptAt { get; set; }
 
+    /// <summary>
+    /// True when the BG service ran without errors but the place panel
+    /// produced no useful data (typical SERP / no-unique-match outcome).
+    /// Retrying with the same query won't help, so the row is removed
+    /// from the queue and the UI prompts the user for a manual Google
+    /// Maps URL via the EnrichFallback dialog. Cleared on the next
+    /// successful enrichment or when the user supplies a URL.
+    /// </summary>
+    public bool EnrichmentNeedsManualUrl { get; set; }
+
     [ConcurrencyCheck]
     public int Version { get; set; }
 

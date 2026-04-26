@@ -98,6 +98,7 @@ public sealed class StartupCleanupService(
             //      success check; flip back to unenriched so BG retries.
             var stuck = await db.Pois
                 .Where(p => p.Latitude != null && p.Longitude != null
+                            && !p.EnrichmentNeedsManualUrl
                             && (
                                 (!p.IsEnriched && p.EnrichmentFailureCount > 0)
                                 || (p.IsEnriched
@@ -118,6 +119,7 @@ public sealed class StartupCleanupService(
                 poi.IsEnriched = false;
                 poi.EnrichmentFailureCount = 0;
                 poi.LastEnrichmentAttemptAt = null;
+                poi.EnrichmentNeedsManualUrl = false;
             }
 
             await db.SaveChangesAsync(cancellationToken);

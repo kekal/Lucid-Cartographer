@@ -203,10 +203,11 @@ public sealed class MapPageViewModel(
             return;
         }
 
-        var stillEmpty = string.IsNullOrWhiteSpace(fresh.Address)
-                         && string.IsNullOrWhiteSpace(fresh.Website)
-                         && string.IsNullOrWhiteSpace(fresh.Phone);
-        if (stillEmpty)
+        // Authoritative signal from the BG service: it ran without errors
+        // but the place panel produced nothing useful, so manual URL entry
+        // is the only path forward. The old "still empty" heuristic also
+        // fired for rows the user had partly filled in by hand.
+        if (fresh.EnrichmentNeedsManualUrl)
         {
             EnrichFallbackPoi = fresh;
         }

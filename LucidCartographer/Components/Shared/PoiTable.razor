@@ -39,7 +39,15 @@
                             @onclick="() => HandlePoiClick(poi.Id)">
                             <td class="px-4 py-2.5">
                                 <div class="flex items-center gap-2">
-                                    <span class="material-symbols-outlined text-base text-on-surface-variant" aria-hidden="true">location_on</span>
+                                    @{
+                                        var (icon, iconClass, iconTitle) = poi switch
+                                        {
+                                            { EnrichmentNeedsManualUrl: true } => ("error", "text-red-500", "Enrichment failed — paste a Google Maps URL"),
+                                            { IsEnriched: true } => ("location_on", "text-on-surface-variant", "Enriched"),
+                                            _ => ("hourglass_empty", "text-amber-500", "Waiting for enrichment")
+                                        };
+                                    }
+                                    <span class="material-symbols-outlined text-base @iconClass" aria-hidden="true" title="@iconTitle">@icon</span>
                                     <div>
                                         <div class="font-medium">@poi.Name</div>
                                         @if (!string.IsNullOrEmpty(poi.Address))
