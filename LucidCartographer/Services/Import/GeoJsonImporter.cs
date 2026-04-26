@@ -104,9 +104,29 @@ public class GeoJsonImporter(ILogger<GeoJsonImporter> logger) : IFileImporter
                       ?? GetStringProp(props, "Address")
                       ?? GetStringProp(props, "location");
 
-        var googleUrl = (GetStringProp(props, "google_maps_url")
-                         ?? GetStringProp(props, "url")
-                         ?? GetStringProp(props, "URL")) ?? GetStringProp(props, "Google Maps URL");
+        // IE-20 (parity with GpxImporter): only assign to GoogleMapsUrl if
+        // the URL is actually a Google Maps link. A generic `url` property
+        // (the venue's own website) used to leak into GoogleMapsUrl and
+        // poisoned enrichment — the BG service navigated there instead of
+        // Google Maps and found no selectors. Generic non-Maps URLs are
+        // promoted to Website instead.
+        var rawUrl = GetStringProp(props, "google_maps_url")
+                     ?? GetStringProp(props, "Google Maps URL")
+                     ?? GetStringProp(props, "url")
+                     ?? GetStringProp(props, "URL");
+        string? googleUrl = null;
+        string? website = GetStringProp(props, "website") ?? GetStringProp(props, "Website");
+        if (!string.IsNullOrWhiteSpace(rawUrl))
+        {
+            if (LooksLikeGoogleMapsUrl(rawUrl))
+            {
+                googleUrl = rawUrl;
+            }
+            else if (string.IsNullOrWhiteSpace(website))
+            {
+                website = rawUrl;
+            }
+        }
 
         var description = GetStringProp(props, "description")
                           ?? GetStringProp(props, "Description")
@@ -123,8 +143,17 @@ public class GeoJsonImporter(ILogger<GeoJsonImporter> logger) : IFileImporter
             GoogleMapsUrl: googleUrl,
             Address: address,
             Category: category,
-            Description: description
+            Description: description,
+            Website: website
         );
+    }
+
+    private static bool LooksLikeGoogleMapsUrl(string url)
+    {
+        return url.Contains("google.com/maps", StringComparison.OrdinalIgnoreCase)
+               || url.Contains("maps.google.com", StringComparison.OrdinalIgnoreCase)
+               || url.Contains("maps.app.goo.gl", StringComparison.OrdinalIgnoreCase)
+               || url.Contains("goo.gl/maps", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? GetStringProp(JsonElement props, string key)

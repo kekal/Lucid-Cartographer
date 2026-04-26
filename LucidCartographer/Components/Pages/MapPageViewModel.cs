@@ -177,6 +177,10 @@ public sealed class MapPageViewModel(
             try
             {
                 await LoadVisibleCollectionsAsync();
+                if (SelectedPoiId is { } selectedId)
+                {
+                    SelectedPoi = await poiService.GetPoiAsync(selectedId);
+                }
                 if (remaining == 0 && _pendingEnrichPoiId is { } pendingId)
                 {
                     _pendingEnrichPoiId = null;

@@ -345,11 +345,10 @@ internal sealed class ImportPersister(
             // ("PoiImage.PoiId unknown" on save).
             Status = ImportedStatus,
             AddedDate = DateTime.UtcNow,
-            // File imports carry whatever address/phone/website the source
-            // file provided — skip the enrichment queue. Google-scraped
-            // rows only have list-card data, so they start unenriched and
-            // the background service fills the rest.
-            IsEnriched = sourceType != GoogleScrapeSourceType
+            // Every imported row goes through enrichment. The BG service
+            // fills only empty fields (preserves whatever the file gave us)
+            // and adds the place photo + canonical /maps/place URL.
+            IsEnriched = false
         };
     }
 

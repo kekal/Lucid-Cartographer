@@ -252,11 +252,17 @@ public class PoiEnrichmentBackgroundService : BackgroundService
                 // directly. Playwright follows redirects and the place-URL wait
                 // loop in EnrichCoreAsync handles the post-redirect hydration.
                 // Only fall back to a name search when we have no URL at all.
-                if (!string.IsNullOrEmpty(poi.GoogleMapsUrl))
+                // Only navigate GoogleMapsUrl if it actually points at Google
+                // Maps. Older imports (and a now-fixed GeoJSON branch) used
+                // to drop a venue's own website here, which sent the enricher
+                // to e.g. termymaltanskie.com.pl — no place selectors, all
+                // fields empty, fallback modal. Treat anything else as missing
+                // and route through the coord-anchored name search.
+                if (!string.IsNullOrEmpty(poi.GoogleMapsUrl) && IsGoogleMapsUrl(poi.GoogleMapsUrl!))
                 {
                     return await PoiDetailEnricher.EnrichAsync(page, poi.GoogleMapsUrl!, innerCt, _logger);
                 }
-                return await PoiDetailEnricher.EnrichByNameAsync(page, poi.Name, poi.Category, innerCt, _logger);
+                return await PoiDetailEnricher.EnrichByNameAsync(page, poi.Name, poi.Category, poi.Latitude, poi.Longitude, innerCt, _logger);
             }, ct);
 
             // Fill empty fields only — never overwrite user edits.
@@ -520,6 +526,14 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         }
 
         yield return imageUrl;
+    }
+
+    private static bool IsGoogleMapsUrl(string url)
+    {
+        return url.Contains("google.com/maps", StringComparison.OrdinalIgnoreCase)
+               || url.Contains("maps.google.com", StringComparison.OrdinalIgnoreCase)
+               || url.Contains("maps.app.goo.gl", StringComparison.OrdinalIgnoreCase)
+               || url.Contains("goo.gl/maps", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsLikelyPlacePhotoUrl(string url)

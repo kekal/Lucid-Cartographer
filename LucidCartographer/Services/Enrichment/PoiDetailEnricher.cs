@@ -32,12 +32,33 @@ public static class PoiDetailEnricher
         => EnrichCoreAsync(page, placeUrl, ct, logger);
 
     public static Task<EnrichedDetails> EnrichByNameAsync(IPage page, string name, string? hint, CancellationToken ct, ILogger? logger = null)
+        => EnrichByNameAsync(page, name, hint, latitude: null, longitude: null, ct, logger);
+
+    public static Task<EnrichedDetails> EnrichByNameAsync(IPage page, string name, string? hint, double? latitude, double? longitude, CancellationToken ct, ILogger? logger = null)
     {
         // Appending the hint (category or description first line) helps
         // disambiguate common names. Example: "Zebra" + "Zabrze, Poland"
         // lands on the specific place rather than the generic feature.
         var query = string.IsNullOrWhiteSpace(hint) ? name : $"{name} {hint}";
-        var url = "https://www.google.com/maps/search/?api=1&query=" + Uri.EscapeDataString(query);
+
+        // When the POI carries coordinates (KML import, manual pin), use the
+        // path-based search URL with a /@lat,lon,17z viewport suffix instead
+        // of the ?api=1&query= form. Maps then biases the search to that
+        // viewport AND, for a near-unique hit, opens the place panel directly
+        // — which is what the address/website/phone selectors expect. Without
+        // the viewport anchor, ?api=1 lands on a SERP that has no place panel
+        // and all three fields come back empty.
+        string url;
+        if (latitude.HasValue && longitude.HasValue)
+        {
+            var lat = latitude.Value.ToString("F7", System.Globalization.CultureInfo.InvariantCulture);
+            var lon = longitude.Value.ToString("F7", System.Globalization.CultureInfo.InvariantCulture);
+            url = $"https://www.google.com/maps/search/{Uri.EscapeDataString(query)}/@{lat},{lon},17z";
+        }
+        else
+        {
+            url = "https://www.google.com/maps/search/?api=1&query=" + Uri.EscapeDataString(query);
+        }
         return EnrichCoreAsync(page, url, ct, logger);
     }
 
