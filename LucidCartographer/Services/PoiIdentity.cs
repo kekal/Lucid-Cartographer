@@ -52,22 +52,33 @@ public static class PoiIdentity
     {
         // Unlocated rows can't be compared meaningfully — wait for
         // enrichment to fill real coords before deciding identity.
-        if (!latA.HasValue || !lonA.HasValue)
+        // (0,0) is the Gulf-of-Guinea placeholder that the Google-list
+        // scraper uses for cards without a /maps/place/ anchor; treat
+        // it the same as NULL so three distinct "Plac zabaw" rows can't
+        // collapse just by sharing the placeholder.
+        if (!IsRealCoord(latA, lonA) || !IsRealCoord(latB, lonB))
         {
             return false;
         }
 
-        if (!latB.HasValue || !lonB.HasValue)
-        {
-            return false;
-        }
-
-        if (GeoUtils.HaversineDistance(latA.Value, lonA.Value, latB.Value, lonB.Value) >= toleranceMeters)
+        if (GeoUtils.HaversineDistance(latA!.Value, lonA!.Value, latB!.Value, lonB!.Value) >= toleranceMeters)
         {
             return false;
         }
 
         return PoiMatcher.NameSimilarity(nameA, nameB) >= nameSimilarityThreshold;
+    }
+
+    private static bool IsRealCoord(double? lat, double? lon)
+    {
+        if (!lat.HasValue || !lon.HasValue)
+        {
+            return false;
+        }
+        // Exact (0,0) is the placeholder; anything within ~10cm of it
+        // is also placeholder noise (no real POIs sit on the equator-
+        // prime-meridian intersection in the Atlantic Ocean).
+        return Math.Abs(lat.Value) > 1e-6 || Math.Abs(lon.Value) > 1e-6;
     }
 
     /// <summary>
