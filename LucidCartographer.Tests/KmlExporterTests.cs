@@ -81,8 +81,14 @@ public class KmlExporterTests
         var placemark = doc.Descendants(Kml + "Placemark").Single();
         placemark.Element(Kml + "name")!.Value.Should().Be("TestPlace");
 
+        // SharpKml serializes doubles at full IEEE round-trip precision
+        // (e.g. "19.935400000000001"); compare by parsed value rather than
+        // exact string formatting.
         var coords = placemark.Descendants(Kml + "coordinates").Single().Value;
-        coords.Should().Be("19.9354,50.0541,0");
+        var parts = coords.Split(',');
+        parts.Should().HaveCountGreaterOrEqualTo(2);
+        double.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture).Should().BeApproximately(19.9354, 1e-6);
+        double.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture).Should().BeApproximately(50.0541, 1e-6);
     }
 
     [Fact]
