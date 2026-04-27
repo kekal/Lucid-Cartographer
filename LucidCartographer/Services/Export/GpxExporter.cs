@@ -1,69 +1,64 @@
-using LucidCartographer.Data.Entities;
+using System.Collections.Immutable;
 using System.Text;
-using System.Xml;
-using System.Xml.Linq;
+using LucidCartographer.Data.Entities;
+using NetTopologySuite.IO;
 
 namespace LucidCartographer.Services.Export;
 
+/// <summary>
+/// GPX exporter backed by NetTopologySuite.IO.GPX. Writes a GPX 1.1
+/// document with one <c>&lt;wpt&gt;</c> per POI. Skips POIs without
+/// coordinates (the GPX spec requires lat/lon on every waypoint).
+/// </summary>
 public class GpxExporter : IFileExporter
 {
-    private static readonly XNamespace Gpx = "http://www.topografix.com/GPX/1/1";
-
     public string FormatName => "GPX";
     public string ContentType => "application/gpx+xml";
 
-    /// <summary>
-    /// Synchronous export — builds the XDocument and writes directly to a MemoryStream.
-    /// No async wrapper; no deadlock risk.
-    /// </summary>
     public byte[] Export(IReadOnlyList<Poi> pois, string documentName = "Lucid Cartographer Export")
     {
-        var doc = BuildDocument(pois, documentName);
-        using var ms = new MemoryStream();
-        doc.Save(ms);
-        return ms.ToArray();
+        var gpx = BuildGpxFile(pois, documentName);
+        var xml = gpx.BuildString(new GpxWriterSettings());
+        return Encoding.UTF8.GetBytes(xml);
     }
 
     public async Task ExportAsync(IReadOnlyList<Poi> pois, Stream output, string documentName = "Lucid Cartographer Export", CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var doc = BuildDocument(pois, documentName);
-
-        await using var writer = XmlWriter.Create(output, new XmlWriterSettings
-        {
-            Async = true,
-            Encoding = Encoding.UTF8,
-            Indent = true
-        });
-        await doc.WriteToAsync(writer, cancellationToken);
-        await writer.FlushAsync();
+        var bytes = Export(pois, documentName);
+        await output.WriteAsync(bytes, cancellationToken);
     }
 
-    private static XDocument BuildDocument(IReadOnlyList<Poi> pois, string documentName)
+    private static GpxFile BuildGpxFile(IReadOnlyList<Poi> pois, string documentName)
     {
-        return new XDocument(
-            new XDeclaration("1.0", "UTF-8", null),
-            new XElement(Gpx + "gpx",
-                new XAttribute("version", "1.1"),
-                new XAttribute("creator", "Lucid Cartographer"),
-                new XAttribute(XNamespace.Xmlns + "xsi", "http://www.w3.org/2001/XMLSchema-instance"),
-                new XElement(Gpx + "metadata",
-                    new XElement(Gpx + "name", documentName),
-                    new XElement(Gpx + "time", DateTime.UtcNow.ToString("O"))
-                ),
-                pois.Where(poi => poi is { Latitude: not null, Longitude: not null }).Select(poi =>
-                    new XElement(Gpx + "wpt",
-                        new XAttribute("lat", poi.Latitude!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)),
-                        new XAttribute("lon", poi.Longitude!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)),
-                        new XElement(Gpx + "name", poi.Name),
-                        string.IsNullOrEmpty(poi.Notes) ? null : new XElement(Gpx + "desc", poi.Notes),
-                        string.IsNullOrEmpty(poi.GoogleMapsUrl) ? null : new XElement(Gpx + "link",
-                            new XAttribute("href", poi.GoogleMapsUrl),
-                            new XElement(Gpx + "text", "Google Maps")
-                        )
-                    )
-                )
-            )
-        );
+        var gpx = new GpxFile
+        {
+            Metadata = new GpxMetadata("Lucid Cartographer")
+                .WithName(documentName)
+                .WithCreationTimeUtc(DateTime.UtcNow)
+        };
+
+        foreach (var poi in pois.Where(p => p is { Latitude: not null, Longitude: not null }))
+        {
+            var wpt = new GpxWaypoint(
+                    longitude: new GpxLongitude(poi.Longitude!.Value),
+                    latitude: new GpxLatitude(poi.Latitude!.Value))
+                .WithName(poi.Name);
+
+            if (!string.IsNullOrEmpty(poi.Notes))
+            {
+                wpt = wpt.WithDescription(poi.Notes);
+            }
+
+            if (!string.IsNullOrEmpty(poi.GoogleMapsUrl)
+                && Uri.TryCreate(poi.GoogleMapsUrl, UriKind.Absolute, out var href))
+            {
+                wpt = wpt.WithLinks(ImmutableArray.Create(new GpxWebLink(href, "Google Maps", null)));
+            }
+
+            gpx.Waypoints.Add(wpt);
+        }
+
+        return gpx;
     }
 }
