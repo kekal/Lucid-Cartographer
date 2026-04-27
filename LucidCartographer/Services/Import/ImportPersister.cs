@@ -35,6 +35,9 @@ internal sealed class ImportPersister(
     // State built up during RunAsync.
     private PoiCollection _collection = null!;
     private HashSet<int> _existingLinks = [];
+    // Lower-cased name → existing rows with that name. Built once per
+    // import to avoid N+1 lookups inside ProcessItemsAsync.
+    private Dictionary<string, List<Poi>> _existingByName = new(StringComparer.Ordinal);
 
     private readonly List<NewPoiEntry> _newPois = [];
     private readonly List<PoiCollectionItem> _linksToAdd = [];
@@ -45,6 +48,7 @@ internal sealed class ImportPersister(
     {
         await CreateCollectionAsync();
         _existingLinks = await LoadExistingLinksAsync();
+        _existingByName = await LoadExistingByNameAsync();
         await ProcessItemsAsync();
         await SaveNewPoisAsync();
         AttachImagesToNewPois();
@@ -84,6 +88,48 @@ internal sealed class ImportPersister(
             .ToHashSetAsync(ct);
     }
 
+    /// <summary>
+    /// One-shot lookup for every existing row whose name appears in the
+    /// imported batch. Avoids the prior O(N) per-row query — a 1000-row
+    /// import now does one IN-list lookup instead of 1000 round trips.
+    /// SQL-side comparison uses uninverted name; the in-memory match in
+    /// <see cref="FindExistingMatchAsync"/> still calls
+    /// <see cref="PoiIdentity.AreSamePlace"/> for the final say.
+    /// </summary>
+    private async Task<Dictionary<string, List<Poi>>> LoadExistingByNameAsync()
+    {
+        var names = validParsed
+            .Select(p => p.Name?.Trim() ?? string.Empty)
+            .Where(n => n.Length > 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (names.Count == 0)
+        {
+            return new Dictionary<string, List<Poi>>(StringComparer.Ordinal);
+        }
+
+        // EF Core translates Contains over an in-memory set to SQL IN.
+        // We over-fetch on case (SQL uses default collation) and let the
+        // C#-side group-by re-bucket using OrdinalIgnoreCase.
+        var nameList = names.ToList();
+        var rows = await db.Pois
+            .Where(p => nameList.Contains(p.Name))
+            .ToListAsync(ct);
+
+        var lookup = new Dictionary<string, List<Poi>>(StringComparer.Ordinal);
+        foreach (var row in rows)
+        {
+            var key = row.Name.ToLowerInvariant().Trim();
+            if (!lookup.TryGetValue(key, out var bucket))
+            {
+                bucket = [];
+                lookup[key] = bucket;
+            }
+            bucket.Add(row);
+        }
+        return lookup;
+    }
+
     // ---- Phase 3: per-item dispatch ------------------------------------------
 
     private async Task ProcessItemsAsync()
@@ -104,7 +150,7 @@ internal sealed class ImportPersister(
         }
     }
 
-    private async Task<Poi?> FindExistingMatchAsync(ImportedPoi imported)
+    private Task<Poi?> FindExistingMatchAsync(ImportedPoi imported)
     {
         var shell = new Poi
         {
@@ -114,19 +160,20 @@ internal sealed class ImportPersister(
         };
 
         var normalizedName = imported.Name.ToLowerInvariant().Trim();
-        var existingCandidates = await db.Pois
-            .Where(p => p.Name.ToLower() == normalizedName)
-            .ToListAsync(ct);
-
-        foreach (var candidate in existingCandidates)
+        if (_existingByName.TryGetValue(normalizedName, out var existingCandidates))
         {
-            if (PoiIdentity.AreSamePlace(candidate, shell))
+            foreach (var candidate in existingCandidates)
             {
-                return candidate;
+                if (PoiIdentity.AreSamePlace(candidate, shell))
+                {
+                    return Task.FromResult<Poi?>(candidate);
+                }
             }
         }
 
-        return _newPois.Select(x => x.Poi).FirstOrDefault(inBatch => PoiIdentity.AreSamePlace(inBatch, shell));
+        var inBatchHit = _newPois.Select(x => x.Poi)
+            .FirstOrDefault(inBatch => PoiIdentity.AreSamePlace(inBatch, shell));
+        return Task.FromResult(inBatchHit);
     }
 
     // ---- Phase 3a: dedup branch ----------------------------------------------

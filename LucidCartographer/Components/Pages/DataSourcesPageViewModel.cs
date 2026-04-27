@@ -21,7 +21,8 @@ public sealed class DataSourcesPageViewModel(
     IGoogleMapsListScraper scraper,
     IEnumerable<IFileExporter> exporters,
     IJSRuntime js,
-    EnrichmentTrigger enrichmentTrigger)
+    EnrichmentTrigger enrichmentTrigger,
+    ILogger<DataSourcesPageViewModel> logger)
     : IAsyncDisposable
 {
     private readonly CancellationTokenSource _cts = new();
@@ -132,7 +133,7 @@ public sealed class DataSourcesPageViewModel(
                 IsImporting = false;
                 ImportResult = status.Result;
                 QueuedMessage = null;
-                _ = ReloadAfterCompletionAsync();
+                _ = ReloadAfterCompletionWithLoggingAsync();
                 return;
             case ImportJobState.Failed:
                 IsImporting = false;
@@ -147,6 +148,29 @@ public sealed class DataSourcesPageViewModel(
     {
         await LoadCollectionsAsync();
         Notify();
+    }
+
+    // The Rx callback that schedules this is synchronous (Action<T>),
+    // so the only way to surface errors is to log + signal them here.
+    // Without this wrapper, a reload failure would only reach the
+    // global UnobservedTaskException handler when the GC finalizes
+    // the discarded Task — far too late to be useful.
+    private async Task ReloadAfterCompletionWithLoggingAsync()
+    {
+        try
+        {
+            await ReloadAfterCompletionAsync();
+        }
+        catch (OperationCanceledException) when (_cts.IsCancellationRequested)
+        {
+            // VM is being disposed; nothing to surface.
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Reloading collections after import completion failed");
+            MaintenanceMessage = $"Refresh after import failed: {ex.Message}";
+            Notify();
+        }
     }
 
     private async Task LoadCollectionsAsync()
@@ -388,7 +412,13 @@ public sealed class DataSourcesPageViewModel(
                         url = resolvedUrl;
                     }
                 }
-                catch { /* best effort — fall back to original short URL */ }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    // Best-effort short-URL expansion: any non-cancellation
+                    // failure just leaves the original short URL in place.
+                    logger.LogDebug(ex, "Short-URL HEAD resolution failed; using original URL");
+                }
             }
 
             // Only accept the place marker (!3d!4d) — never trust the
@@ -485,7 +515,8 @@ public sealed class DataSourcesPageViewModel(
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Error exporting collection {collectionId}: {ex.Message}");
+            logger.LogError(ex, "Error exporting collection {CollectionId} to KML", collectionId);
+            MaintenanceMessage = $"Export failed: {ex.Message}";
         }
         finally
         {
@@ -555,7 +586,8 @@ public sealed class DataSourcesPageViewModel(
     public ValueTask DisposeAsync()
     {
         _statusSubscription?.Dispose();
-        try { _cts.Cancel(); } catch { /* token already disposed */ }
+        try { _cts.Cancel(); }
+        catch (ObjectDisposedException) { /* token source already disposed */ }
         _cts.Dispose();
         return ValueTask.CompletedTask;
     }

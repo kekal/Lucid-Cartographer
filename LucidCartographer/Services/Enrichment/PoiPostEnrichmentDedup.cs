@@ -25,6 +25,22 @@ namespace LucidCartographer.Services.Enrichment;
 internal static class PoiPostEnrichmentDedup
 {
     /// <summary>
+    /// SQL-side bounding-box half-width (decimal degrees) used to
+    /// pre-filter dedup candidates around <c>justEnriched</c>'s
+    /// coordinates. The in-memory <see cref="PoiIdentity.AreSamePlace"/>
+    /// check has the final 100m-distance say.
+    ///
+    /// Tuned for mid-latitude European usage (≈222m at the equator,
+    /// ≈111m at 60°N). Equator-biased: at very high latitudes the box
+    /// shrinks below the 100m identity threshold, which only causes
+    /// missed candidates (false negatives), never spurious merges.
+    /// If we ever start ingesting polar data we should switch to a
+    /// distance-based filter that scales the longitude span by
+    /// cos(latitude).
+    /// </summary>
+    private const double DedupBoundingBoxDegrees = 0.002;
+
+    /// <summary>
     /// Returns true if <paramref name="justEnriched"/> was merged into an
     /// older canonical row and removed from the database.
     /// </summary>
@@ -88,16 +104,11 @@ internal static class PoiPostEnrichmentDedup
         // `wieŻa widokowa` and never match `wieża widokowa` produced
         // by C#'s Unicode-aware ToLowerInvariant. The bbox avoids the
         // issue entirely and is itself indexable on lat/lon.
-        //
-        // The box is intentionally generous (≈222m at 50°N latitude,
-        // vs PoiIdentity's 100m threshold) so the in-memory
-        // AreSamePlace check still has the final say without missing
-        // candidates sitting right on the edge.
-        const double boundingBoxDegrees = 0.002;
-        var latLo = justEnriched.Latitude.Value - boundingBoxDegrees;
-        var latHi = justEnriched.Latitude.Value + boundingBoxDegrees;
-        var lonLo = justEnriched.Longitude.Value - boundingBoxDegrees;
-        var lonHi = justEnriched.Longitude.Value + boundingBoxDegrees;
+        // See DedupBoundingBoxDegrees for the latitude-bias caveat.
+        var latLo = justEnriched.Latitude.Value - DedupBoundingBoxDegrees;
+        var latHi = justEnriched.Latitude.Value + DedupBoundingBoxDegrees;
+        var lonLo = justEnriched.Longitude.Value - DedupBoundingBoxDegrees;
+        var lonHi = justEnriched.Longitude.Value + DedupBoundingBoxDegrees;
 
         var candidates = await db.Pois
             .Where(p => p.Id < justEnriched.Id

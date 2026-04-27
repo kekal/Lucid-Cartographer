@@ -302,9 +302,16 @@ public sealed class MapPageViewModel(
     public async Task HandleVisibilityToggledAsync(int collectionId)
     {
         var s = CollectionStates.FirstOrDefault(c => c.Id == collectionId);
-        s?.IsVisible = !s.IsVisible;
+        if (s is null)
+        {
+            return;
+        }
 
+        // Persist first; only flip the UI flag once the database
+        // confirms. If the call throws the toggle stays where it was
+        // and the exception bubbles to the calling event handler.
         await poiService.ToggleVisibilityAsync(collectionId);
+        s.IsVisible = !s.IsVisible;
         await LoadVisibleCollectionsAsync();
     }
 
@@ -474,11 +481,11 @@ public sealed class MapPageViewModel(
         }
 
         PoiCollectionNames = (await poiService.GetPoiCollectionNamesAsync(poiIds))
-            .ToDictionary(kvp => kvp.Key, IReadOnlyList<string> (kvp) => kvp.Value);
+            .ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<string>)kvp.Value);
 
         var memberships = await poiService.GetPoiCollectionMembershipsAsync(poiIds);
         PoiCollectionMemberships = memberships
-            .ToDictionary(kvp => kvp.Key, IReadOnlyList<int> (kvp) => kvp.Value);
+            .ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<int>)kvp.Value);
 
         PoiCollectionIds = memberships
             .Where(kvp => kvp.Value.Count > 0)

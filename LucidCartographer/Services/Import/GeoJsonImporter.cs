@@ -1,4 +1,5 @@
 using System.Text.Json;
+using LucidCartographer.Services;
 
 namespace LucidCartographer.Services.Import;
 
@@ -118,7 +119,7 @@ public class GeoJsonImporter(ILogger<GeoJsonImporter> logger) : IFileImporter
         string? website = GetStringProp(props, "website") ?? GetStringProp(props, "Website");
         if (!string.IsNullOrWhiteSpace(rawUrl))
         {
-            if (LooksLikeGoogleMapsUrl(rawUrl))
+            if (PoiUrlHelper.IsGoogleMapsUrl(rawUrl))
             {
                 googleUrl = rawUrl;
             }
@@ -146,14 +147,6 @@ public class GeoJsonImporter(ILogger<GeoJsonImporter> logger) : IFileImporter
             Description: description,
             Website: website
         );
-    }
-
-    private static bool LooksLikeGoogleMapsUrl(string url)
-    {
-        return url.Contains("google.com/maps", StringComparison.OrdinalIgnoreCase)
-               || url.Contains("maps.google.com", StringComparison.OrdinalIgnoreCase)
-               || url.Contains("maps.app.goo.gl", StringComparison.OrdinalIgnoreCase)
-               || url.Contains("goo.gl/maps", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? GetStringProp(JsonElement props, string key)

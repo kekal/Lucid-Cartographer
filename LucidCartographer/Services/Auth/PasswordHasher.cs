@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Globalization;
 
 namespace LucidCartographer.Services.Auth;
 
@@ -11,7 +10,10 @@ namespace LucidCartographer.Services.Auth;
 public static class PasswordHasher
 {
     private const string Scheme = "pbkdf2";
-    private const int DefaultIterations = 100000;
+    // OWASP 2023+ guidance for PBKDF2-SHA256: ≥600,000 iterations.
+    // The encoded format embeds the iteration count, so old hashes
+    // generated at lower factors still verify correctly.
+    private const int DefaultIterations = 600000;
     private const int SaltSize = 16;
     private const int HashSize = 32;
 
@@ -31,9 +33,7 @@ public static class PasswordHasher
             HashAlgorithmName.SHA256,
             HashSize);
 
-        return string.Create(
-            CultureInfo.InvariantCulture,
-            $"{Scheme}${DefaultIterations}${Convert.ToBase64String(salt)}${Convert.ToBase64String(hash)}");
+        return $"{Scheme}${DefaultIterations}${Convert.ToBase64String(salt)}${Convert.ToBase64String(hash)}";
     }
 
     /// <summary>

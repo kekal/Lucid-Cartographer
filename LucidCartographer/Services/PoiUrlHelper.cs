@@ -83,6 +83,25 @@ public static class PoiUrlHelper
         return null;
     }
 
+    /// <summary>
+    /// True if <paramref name="url"/> looks like a Google Maps link
+    /// (any of google.com/maps, maps.google.com, maps.app.goo.gl, or
+    /// the legacy goo.gl/maps form). Used by importers and the enrichment
+    /// background service to decide whether navigating the URL will reach
+    /// the place selectors the scraper expects.
+    /// </summary>
+    public static bool IsGoogleMapsUrl(string url)
+    {
+        if (string.IsNullOrEmpty(url))
+        {
+            return false;
+        }
+        return url.Contains("google.com/maps", StringComparison.OrdinalIgnoreCase)
+               || url.Contains("maps.google.com", StringComparison.OrdinalIgnoreCase)
+               || url.Contains("maps.app.goo.gl", StringComparison.OrdinalIgnoreCase)
+               || url.Contains("goo.gl/maps", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static double? ExtractBangParam(string url, string prefix)
     {
         var idx = url.IndexOf(prefix, StringComparison.Ordinal);

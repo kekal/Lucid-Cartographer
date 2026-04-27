@@ -184,7 +184,8 @@ public sealed class OperationsPageViewModel(
     public ValueTask DisposeAsync()
     {
         _toleranceDebounce?.Dispose();
-        try { _cts.Cancel(); } catch { /* token already disposed */ }
+        try { _cts.Cancel(); }
+        catch (ObjectDisposedException) { /* token source already disposed */ }
         _cts.Dispose();
         return ValueTask.CompletedTask;
     }

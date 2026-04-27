@@ -59,7 +59,9 @@
     private string _url = string.Empty;
     private string? _error;
     private bool _submitting;
-    private int _lastSeenPoiId;
+    // -1 sentinel so the very first OnParametersSet always triggers the
+    // reset path, even if the incoming Poi happens to have Id 0.
+    private int _lastSeenPoiId = -1;
 
     private string SearchUrl =>
         "https://www.google.com/maps/search/?api=1&query=" +
@@ -106,7 +108,13 @@
             return false;
         }
         var host = uri.Host.ToLowerInvariant();
-        return (host.Contains("google.") || host == "maps.app.goo.gl" || host == "goo.gl")
-               && (uri.AbsolutePath.Contains("/maps") || host == "maps.app.goo.gl" || host == "goo.gl");
+        // maps.app.goo.gl is the canonical Google Maps short link; legacy
+        // goo.gl/maps was retired in 2024. A bare goo.gl/* shortlink may
+        // point anywhere, so don't accept it without an explicit /maps path.
+        if (host == "maps.app.goo.gl")
+        {
+            return true;
+        }
+        return host.Contains("google.") && uri.AbsolutePath.Contains("/maps");
     }
 }

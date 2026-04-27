@@ -18,11 +18,17 @@ public class MapPageViewModelTests
 {
     private readonly Mock<IPoiService> _poi = new();
     private readonly EnrichmentProgressService _progress = new();
+    private readonly EnrichmentTrigger _trigger = new();
     private readonly TestNavigationManager _navigation = new();
 
     private MapPageViewModel CreateVm()
     {
-        return new MapPageViewModel(_poi.Object, _navigation, _progress, NullLogger<MapPageViewModel>.Instance);
+        return new MapPageViewModel(
+            _poi.Object,
+            _navigation,
+            _progress,
+            _trigger,
+            NullLogger<MapPageViewModel>.Instance);
     }
 
     private static PoiCollection MakeCollection(int id, string name, bool isVisible = true)

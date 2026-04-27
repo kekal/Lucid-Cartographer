@@ -70,11 +70,13 @@ public static class AuthRouteGuardExtensions
 
         if (address.AddressFamily == AddressFamily.InterNetwork)
         {
+            // Loopback (127.0.0.0/8) is already handled above by
+            // IPAddress.IsLoopback; the remaining clauses cover RFC 1918
+            // private ranges only.
             var bytes = address.GetAddressBytes();
             return bytes[0] == 10
                    || (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)
-                   || (bytes[0] == 192 && bytes[1] == 168)
-                   || bytes[0] == 127;
+                   || (bytes[0] == 192 && bytes[1] == 168);
         }
 
         if (address.AddressFamily != AddressFamily.InterNetworkV6)

@@ -66,4 +66,14 @@ public sealed class EnrichmentOptions
     /// Only meaningful with <see cref="Headed"/> = true. Default: 0.
     /// </summary>
     public int SlowMoMs { get; set; }
+
+    /// <summary>
+    /// User-Agent header sent by the Playwright BrowserContext. Pinned
+    /// to a recent stable Chrome string so Google Maps doesn't downgrade
+    /// the experience or trigger bot heuristics. Operators can override
+    /// without a rebuild via <c>Enrichment:UserAgent</c>.
+    /// </summary>
+    public string UserAgent { get; set; } =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 }

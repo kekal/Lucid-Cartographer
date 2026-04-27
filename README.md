@@ -32,7 +32,36 @@ docker-compose up
 
 The DB path is resolved from `DB_PATH` env var, then `Database:Path` config, then defaults to `data/cartographer.db` under `ContentRootPath`.
 
-Auth is mandatory in non-Development environments — set `Auth:Password` or `Auth:PasswordHash` (see `appsettings.json`). The app refuses to start with the literal value `changeme`.
+## Authentication
+
+Per-user accounts persist in the `Users` table. On first run with an empty
+table, `StartupCleanupService` bootstraps an `admin` user with a
+24-character random password and prints it to the log under a banner
+("INITIAL ADMIN USER CREATED"). Capture it from `docker compose logs` or
+your hosting platform's log viewer — it is **not shown again**. Password
+hashing is PBKDF2-SHA256 (600,000 iterations).
+
+### LAN bypass
+
+`Auth:BypassLocalAddresses` (default **false**) accepts unauthenticated
+requests from RFC 1918 / loopback / IPv6 link-local addresses, attaching a
+synthetic `lan-bypass` principal. Useful for a single-operator
+home/lab deployment that doesn't want a login form on a private network.
+
+> **Warning.** Enable this only when the app server is on a network you
+> trust end-to-end. Behind a reverse proxy you **must** also list the
+> proxy's IP in `Auth:TrustedProxies` so the framework's
+> `ForwardedHeaders` middleware substitutes the original client IP into
+> `Connection.RemoteIpAddress`. Without that, every request through the
+> proxy looks "local" and bypasses auth — see
+> [`docs/auth-rework-proposal.md`](docs/auth-rework-proposal.md).
+
+```json
+"Auth": {
+  "BypassLocalAddresses": true,
+  "TrustedProxies": ["10.0.0.5", "172.20.0.1"]
+}
+```
 
 ## Test
 

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
@@ -28,10 +29,6 @@ namespace LucidCartographer.Services.Enrichment;
 /// </summary>
 public class PoiEnrichmentBackgroundService : BackgroundService
 {
-    private const string UserAgent =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-
     private readonly IDbContextFactory<AppDbContext> _factory;
     private readonly EnrichmentProgressService _progress;
     private readonly EnrichmentTrigger _trigger;
@@ -42,6 +39,12 @@ public class PoiEnrichmentBackgroundService : BackgroundService
     private readonly TimeSpan _baseRetryDelay;
     private readonly SemaphoreSlim _sqliteWriteLock = new(1, 1);
     private readonly SemaphoreSlim _pageConcurrencyLock;
+    // Tracks POI ids currently being enriched across all workers in this
+    // process. Without it, two workers can pick the same id when their
+    // batch queries overlap, leading to lost updates and dedup deletions
+    // racing each other. Entry held for the lifetime of the worker's
+    // page+persist phase.
+    private readonly ConcurrentDictionary<int, byte> _inFlight = new();
 
     public PoiEnrichmentBackgroundService(
         IDbContextFactory<AppDbContext> factory,
@@ -101,7 +104,7 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         await using var context = await browser.NewContextAsync(new BrowserNewContextOptions
         {
             Locale = "en-US",
-            UserAgent = UserAgent
+            UserAgent = _options.UserAgent
         });
 
         // In headed mode Chromium closes the window when its last page goes
@@ -184,6 +187,10 @@ public class PoiEnrichmentBackgroundService : BackgroundService
                 batchIds = candidates
                     .Where(p => IsRetryDue(p.EnrichmentFailureCount, p.LastEnrichmentAttemptAt, now))
                     .Select(p => p.Id)
+                    // Skip ids another worker is already enriching this
+                    // batch — the in-flight entry stays until the persist
+                    // task finishes, so we won't double-claim a row.
+                    .Where(id => !_inFlight.ContainsKey(id))
                     .Take(_options.BatchSize)
                     .ToList();
             }
@@ -260,31 +267,56 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         // starts the next POI's GotoAsync while the previous POI's
         // housekeeping runs in parallel. We await the list before the
         // worker closes its tab so nothing is lost on shutdown.
-        var persistTasks = new List<Task>();
+        var persistTasks = new List<(int PoiId, Task Task)>();
         try
         {
             page = await context.NewPageAsync();
             await foreach (var poiId in reader.ReadAllAsync(ct))
             {
+                if (!_inFlight.TryAdd(poiId, 0))
+                {
+                    // Another worker grabbed this id already (shouldn't
+                    // happen given the dispatch-side filter, but cheap
+                    // defensive guard).
+                    continue;
+                }
+
                 try
                 {
                     var persistTask = await EnrichOneAsync(context, page, poiId, ct);
-                    persistTasks.Add(persistTask);
+                    persistTasks.Add((poiId, persistTask));
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
+                    _inFlight.TryRemove(poiId, out _);
                     break;
                 }
                 catch (Exception ex)
                 {
+                    _inFlight.TryRemove(poiId, out _);
                     _logger.LogError(ex, "Worker crashed enriching Poi {PoiId}; continuing", poiId);
                 }
             }
         }
         finally
         {
-            try { await Task.WhenAll(persistTasks); }
-            catch (Exception ex) { _logger.LogDebug(ex, "A background persist task failed"); }
+            // Await each persist task individually so a failure on row N
+            // doesn't hide failures on rows >N. Task.WhenAll only rethrows
+            // the first faulted task; we want every POI's outcome logged.
+            foreach (var (poiId, task) in persistTasks)
+            {
+                try { await task; }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { /* shutdown */ }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Persist phase failed for Poi {PoiId}", poiId);
+                }
+                finally
+                {
+                    _inFlight.TryRemove(poiId, out _);
+                }
+            }
 
             if (page != null)
             {
@@ -345,7 +377,7 @@ public class PoiEnrichmentBackgroundService : BackgroundService
                 // to e.g. termymaltanskie.com.pl — no place selectors, all
                 // fields empty, fallback modal. Treat anything else as missing
                 // and route through the coord-anchored name search.
-                if (!string.IsNullOrEmpty(snapshot.GoogleMapsUrl) && IsGoogleMapsUrl(snapshot.GoogleMapsUrl!))
+                if (!string.IsNullOrEmpty(snapshot.GoogleMapsUrl) && PoiUrlHelper.IsGoogleMapsUrl(snapshot.GoogleMapsUrl!))
                 {
                     return await PoiDetailEnricher.EnrichAsync(page, snapshot.GoogleMapsUrl!, innerCt, _logger);
                 }
@@ -608,14 +640,6 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         }
 
         yield return imageUrl;
-    }
-
-    private static bool IsGoogleMapsUrl(string url)
-    {
-        return url.Contains("google.com/maps", StringComparison.OrdinalIgnoreCase)
-               || url.Contains("maps.google.com", StringComparison.OrdinalIgnoreCase)
-               || url.Contains("maps.app.goo.gl", StringComparison.OrdinalIgnoreCase)
-               || url.Contains("goo.gl/maps", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsLikelyPlacePhotoUrl(string url)

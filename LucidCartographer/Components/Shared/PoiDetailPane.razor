@@ -210,6 +210,14 @@
 
     protected override void OnParametersSet()
     {
+        // The pane renders only when Poi is non-null (parent owns the
+        // null check), but bUnit / unit tests do pass Poi=null to verify
+        // graceful handling — guard accordingly.
+        if (Poi is null)
+        {
+            return;
+        }
+
         // Reset the queued state when the user opens a different POI, or when
         // the BG service finishes and flips IsEnriched back to true.
         if (Poi.Id != _lastSeenPoiId || Poi.IsEnriched)

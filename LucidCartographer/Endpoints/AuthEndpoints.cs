@@ -15,15 +15,24 @@ public static class AuthEndpoints
         // Login endpoint with rate limiting + CSRF validation.
         endpoints.MapPost("/login", async context =>
         {
-            // ARCH-CRIT-03: Validate antiforgery token on login POST
+            // ARCH-CRIT-03: Validate antiforgery token on login POST.
+            // Failure surfaces as 400 (not a redirect) so anomaly-detection
+            // tooling can distinguish CSRF abuse from typo'd passwords.
             var antiforgery = context.RequestServices.GetRequiredService<IAntiforgery>();
             try
             {
                 await antiforgery.ValidateRequestAsync(context);
             }
-            catch (AntiforgeryValidationException)
+            catch (AntiforgeryValidationException ex)
             {
-                context.Response.Redirect("/login?error=1");
+                var loggerFactory = context.RequestServices.GetRequiredService<ILoggerFactory>();
+                loggerFactory.CreateLogger("AuthEndpoints").LogWarning(
+                    ex,
+                    "Antiforgery validation failed for {Path} from {RemoteIp}",
+                    context.Request.Path,
+                    context.Connection.RemoteIpAddress);
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                await context.Response.WriteAsync("CSRF validation failed");
                 return;
             }
 
@@ -71,14 +80,27 @@ public static class AuthEndpoints
             }
         }).RequireRateLimiting("login");
 
-        // Logout endpoint
+        // Logout endpoint. Revoke + sign-out are independent: a failed
+        // server-side revoke must NOT leave the client cookie valid, so
+        // SignOutAsync runs unconditionally. Worst case: stale Sessions
+        // row hangs around until the vacuum sweep cleans it up.
         endpoints.MapGet("/logout", async context =>
         {
             var sessionToken = context.User.FindFirstValue("session_token");
             if (!string.IsNullOrWhiteSpace(sessionToken))
             {
-                var store = context.RequestServices.GetRequiredService<SessionStore>();
-                await store.RevokeAsync(sessionToken, context.RequestAborted);
+                try
+                {
+                    var store = context.RequestServices.GetRequiredService<SessionStore>();
+                    await store.RevokeAsync(sessionToken, context.RequestAborted);
+                }
+                catch (Exception ex)
+                {
+                    var loggerFactory = context.RequestServices.GetRequiredService<ILoggerFactory>();
+                    loggerFactory.CreateLogger("AuthEndpoints").LogWarning(
+                        ex,
+                        "Server-side session revoke failed; signing out the client cookie anyway");
+                }
             }
 
             await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);

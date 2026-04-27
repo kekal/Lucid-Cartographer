@@ -11,18 +11,28 @@ namespace LucidCartographer.Services;
 ///   1. Sweep orphaned lucid-import-* temp files older than 1h.
 ///   2. Apply EF Core migrations (ARCH-CRIT-01: MigrateAsync, not EnsureCreatedAsync).
 ///   3. Bootstrap an initial admin user when the Users table is empty.
+///   4. Revive stuck file-imported POIs (one-time data recovery, idempotent).
+///   5. Vacuum expired / long-revoked auth sessions.
 /// </summary>
 public sealed class StartupCleanupService(
     IServiceProvider services,
     ILoggerFactory loggerFactory)
     : IHostedService
 {
+    // Cross-restart guard for ReviveStuckImportedPoisAsync: a single
+    // transient DB hiccup is fine, but two consecutive failures point at
+    // a real schema/index problem and we'd rather refuse to start than
+    // silently keep limping. Persisted in-memory only — restarting a
+    // healthy host clears it.
+    private static int s_consecutiveReviveFailures;
+
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         SweepOrphanedTempFiles();
         await ApplyMigrationsAsync(cancellationToken);
         await EnsureAdminUserAsync(cancellationToken);
         await ReviveStuckImportedPoisAsync(cancellationToken);
+        await VacuumExpiredSessionsAsync(cancellationToken);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
@@ -124,10 +134,59 @@ public sealed class StartupCleanupService(
 
             await db.SaveChangesAsync(cancellationToken);
             logger.LogWarning("Revived {Count} stuck POIs (failed enrichment or pseudo-enriched) for re-enrichment", stuck.Count);
+            // Successful run resets the consecutive-failure counter.
+            Interlocked.Exchange(ref s_consecutiveReviveFailures, 0);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "ReviveStuckImportedPois failed; continuing startup");
+            var failures = Interlocked.Increment(ref s_consecutiveReviveFailures);
+            if (failures >= 2)
+            {
+                logger.LogCritical(ex,
+                    "ReviveStuckImportedPois has failed {FailureCount} starts in a row; refusing to continue startup so the underlying problem is visible",
+                    failures);
+                throw;
+            }
+            logger.LogError(ex,
+                "ReviveStuckImportedPois failed (attempt {FailureCount}); continuing startup, will escalate on next failure",
+                failures);
+        }
+    }
+
+    /// <summary>
+    /// Removes session rows that are either past their <c>ExpiresAt</c>
+    /// or were revoked more than 30 days ago. Cookie auth never reads
+    /// these rows, so the table just grows monotonically without it.
+    /// One sweep per startup is enough — sessions accumulate slowly.
+    /// </summary>
+    private async Task VacuumExpiredSessionsAsync(CancellationToken cancellationToken)
+    {
+        var logger = loggerFactory.CreateLogger("SessionVacuum");
+        try
+        {
+            using var scope = services.CreateScope();
+            var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using var db = await factory.CreateDbContextAsync(cancellationToken);
+
+            var now = DateTime.UtcNow;
+            var revokedCutoff = now - TimeSpan.FromDays(30);
+
+            var stale = await db.Sessions
+                .Where(s => s.ExpiresAt < now || (s.RevokedAt != null && s.RevokedAt < revokedCutoff))
+                .ToListAsync(cancellationToken);
+
+            if (stale.Count == 0)
+            {
+                return;
+            }
+
+            db.Sessions.RemoveRange(stale);
+            await db.SaveChangesAsync(cancellationToken);
+            logger.LogInformation("Vacuumed {Count} expired/revoked auth sessions", stale.Count);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Session vacuum failed; continuing startup");
         }
     }
 
@@ -167,6 +226,13 @@ public sealed class StartupCleanupService(
 
     private static string GenerateUrlSafePassword(int length)
     {
+        // 64 chars — power of two so byte % 64 is uniformly distributed.
+        // Deliberately omits 0 / O / 1 / l / I to keep the bootstrap
+        // password unambiguous when an operator copies it out of logs.
+        // Resist the urge to "fill in" the missing characters: the modest
+        // entropy loss (≈0.8 bits in a 24-char password) is dwarfed by
+        // the cost of someone mistyping `1` for `l` and getting locked
+        // out of a fresh deploy.
         const string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
         var buffer = RandomNumberGenerator.GetBytes(length);
         var chars = new char[length];

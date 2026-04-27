@@ -5,6 +5,7 @@ using LucidCartographer.Services;
 using LucidCartographer.Services.Enrichment;
 using LucidCartographer.Services.Export;
 using LucidCartographer.Services.Import;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.JSInterop;
 using Moq;
 
@@ -33,7 +34,8 @@ public class DataSourcesPageViewModelTests
         _exporter.SetupGet(e => e.FormatName).Returns("KML");
         return new DataSourcesPageViewModel(
             _queue.Object, _status, _poi.Object, _scraper.Object,
-            [_exporter.Object], _js.Object, _trigger);
+            [_exporter.Object], _js.Object, _trigger,
+            NullLogger<DataSourcesPageViewModel>.Instance);
     }
 
     private static PoiCollection MakeCollection(int id, string name, string color = "#005bbf")
