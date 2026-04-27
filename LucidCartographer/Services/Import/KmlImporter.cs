@@ -1,109 +1,100 @@
-using System.IO.Compression;
-using System.Text.RegularExpressions;
-using System.Xml.Linq;
+using SharpKml.Dom;
+using SharpKml.Engine;
 
 namespace LucidCartographer.Services.Import;
 
-public partial class KmlImporter(ILogger<KmlImporter> logger) : IFileImporter
+/// <summary>
+/// KML / KMZ importer backed by SharpKml. Strict spec parser: malformed
+/// or non-compliant input surfaces as an exception from the library
+/// (typically <see cref="System.Xml.XmlException"/> or
+/// <see cref="InvalidOperationException"/>) — no silent placeholder names.
+/// </summary>
+public class KmlImporter(ILogger<KmlImporter> logger) : IFileImporter
 {
     public string FormatName => "KML";
 
     private static readonly string[] Extensions = [".kml", ".kmz"];
     public IReadOnlyList<string> SupportedExtensions => Extensions;
 
-    public async Task<List<ImportedPoi>> ParseAsync(Stream fileStream, string fileName, CancellationToken cancellationToken = default)
+    public Task<List<ImportedPoi>> ParseAsync(Stream fileStream, string fileName, CancellationToken cancellationToken = default)
     {
         logger.LogInformation("Parsing KML/KMZ file: {FileName}", fileName);
-        XDocument doc;
 
+        KmlFile kml;
         if (Path.GetExtension(fileName).Equals(".kmz", StringComparison.OrdinalIgnoreCase))
         {
-            using var zip = new ZipArchive(fileStream, ZipArchiveMode.Read);
-            var kmlEntry = zip.Entries.FirstOrDefault(e => e.FullName.EndsWith(".kml", StringComparison.OrdinalIgnoreCase));
-            if (kmlEntry == null)
-            {
-                return [];
-            }
-
-            await using var kmlStream = kmlEntry.Open();
-            doc = await XDocument.LoadAsync(kmlStream, LoadOptions.None, cancellationToken);
+            using var kmz = KmzFile.Open(fileStream);
+            using var inner = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(kmz.ReadKml()));
+            kml = KmlFile.Load(inner);
         }
         else
         {
-            doc = await XDocument.LoadAsync(fileStream, LoadOptions.None, cancellationToken);
+            kml = KmlFile.Load(fileStream);
         }
 
-        var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
-
-        var skipped = 0;
-        var results = new List<ImportedPoi>();
-        var placemarks = doc.Descendants(ns + "Placemark").ToList();
-        if (!placemarks.Any())
+        if (kml.Root is null)
         {
-            placemarks = doc.Descendants("Placemark").ToList();
+            throw new InvalidDataException("KML file is empty or its root element could not be parsed.");
         }
 
-        foreach (var pm in placemarks)
+        var results = new List<ImportedPoi>();
+        foreach (var placemark in kml.Root.Flatten().OfType<Placemark>())
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // IE-24: Use coordinate-based fallback name (consistent with CsvImporter)
-            var name = XmlParsingHelpers.FindElement(pm, ns, "name")?.Value;
-            var desc = XmlParsingHelpers.FindElement(pm, ns, "description")?.Value;
-
-            var coordsText = XmlParsingHelpers.FindDescendant(pm, ns, "coordinates")?.Value;
-            if (coordsText == null) { skipped++; continue; }
-
-            var parts = coordsText.Trim().Split(',');
-            if (parts.Length < 2) { skipped++; continue; }
-
-            if (!double.TryParse(parts[0].Trim(), System.Globalization.CultureInfo.InvariantCulture, out var lon)) { skipped++; continue; }
-            if (!double.TryParse(parts[1].Trim(), System.Globalization.CultureInfo.InvariantCulture, out var lat)) { skipped++; continue; }
-
-            var googleUrl = ExtractGoogleMapsUrl(desc);
-            var effectiveName = string.IsNullOrWhiteSpace(name) ? $"Point ({lat:F4}, {lon:F4})" : name.Trim();
-
-            // Climb ancestors to find the nearest <Folder>'s <name>. Used by
-            // the orchestrator to split one KML into multiple collections —
-            // one per folder — when the file uses Folder grouping.
-            var folderName = FindAncestorFolderName(pm, ns);
-
-            results.Add(new ImportedPoi(
-                Name: effectiveName,
-                Latitude: lat,
-                Longitude: lon,
-                GoogleMapsUrl: googleUrl,
-                Description: StripHtml(desc),
-                FolderName: folderName
-            ));
-        }
-
-        logger.LogInformation("KML parse complete: {FileName} — {Count} POIs parsed, {Skipped} skipped",
-            fileName, results.Count, skipped);
-        return results;
-    }
-
-    private static string? FindAncestorFolderName(XElement placemark, XNamespace ns)
-    {
-        for (var ancestor = placemark.Parent; ancestor != null; ancestor = ancestor.Parent)
-        {
-            var isFolder = ancestor.Name == ns + "Folder" || ancestor.Name.LocalName == "Folder";
-            if (!isFolder)
+            var coords = ExtractCoordinates(placemark.Geometry);
+            if (coords is null)
             {
                 continue;
             }
 
-            var nameEl = XmlParsingHelpers.FindElement(ancestor, ns, "name");
-            var folderName = nameEl?.Value?.Trim();
-            if (!string.IsNullOrWhiteSpace(folderName))
+            var (lat, lon) = coords.Value;
+            var name = placemark.Name?.Trim();
+            if (string.IsNullOrWhiteSpace(name))
             {
-                return folderName;
+                throw new InvalidDataException(
+                    $"Placemark at ({lat:F4}, {lon:F4}) has no <name> element. " +
+                    "Re-export the file from a spec-compliant tool.");
             }
+
+            results.Add(new ImportedPoi(
+                Name: name,
+                Latitude: lat,
+                Longitude: lon,
+                GoogleMapsUrl: ExtractGoogleMapsUrl(placemark.Description?.Text),
+                Address: placemark.Address?.Trim(),
+                Description: StripHtml(placemark.Description?.Text),
+                FolderName: FindAncestorFolderName(placemark)
+            ));
+        }
+
+        logger.LogInformation("KML parse complete: {FileName} — {Count} POIs parsed", fileName, results.Count);
+        return Task.FromResult(results);
+    }
+
+    private static (double lat, double lon)? ExtractCoordinates(Geometry? geometry)
+    {
+        // Only Point placemarks are POIs in our model. LineStrings,
+        // Polygons, and MultiGeometry are skipped silently — same as the
+        // previous parser.
+        if (geometry is Point point && point.Coordinate is not null)
+        {
+            return (point.Coordinate.Latitude, point.Coordinate.Longitude);
         }
         return null;
     }
 
-    // IE-04: FindElement/FindDescendant moved to XmlParsingHelpers
+    private static string? FindAncestorFolderName(Feature feature)
+    {
+        for (var parent = feature.Parent; parent is not null; parent = parent.Parent)
+        {
+            if (parent is Folder folder && !string.IsNullOrWhiteSpace(folder.Name))
+            {
+                return folder.Name.Trim();
+            }
+        }
+        return null;
+    }
 
     private static string? ExtractGoogleMapsUrl(string? html)
     {
@@ -117,7 +108,6 @@ public partial class KmlImporter(ILogger<KmlImporter> logger) : IFileImporter
         {
             idx = html.IndexOf("maps.google.com", StringComparison.OrdinalIgnoreCase);
         }
-
         if (idx < 0)
         {
             return null;
@@ -131,15 +121,13 @@ public partial class KmlImporter(ILogger<KmlImporter> logger) : IFileImporter
 
         var end = idx;
         while (end < html.Length && html[end] != '"' && html[end] != '\'' && html[end] != '<' && html[end] != ' ' && html[end] != '\n')
+        {
             end++;
+        }
 
         return html[start..end];
     }
 
-    /// <summary>
-    /// Strips HTML tags from a string using a compiled regex (IE-11).
-    /// Single pass is sufficient -- a second identical regex pass cannot match anything new.
-    /// </summary>
     private static string? StripHtml(string? html)
     {
         if (string.IsNullOrEmpty(html))
@@ -147,10 +135,7 @@ public partial class KmlImporter(ILogger<KmlImporter> logger) : IFileImporter
             return null;
         }
 
-        var result = HtmlTagRegex().Replace(html, " ");
+        var result = System.Text.RegularExpressions.Regex.Replace(html, "<[^>]*>", " ");
         return System.Net.WebUtility.HtmlDecode(result).Trim();
     }
-
-    [GeneratedRegex("<[^>]*>")]
-    private static partial Regex HtmlTagRegex();
 }
