@@ -190,7 +190,7 @@ public class GeoUtilsPinningTests
     [InlineData(90.0, 0.0, -90.0, 0.0)]                // Antipodes (poles)
     [InlineData(0.0, 0.0, 0.0, 1.0)]                   // 1 degree at equator
     [InlineData(48.8584, 2.2945, 40.7128, -74.0060)]   // Paris ↔ New York
-    public void HaversineDistance_IsSymmetric(double lat1, double lon1, double lat2, double lon2)
+    public void Pinning_HaversineDistance_IsSymmetric(double lat1, double lon1, double lat2, double lon2)
     {
         var fwd = GeoUtils.HaversineDistance(lat1, lon1, lat2, lon2);
         var bwd = GeoUtils.HaversineDistance(lat2, lon2, lat1, lon1);
@@ -252,10 +252,12 @@ public class GeoUtilsPinningTests
     }
 
     [Fact]
-    public void HaversineDistance_SamePoint_ReturnsZero()
+    public void Pinning_HaversineDistance_SamePoint_ReturnsZero()
     {
         // Any sane distance function returns 0 for identical
-        // coordinates — no tolerance needed.
+        // coordinates — no tolerance needed. (Direct GeoUtils unit
+        // tests live in GeoUtilsTests; this copy is the pinning
+        // anchor for any future library swap of the math layer.)
         GeoUtils.HaversineDistance(52.2297, 21.0122, 52.2297, 21.0122).Should().Be(0.0);
     }
 }
