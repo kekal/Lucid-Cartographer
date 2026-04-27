@@ -1,8 +1,17 @@
-using System.Text.Json;
 using LucidCartographer.Services;
+using NetTopologySuite.Features;
+using NetTopologySuite.Geometries;
+using NetTopologySuite.IO;
 
 namespace LucidCartographer.Services.Import;
 
+/// <summary>
+/// GeoJSON importer backed by NetTopologySuite. Strict spec parser:
+/// malformed input surfaces the library's own diagnostic via
+/// <see cref="System.Text.Json.JsonException"/>. Only Point features
+/// produce POIs; other geometry kinds (LineString, Polygon, …) are
+/// skipped silently as before.
+/// </summary>
 public class GeoJsonImporter(ILogger<GeoJsonImporter> logger) : IFileImporter
 {
     public string FormatName => "GeoJSON";
@@ -13,41 +22,25 @@ public class GeoJsonImporter(ILogger<GeoJsonImporter> logger) : IFileImporter
     public async Task<List<ImportedPoi>> ParseAsync(Stream fileStream, string fileName, CancellationToken cancellationToken = default)
     {
         logger.LogInformation("Parsing GeoJSON file: {FileName}", fileName);
-        using var doc = await JsonDocument.ParseAsync(fileStream, cancellationToken: cancellationToken);
+
+        // The NTS reader is sync-only. Buffer the stream to memory so we
+        // honour cancellation while reading the network/disk side.
+        using var ms = new MemoryStream();
+        await fileStream.CopyToAsync(ms, cancellationToken);
+        ms.Position = 0;
+
+        using var sr = new StreamReader(ms);
+        var json = await sr.ReadToEndAsync(cancellationToken);
+
+        var reader = new GeoJsonReader();
         var results = new List<ImportedPoi>();
-        var root = doc.RootElement;
-
-        // Determine root type
-        var rootType = root.TryGetProperty("type", out var typeProp) ? typeProp.GetString() : null;
-
-        switch (rootType)
+        foreach (var feature in ReadFeatures(reader, json))
         {
-            case "FeatureCollection"
-                when root.TryGetProperty("features", out var features)
-                     && features.ValueKind == JsonValueKind.Array:
+            cancellationToken.ThrowIfCancellationRequested();
+            var poi = MapFeature(feature);
+            if (poi is not null)
             {
-                foreach (var feature in features.EnumerateArray())
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var poi = ParseFeature(feature);
-                    if (poi != null)
-                    {
-                        results.Add(poi);
-                    }
-                }
-
-                break;
-            }
-            case "Feature":
-            {
-                // Standalone Feature
-                var poi = ParseFeature(root);
-                if (poi != null)
-                {
-                    results.Add(poi);
-                }
-
-                break;
+                results.Add(poi);
             }
         }
 
@@ -55,68 +48,37 @@ public class GeoJsonImporter(ILogger<GeoJsonImporter> logger) : IFileImporter
         return results;
     }
 
-    private static ImportedPoi? ParseFeature(JsonElement feature)
+    private static IEnumerable<IFeature> ReadFeatures(GeoJsonReader reader, string json)
     {
-        if (!feature.TryGetProperty("geometry", out var geometry))
+        // Accept both FeatureCollection and a single Feature at the root
+        // (matches the previous behaviour). NTS throws JsonException for
+        // anything else — that's the library's diagnostic we want surfaced.
+        if (json.Contains("\"FeatureCollection\""))
+        {
+            return reader.Read<FeatureCollection>(json);
+        }
+        return [reader.Read<IFeature>(json)];
+    }
+
+    private static ImportedPoi? MapFeature(IFeature feature)
+    {
+        if (feature.Geometry is not Point point)
         {
             return null;
         }
 
-        if (!geometry.TryGetProperty("coordinates", out var coords))
-        {
-            return null;
-        }
+        var lat = point.Y;
+        var lon = point.X;
+        var props = feature.Attributes;
 
-        if (coords.ValueKind != JsonValueKind.Array || coords.GetArrayLength() < 2)
-        {
-            return null;
-        }
-
-        // IE-16: Only handle Point geometry. Also reject features with missing geometry type
-        // (malformed geometry should not slip through).
-        if (!geometry.TryGetProperty("type", out var geoType))
-        {
-            return null; // Malformed: no geometry type
-        }
-
-        if (geoType.GetString() != "Point")
-        {
-            return null; // Not a Point geometry (LineString, Polygon, etc.)
-        }
-
-        if (coords[0].ValueKind != JsonValueKind.Number || coords[1].ValueKind != JsonValueKind.Number)
-        {
-            return null;
-        }
-
-        var lon = coords[0].GetDouble();
-        var lat = coords[1].GetDouble();
-
-        var props = feature.TryGetProperty("properties", out var p) ? p : default;
-
-        // IE-24: Use coordinate-based fallback name (consistent with CsvImporter) instead of "Unknown"
-        var name = GetStringProp(props, "name")
-                   ?? GetStringProp(props, "Name")
-                   ?? GetStringProp(props, "title")
-                   ?? GetStringProp(props, "Title")
+        var name = GetString(props, "name", "Name", "title", "Title")
                    ?? $"Point ({lat:F4}, {lon:F4})";
 
-        var address = GetStringProp(props, "address")
-                      ?? GetStringProp(props, "Address")
-                      ?? GetStringProp(props, "location");
+        var address = GetString(props, "address", "Address", "location");
 
-        // IE-20 (parity with GpxImporter): only assign to GoogleMapsUrl if
-        // the URL is actually a Google Maps link. A generic `url` property
-        // (the venue's own website) used to leak into GoogleMapsUrl and
-        // poisoned enrichment — the BG service navigated there instead of
-        // Google Maps and found no selectors. Generic non-Maps URLs are
-        // promoted to Website instead.
-        var rawUrl = GetStringProp(props, "google_maps_url")
-                     ?? GetStringProp(props, "Google Maps URL")
-                     ?? GetStringProp(props, "url")
-                     ?? GetStringProp(props, "URL");
+        var rawUrl = GetString(props, "google_maps_url", "Google Maps URL", "url", "URL");
         string? googleUrl = null;
-        string? website = GetStringProp(props, "website") ?? GetStringProp(props, "Website");
+        var website = GetString(props, "website", "Website");
         if (!string.IsNullOrWhiteSpace(rawUrl))
         {
             if (PoiUrlHelper.IsGoogleMapsUrl(rawUrl))
@@ -129,13 +91,8 @@ public class GeoJsonImporter(ILogger<GeoJsonImporter> logger) : IFileImporter
             }
         }
 
-        var description = GetStringProp(props, "description")
-                          ?? GetStringProp(props, "Description")
-                          ?? GetStringProp(props, "comment");
-
-        var category = GetStringProp(props, "category")
-                       ?? GetStringProp(props, "Category")
-                       ?? GetStringProp(props, "type");
+        var description = GetString(props, "description", "Description", "comment");
+        var category = GetString(props, "category", "Category", "type");
 
         return new ImportedPoi(
             Name: name.Trim(),
@@ -149,23 +106,29 @@ public class GeoJsonImporter(ILogger<GeoJsonImporter> logger) : IFileImporter
         );
     }
 
-    private static string? GetStringProp(JsonElement props, string key)
+    private static string? GetString(IAttributesTable? props, params string[] keys)
     {
-        if (props.ValueKind != JsonValueKind.Object)
+        if (props is null)
         {
             return null;
         }
-
-        if (!props.TryGetProperty(key, out var val))
+        foreach (var key in keys)
         {
-            return null;
+            if (!props.Exists(key))
+            {
+                continue;
+            }
+            var value = props[key];
+            if (value is null)
+            {
+                continue;
+            }
+            var s = value.ToString();
+            if (!string.IsNullOrWhiteSpace(s))
+            {
+                return s;
+            }
         }
-
-        return val.ValueKind switch
-        {
-            JsonValueKind.String => val.GetString(),
-            JsonValueKind.Null or JsonValueKind.Undefined => null,
-            _ => val.ToString()
-        };
+        return null;
     }
 }
