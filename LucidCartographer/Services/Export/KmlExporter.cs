@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Xml.Linq;
 using LucidCartographer.Data.Entities;
 using SharpKml.Base;
 using SharpKml.Dom;
@@ -78,74 +79,88 @@ public class KmlExporter : IFileExporter
         return Encoding.UTF8.GetBytes(serializer.Xml);
     }
 
+    /// <summary>
+    /// Builds the HTML balloon body for a placemark. KML's
+    /// <c>&lt;description&gt;</c> renders as HTML in Earth / Maps
+    /// popups; we build it with <see cref="XElement"/> so attribute and
+    /// text escaping is handled by the framework instead of by hand.
+    /// </summary>
     private static string BuildDescription(Poi poi)
     {
-        var sb = new StringBuilder();
+        var nodes = new List<XNode>();
 
         if (!string.IsNullOrEmpty(poi.ImageUrl))
         {
-            sb.Append(CultureInfo.InvariantCulture, $"<img src=\"{Escape(poi.ImageUrl)}\" style=\"max-width:300px;margin-bottom:8px\" /><br/>");
-        }
-        if (!string.IsNullOrEmpty(poi.Address))
-        {
-            sb.Append(CultureInfo.InvariantCulture, $"<b>Address:</b> {Escape(poi.Address)}<br/>");
-        }
-        if (!string.IsNullOrEmpty(poi.Category))
-        {
-            sb.Append(CultureInfo.InvariantCulture, $"<b>Category:</b> {Escape(poi.Category)}<br/>");
-        }
-        if (!string.IsNullOrEmpty(poi.Status))
-        {
-            sb.Append(CultureInfo.InvariantCulture, $"<b>Status:</b> {Escape(poi.Status)}<br/>");
-        }
-        if (!string.IsNullOrEmpty(poi.Country))
-        {
-            sb.Append(CultureInfo.InvariantCulture, $"<b>Country:</b> {Escape(poi.Country)}<br/>");
-        }
-        if (!string.IsNullOrEmpty(poi.Region))
-        {
-            sb.Append(CultureInfo.InvariantCulture, $"<b>Region:</b> {Escape(poi.Region)}<br/>");
-        }
-        if (poi.Rating.HasValue)
-        {
-            sb.Append(CultureInfo.InvariantCulture, $"<b>My Rating:</b> {poi.Rating}/5<br/>");
-        }
-        if (poi.GoogleRating.HasValue)
-        {
-            sb.Append(CultureInfo.InvariantCulture, $"<b>Google Rating:</b> {poi.GoogleRating:F1}");
-        }
-        if (poi.ReviewCount.HasValue)
-        {
-            sb.Append(CultureInfo.InvariantCulture, $" ({poi.ReviewCount:N0} reviews)");
-        }
-        if (poi.GoogleRating.HasValue)
-        {
-            sb.Append("<br/>");
-        }
-        if (!string.IsNullOrEmpty(poi.Phone))
-        {
-            sb.Append(CultureInfo.InvariantCulture, $"<b>Phone:</b> {Escape(poi.Phone)}<br/>");
-        }
-        if (!string.IsNullOrEmpty(poi.Website))
-        {
-            sb.Append(CultureInfo.InvariantCulture, $"<b>Website:</b> <a href=\"{Escape(poi.Website)}\">{Escape(poi.Website)}</a><br/>");
-        }
-        if (!string.IsNullOrEmpty(poi.Notes))
-        {
-            sb.Append(CultureInfo.InvariantCulture, $"<b>Notes:</b> {Escape(poi.Notes)}<br/>");
-        }
-        if (poi.VisitedDate.HasValue)
-        {
-            sb.Append(CultureInfo.InvariantCulture, $"<b>Visited:</b> {poi.VisitedDate.Value:MMM dd, yyyy}<br/>");
-        }
-        if (!string.IsNullOrEmpty(poi.GoogleMapsUrl))
-        {
-            sb.Append(CultureInfo.InvariantCulture, $"<a href=\"{Escape(poi.GoogleMapsUrl)}\">Open in Google Maps</a><br/>");
+            nodes.Add(new XElement("img",
+                new XAttribute("src", poi.ImageUrl),
+                new XAttribute("style", "max-width:300px;margin-bottom:8px")));
+            nodes.Add(new XElement("br"));
         }
 
+        AddLabelled(nodes, "Address", poi.Address);
+        AddLabelled(nodes, "Category", poi.Category);
+        AddLabelled(nodes, "Status", poi.Status);
+        AddLabelled(nodes, "Country", poi.Country);
+        AddLabelled(nodes, "Region", poi.Region);
+
+        if (poi.Rating.HasValue)
+        {
+            AddLabelled(nodes, "My Rating", string.Create(CultureInfo.InvariantCulture, $"{poi.Rating}/5"));
+        }
+
+        if (poi.GoogleRating.HasValue)
+        {
+            var rating = poi.GoogleRating.Value.ToString("F1", CultureInfo.InvariantCulture);
+            var review = poi.ReviewCount.HasValue
+                ? string.Create(CultureInfo.InvariantCulture, $" ({poi.ReviewCount.Value:N0} reviews)")
+                : "";
+            nodes.Add(new XElement("b", "Google Rating:"));
+            nodes.Add(new XText(" " + rating + review));
+            nodes.Add(new XElement("br"));
+        }
+
+        AddLabelled(nodes, "Phone", poi.Phone);
+
+        if (!string.IsNullOrEmpty(poi.Website))
+        {
+            nodes.Add(new XElement("b", "Website:"));
+            nodes.Add(new XText(" "));
+            nodes.Add(new XElement("a", new XAttribute("href", poi.Website), poi.Website));
+            nodes.Add(new XElement("br"));
+        }
+
+        AddLabelled(nodes, "Notes", poi.Notes);
+
+        if (poi.VisitedDate.HasValue)
+        {
+            AddLabelled(nodes, "Visited",
+                poi.VisitedDate.Value.ToString("MMM dd, yyyy", CultureInfo.InvariantCulture));
+        }
+
+        if (!string.IsNullOrEmpty(poi.GoogleMapsUrl))
+        {
+            nodes.Add(new XElement("a",
+                new XAttribute("href", poi.GoogleMapsUrl),
+                "Open in Google Maps"));
+            nodes.Add(new XElement("br"));
+        }
+
+        var sb = new StringBuilder();
+        foreach (var node in nodes)
+        {
+            sb.Append(node.ToString(SaveOptions.DisableFormatting));
+        }
         return sb.ToString();
     }
 
-    private static string Escape(string value)
-        => System.Security.SecurityElement.Escape(value);
+    private static void AddLabelled(List<XNode> nodes, string label, string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return;
+        }
+        nodes.Add(new XElement("b", label + ":"));
+        nodes.Add(new XText(" " + value));
+        nodes.Add(new XElement("br"));
+    }
 }
