@@ -13,6 +13,7 @@ using Microsoft.Playwright;
 using Polly;
 using Polly.Retry;
 using LucidCartographer.Components;
+using LucidCartographer.Configuration;
 
 namespace LucidCartographer.Tests.Integration;
 
@@ -33,7 +34,19 @@ public abstract class IntegrationTestBase : IAsyncLifetime
         _sw.Start();
         Log("INIT: start");
 
-        var builder = WebApplication.CreateBuilder();
+        // Point WebRoot at the main project's wwwroot so leafletInterop.js
+        // and the rest of the static assets resolve. The test bin dir has
+        // no wwwroot of its own; without this the first OnAfterRenderAsync
+        // on MapPage fails with "Could not find 'leafletInterop.initSplitter'
+        // ('leafletInterop' was undefined)" and tears down the circuit
+        // before any subsequent interaction can land.
+        var webRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", "..",
+            "LucidCartographer", "wwwroot"));
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            WebRootPath = webRoot
+        });
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Environment.EnvironmentName = "Development";
 
@@ -108,6 +121,13 @@ public abstract class IntegrationTestBase : IAsyncLifetime
         builder.Services.AddScoped<Services.Operations.IPoiMatcher, Services.Operations.PoiMatcher>();
         builder.Services.AddScoped<Services.Operations.ISetOperationService, Services.Operations.SetOperationService>();
         builder.Services.AddScoped<Services.IMapService, StubMapService>();
+
+        // Page ViewModels — added in commit 5ba80fa as a required @inject
+        // dependency for every page-component. Without this registration
+        // the Razor renderer fails to resolve the VM, the page never
+        // renders, and Playwright integration tests time out waiting for
+        // landmark selectors that never appear.
+        builder.Services.AddPageViewModels();
 
         RegisterAdditionalServices(builder.Services);
         Log("INIT: services registered");
