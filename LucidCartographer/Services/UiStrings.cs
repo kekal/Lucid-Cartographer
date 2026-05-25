@@ -31,6 +31,8 @@ public static class UiStrings
     public const string MapPageTitle = "Map - Lucid Cartographer";
     public const string FitAll = "Fit All";
     public const string FitMapToVisible = "Fit map to all visible collections";
+    public const string Labels = "Labels";
+    public const string ToggleLabels = "Show or hide POI name labels on the map";
     public const string FilteredResults = "Filtered Results";
     public const string NoPoiToDisplay = "No POIs to display. Toggle collection visibility or import data.";
     public const string LocationDetails = "Location Details";

@@ -28,6 +28,29 @@ nav a, .nav-link-no-underline {
     text-decoration: none;
 }
 
+/* POI name labels on the map (toggled via the "Labels" button in the toolbar).
+   Small white box hugging the text: no padding, border drawn tight around the
+   name, Leaflet's default pointer arrow removed. */
+.leaflet-tooltip.poi-label {
+    background: #fff;
+    border: 1px solid rgba(0, 0, 0, 0.25);
+    border-radius: 3px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+    padding: 0;
+    margin: 0;
+    color: #181c20;
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.3;
+    white-space: nowrap;
+}
+
+/* Hide Leaflet's tooltip pointer arrow for our label variant. */
+.leaflet-tooltip.poi-label::before {
+    display: none;
+}
+
 /* Blazor error UI */
 #blazor-error-ui {
     background: lightyellow;

@@ -17,6 +17,9 @@ public interface IMapService
     Task FitBoundsAsync();
     Task RefreshLayoutAsync();
     Task HighlightMarkerAsync(int poiId);
+
+    /// <summary>Show or hide permanent POI name labels next to every marker.</summary>
+    Task SetLabelsVisibleAsync(bool visible);
     /// <summary>
     /// CRIT-04: Destroy the JS-side map object to prevent memory leaks on navigation.
     /// </summary>

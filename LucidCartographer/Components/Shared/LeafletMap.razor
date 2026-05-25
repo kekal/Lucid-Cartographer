@@ -104,6 +104,16 @@
         await MapService.HighlightMarkerAsync(poiId);
     }
 
+    public async Task SetLabelsVisibleAsync(bool visible)
+    {
+        if (!IsInitialized)
+        {
+            return;
+        }
+
+        await MapService.SetLabelsVisibleAsync(visible);
+    }
+
     // REVIEW-12: Async callback — no more async void
     private async Task HandleMarkerClickedAsync(int poiId)
     {

@@ -61,6 +61,9 @@ public sealed class MapPageViewModel(
     public int TableHeight { get; private set; } = 256;
     public bool PendingSearchMapUpdate { get; private set; }
 
+    /// <summary>When true, every map marker shows a permanent POI-name label.</summary>
+    public bool ShowPoiLabels { get; private set; }
+
     // Set when the user clicks Enrich; cleared after the BG queue drains and
     // we either confirm success or open the fallback dialog. Used to scope
     // the post-enrichment "did it work?" check to the POI the user asked about.
@@ -367,6 +370,16 @@ public sealed class MapPageViewModel(
             FilteredPois = VisiblePois;
             Notify();
             await _map.FitBoundsAsync();
+        }
+    }
+
+    public async Task TogglePoiLabelsAsync()
+    {
+        ShowPoiLabels = !ShowPoiLabels;
+        Notify();
+        if (_map is { IsInitialized: true })
+        {
+            await _map.SetLabelsVisibleAsync(ShowPoiLabels);
         }
     }
 

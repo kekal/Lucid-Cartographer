@@ -54,6 +54,8 @@ public class LeafletMapService(IJSRuntime js) : IMapService, IAsyncDisposable
 
     public async Task HighlightMarkerAsync(int poiId) => await InvokeJsVoidAsync("leafletInterop.highlightMarker", poiId);
 
+    public async Task SetLabelsVisibleAsync(bool visible) => await InvokeJsVoidAsync("leafletInterop.setLabelsVisible", visible);
+
     public async Task DestroyMapAsync() => await InvokeJsVoidAsync("leafletInterop.destroyMap");
 
     public async Task EnableBoundsTrackingAsync() => await InvokeJsVoidAsync("leafletInterop.enableBoundsTracking");

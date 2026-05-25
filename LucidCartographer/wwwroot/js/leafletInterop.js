@@ -7,7 +7,8 @@
         map: null,
         layerGroups: {},
         markers: {},
-        dotnetRef: null
+        dotnetRef: null,
+        labelsVisible: false
     };
 
     function escapeHtml(text) {
@@ -15,6 +16,19 @@
         var div = document.createElement('div');
         div.appendChild(document.createTextNode(text));
         return div.innerHTML;
+    }
+
+    // Bind a permanent, non-interactive tooltip showing the POI name to the
+    // right of the marker dot. Non-interactive => pointer-events:none, so the
+    // label never swallows clicks meant for the marker underneath.
+    function bindLabel(marker) {
+        marker.bindTooltip(escapeHtml(marker._poiName || ''), {
+            permanent: true,
+            direction: 'right',
+            offset: [8, 0],
+            className: 'poi-label',
+            interactive: false
+        });
     }
 
     window.leafletInterop = {
@@ -47,6 +61,9 @@
             state.dotnetRef = dotnetRef;
             state.layerGroups = {};
             state.markers = {};
+            // Reset on (re)init so the JS state matches the freshly-constructed,
+            // transient MapPageViewModel (whose ShowPoiLabels defaults to false).
+            state.labelsVisible = false;
 
             // On SPA navigation (e.g. from /datasources back to /), Leaflet may
             // initialise before the flex layout has finalised the container's
@@ -125,12 +142,37 @@
                     }
                 });
 
+                // Remember the name so the labels toggle can (re)bind tooltips
+                // for markers added at any time (enrichment refresh, re-show).
+                marker._poiName = poi.name;
+                if (state.labelsVisible) {
+                    bindLabel(marker);
+                }
+
                 marker.addTo(group);
                 state.markers[poi.id] = marker;
             });
 
             group.addTo(state.map);
             state.layerGroups[collectionId] = group;
+        },
+
+        // Toggle permanent name labels next to every marker currently on the map.
+        // New markers added later read state.labelsVisible in addCollectionMarkers,
+        // so the setting persists across collection re-shows within the session.
+        setLabelsVisible: function (visible) {
+            state.labelsVisible = !!visible;
+            for (var id in state.markers) {
+                if (!Object.prototype.hasOwnProperty.call(state.markers, id)) continue;
+                var marker = state.markers[id];
+                if (state.labelsVisible) {
+                    if (!marker.getTooltip()) {
+                        bindLabel(marker);
+                    }
+                } else if (marker.getTooltip()) {
+                    marker.unbindTooltip();
+                }
+            }
         },
 
         removeCollectionMarkers: function (collectionId) {

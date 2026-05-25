@@ -60,6 +60,13 @@ else
                     <span class="material-symbols-outlined text-sm" aria-hidden="true">fit_screen</span>
                     @UiStrings.FitAll
                 </button>
+                <button class="text-xs transition-colors flex items-center gap-1 @(Vm.ShowPoiLabels ? "text-primary" : "text-on-surface-variant hover:text-primary")"
+                        @onclick="Vm.TogglePoiLabelsAsync"
+                        aria-pressed="@Vm.ShowPoiLabels"
+                        aria-label="@UiStrings.ToggleLabels">
+                    <span class="material-symbols-outlined text-sm" aria-hidden="true">@(Vm.ShowPoiLabels ? "label" : "label_off")</span>
+                    @UiStrings.Labels
+                </button>
             }
         </div>
 
