@@ -507,11 +507,15 @@ public sealed class DataSourcesPageViewModel(
 
             // Push the KML to the client's browser as a download. The app may
             // run in a container, where a server-side file path (the previous
-            // approach) is meaningless to the user. Then open Google My Maps so
-            // they can import the file that just landed in their Downloads.
+            // approach) is meaningless to the user. The browser never exposes
+            // the saved location to JS, so we copy the file NAME to the
+            // clipboard instead — the user pastes it into the OS file picker
+            // when importing into My Maps to jump straight to it. Then open
+            // Google My Maps so they can import the just-downloaded file.
             var fileName = $"{SanitizeFileName(col.Name)}.kml";
             await js.InvokeVoidAsync("LucidCartographer.downloadFile",
                 fileName, "application/vnd.google-earth.kml+xml", Convert.ToBase64String(bytes));
+            await js.InvokeVoidAsync("navigator.clipboard.writeText", fileName);
             await js.InvokeVoidAsync("window.open", "https://www.google.com/maps/d/", "_blank");
         }
         catch (Exception ex)
