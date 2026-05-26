@@ -5,8 +5,8 @@ services:
       args:
         # Run the container as the host user that owns ./data (NAS PUID/PGID),
         # so it can write the SQLite DB and OAuth keys. Override in .env.
-        APP_UID: ${APP_UID:-1026}
-        APP_GID: ${APP_GID:-100}
+        PUID: ${PUID:-1026}
+        PGID: ${PGID:-100}
     ports:
       - "5087:8080"
     volumes:

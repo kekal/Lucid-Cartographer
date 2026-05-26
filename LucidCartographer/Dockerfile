@@ -22,13 +22,16 @@ COPY --from=build /app/publish .
 # MED-02: Run as a non-root user. UID/GID are build args so the container user
 # matches the owner of the bind-mounted /data volume on the host (e.g. a NAS
 # PUID/PGID) — otherwise it can't write the SQLite DB or the OAuth keys. Defaults
-# match the target NAS; override with --build-arg APP_UID/APP_GID (or via compose).
-ARG APP_UID=1026
-ARG APP_GID=100
-RUN groupadd --gid ${APP_GID} appgroup 2>/dev/null || true && \
-    useradd --uid ${APP_UID} --gid ${APP_GID} --home-dir /app --no-create-home --shell /usr/sbin/nologin appuser && \
-    mkdir -p /data && chown -R ${APP_UID}:${APP_GID} /app /data
-USER ${APP_UID}:${APP_GID}
+# match the target NAS; override with --build-arg PUID/PGID (or via compose).
+# NB: named PUID/PGID, not APP_UID/APP_GID — the .NET base image sets
+# `ENV APP_UID=1654`, and an ENV overrides a same-named ARG, so APP_UID would
+# silently resolve to 1654 (the base image's "app" user) instead of ours.
+ARG PUID=1026
+ARG PGID=100
+RUN groupadd --gid ${PGID} appgroup 2>/dev/null || true && \
+    useradd --uid ${PUID} --gid ${PGID} --home-dir /app --no-create-home --shell /usr/sbin/nologin appuser && \
+    mkdir -p /data && chown -R ${PUID}:${PGID} /app /data
+USER ${PUID}:${PGID}
 
 ENV ASPNETCORE_URLS=http://+:8080
 ENV ASPNETCORE_ENVIRONMENT=Production
