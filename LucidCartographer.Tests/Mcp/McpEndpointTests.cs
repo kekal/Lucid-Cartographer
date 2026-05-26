@@ -82,6 +82,30 @@ public sealed class McpEndpointTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PromptsList_ExposesTemplates()
+    {
+        var root = await PostRpcAsync("prompts/list");
+
+        var names = root.GetProperty("result").GetProperty("prompts").EnumerateArray()
+            .Select(p => p.GetProperty("name").GetString())
+            .ToList();
+
+        names.Should().Contain(new[] { "plan_day_trip", "audit_collection" });
+    }
+
+    [Fact]
+    public async Task ResourcesList_ExposesReferenceDocs()
+    {
+        var root = await PostRpcAsync("resources/list");
+
+        var uris = root.GetProperty("result").GetProperty("resources").EnumerateArray()
+            .Select(r => r.GetProperty("uri").GetString())
+            .ToList();
+
+        uris.Should().Contain(new[] { "lucid://guide/usage", "lucid://reference/poi-schema" });
+    }
+
+    [Fact]
     public async Task CreateCollectionTool_FlowsThroughToService()
     {
         _poiService
