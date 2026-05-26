@@ -24,8 +24,14 @@ public static class AuthRouteGuardExtensions
                 path == "/health" ||
                 // The MCP endpoint is an API for non-browser clients (Claude Code).
                 // It must NOT be 302-redirected to /login; its own endpoint filter
-                // (McpApiKeyFilter) enforces loopback/LAN-or-API-key auth instead.
+                // (McpApiKeyFilter) enforces loopback/LAN / API-key / OAuth auth instead.
                 path.StartsWith("/mcp", StringComparison.Ordinal) ||
+                // OAuth frontdoor: authorization/token/registration endpoints and the
+                // discovery/metadata documents must be reachable without the cookie
+                // redirect. /connect/authorize challenges the cookie scheme itself when
+                // an interactive login is required.
+                path.StartsWith("/connect", StringComparison.Ordinal) ||
+                path.StartsWith("/.well-known", StringComparison.Ordinal) ||
                 path.StartsWith("/_blazor", StringComparison.Ordinal))
             {
                 await next();

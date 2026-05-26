@@ -1,15 +1,21 @@
 using System.Security.Cryptography;
 using System.Text;
 using LucidCartographer.Configuration;
+using Microsoft.AspNetCore.Authentication;
+using OpenIddict.Validation.AspNetCore;
 
 namespace LucidCartographer.Endpoints;
 
 /// <summary>
-/// Endpoint filter guarding the MCP endpoint. Loopback/LAN requests are allowed
-/// without a key (so local Claude Code works with zero config). Any other origin
-/// must present the configured key via <c>Authorization: Bearer &lt;key&gt;</c>
-/// or <c>X-Api-Key: &lt;key&gt;</c>. If no key is configured, remote access is
-/// refused (fail-closed).
+/// Endpoint filter guarding the MCP endpoint. A request is allowed if any of:
+///   1. it comes from loopback/LAN and the bypass is enabled
+///      (<c>Mcp:AllowLocalNetworkBypass</c>, off in Production);
+///   2. it presents the static API key (<c>Authorization: Bearer &lt;key&gt;</c> or
+///      <c>X-Api-Key</c>) — for Claude Code / scripts;
+///   3. it presents a valid OAuth access token issued by this app's frontdoor —
+///      for Claude.ai connectors (validated in-process by OpenIddict).
+/// Otherwise it returns 401 with a <c>WWW-Authenticate</c> header pointing at the
+/// protected-resource metadata so an OAuth-capable client can start the flow.
 /// </summary>
 public sealed class McpApiKeyFilter(IConfiguration configuration, ILogger<McpApiKeyFilter> logger) : IEndpointFilter
 {
@@ -17,36 +23,67 @@ public sealed class McpApiKeyFilter(IConfiguration configuration, ILogger<McpApi
     {
         var http = context.HttpContext;
 
-        // 1. Local machine / LAN — trusted, no key needed.
-        if (AuthRouteGuardExtensions.IsLocalNetwork(http.Connection.RemoteIpAddress))
+        // 1. Local machine / LAN — trusted, no credential needed, unless the bypass
+        //    is disabled (Production), where RFC1918 peers are the proxy/tunnel.
+        var allowLocalBypass = configuration.GetValue("Mcp:AllowLocalNetworkBypass", true);
+        if (allowLocalBypass && AuthRouteGuardExtensions.IsLocalNetwork(http.Connection.RemoteIpAddress))
         {
             return await next(context);
         }
 
-        // 2. Remote — require the configured key. Env var MCP_API_KEY wins,
-        //    then the Mcp:ApiKey configuration value.
+        // 2. Static API key. Env var MCP_API_KEY wins, then the Mcp:ApiKey config.
         var configuredKey = Environment.GetEnvironmentVariable("MCP_API_KEY");
         if (string.IsNullOrEmpty(configuredKey))
         {
             configuredKey = configuration["Mcp:ApiKey"];
         }
-
-        if (string.IsNullOrEmpty(configuredKey))
+        if (!string.IsNullOrEmpty(configuredKey))
         {
-            logger.LogWarning(
-                "Rejected remote MCP request from {RemoteIp}: no MCP API key is configured (set MCP_API_KEY).",
-                http.Connection.RemoteIpAddress);
-            return Results.Text("Unauthorized: MCP API key is not configured; remote access is disabled.", statusCode: StatusCodes.Status401Unauthorized);
+            var presented = ExtractKey(http);
+            if (presented is not null && FixedTimeEquals(presented, configuredKey))
+            {
+                return await next(context);
+            }
         }
 
-        var presented = ExtractKey(http);
-        if (presented is not null && FixedTimeEquals(presented, configuredKey))
+        // 3. OAuth bearer token, validated in-process by the OpenIddict frontdoor.
+        //    Skipped cleanly when the frontdoor is disabled (scheme not registered)
+        //    or in unit tests (no request services).
+        if (await TryAuthenticateOAuthAsync(http))
         {
             return await next(context);
         }
 
-        logger.LogWarning("Rejected remote MCP request from {RemoteIp}: missing or invalid API key.", http.Connection.RemoteIpAddress);
-        return Results.Text("Unauthorized: missing or invalid MCP API key.", statusCode: StatusCodes.Status401Unauthorized);
+        // 4. Unauthorized. Point OAuth-capable clients at the protected-resource
+        //    metadata so they can discover the authorization server and sign in.
+        logger.LogWarning(
+            "Rejected MCP request from {RemoteIp}: no LAN bypass, API key, or OAuth token.",
+            http.Connection.RemoteIpAddress);
+
+        http.Response.Headers.WWWAuthenticate =
+            $"Bearer resource_metadata=\"{http.Request.Scheme}://{http.Request.Host}/.well-known/oauth-protected-resource\"";
+        return Results.Text(
+            "Unauthorized: present a valid MCP API key or OAuth access token.",
+            statusCode: StatusCodes.Status401Unauthorized);
+    }
+
+    private static async Task<bool> TryAuthenticateOAuthAsync(HttpContext http)
+    {
+        var schemeProvider = http.RequestServices?.GetService<IAuthenticationSchemeProvider>();
+        if (schemeProvider is null ||
+            await schemeProvider.GetSchemeAsync(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme) is null)
+        {
+            return false;
+        }
+
+        var result = await http.AuthenticateAsync(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
+        if (result.Succeeded && result.Principal is not null)
+        {
+            http.User = result.Principal;
+            return true;
+        }
+
+        return false;
     }
 
     private static string? ExtractKey(HttpContext http)

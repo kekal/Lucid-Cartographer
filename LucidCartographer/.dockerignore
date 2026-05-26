@@ -18,3 +18,11 @@ Dockerfile
 .env
 .env.*
 tailwindcss-windows-x64.exe
+# Local dev state must never be baked into the image. The "data/" rule above is
+# case-sensitive on Linux builders, so also exclude these explicitly (on Windows
+# the dev data dir collides with the source Data/ folder).
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/oauth-signing.key
+**/oauth-encryption.key

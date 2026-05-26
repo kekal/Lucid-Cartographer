@@ -21,8 +21,36 @@ public static class DatabaseServicesExtensions
     {
         var dbPath = ResolveDbPath(configuration, environment);
         services.AddDbContextFactory<AppDbContext>(options =>
-            options.UseSqlite($"Data Source={dbPath}"));
+            options.UseSqlite($"Data Source={dbPath}")
+                // Register the OpenIddict entity sets on the model so the OAuth
+                // frontdoor's clients/tokens/authorizations live in the same DB
+                // and are picked up by EF migrations.
+                .UseOpenIddict());
+
+        // OpenIddict's managers resolve a request-scoped AppDbContext from DI, but
+        // AddDbContextFactory only registers the factory. Add a scoped context
+        // sourced from that factory so OAuth requests get a writable per-request
+        // context (the container disposes it at scope end).
+        services.AddScoped<AppDbContext>(sp =>
+            sp.GetRequiredService<IDbContextFactory<AppDbContext>>().CreateDbContext());
+
         return services;
+    }
+
+    /// <summary>
+    /// The directory that holds persistent on-disk state (the SQLite DB and the
+    /// OAuth signing/encryption keys). Same location the DB resolves to, so a
+    /// single mounted volume persists everything. Created if missing.
+    /// </summary>
+    internal static string ResolveDataDirectory(IConfiguration cfg, IHostEnvironment env)
+    {
+        var dir = Path.GetDirectoryName(ResolveDbPath(cfg, env));
+        if (string.IsNullOrEmpty(dir))
+        {
+            dir = Path.GetFullPath(Path.Combine(env.ContentRootPath, "data"));
+        }
+        Directory.CreateDirectory(dir);
+        return dir;
     }
 
     private static string ResolveDbPath(IConfiguration cfg, IHostEnvironment env)

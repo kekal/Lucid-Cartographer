@@ -63,6 +63,18 @@ home/lab deployment that doesn't want a login form on a private network.
 }
 ```
 
+## MCP server (Claude integration)
+
+A [Model Context Protocol](https://modelcontextprotocol.io) server is exposed at
+**`/mcp`** so AI clients (Claude Code, Claude.ai connectors) can read and manage
+POIs/collections without the browser UI. It accepts a request via any of: a
+loopback/LAN bypass (Development only), a static `MCP_API_KEY`, or an OAuth access
+token from the app's own OAuth 2.1 frontdoor.
+
+To publish it for Claude.ai connectors over a plain HTTPS tunnel, set
+`OAuth__Issuer` to the public URL and trust the tunnel in `Auth:TrustedProxies`.
+Full walkthrough: [`docs/mcp-oauth-setup.md`](docs/mcp-oauth-setup.md).
+
 ## Test
 
 ```bash

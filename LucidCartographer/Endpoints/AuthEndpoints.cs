@@ -39,6 +39,7 @@ public static class AuthEndpoints
             var form = await context.Request.ReadFormAsync();
             var username = form["username"].ToString();
             var password = form["password"].ToString();
+            var returnUrl = form["returnUrl"].ToString();
             var dbFactory = context.RequestServices.GetRequiredService<IDbContextFactory<AppDbContext>>();
 
             await using var db = await dbFactory.CreateDbContextAsync(context.RequestAborted);
@@ -72,7 +73,11 @@ public static class AuthEndpoints
                         IsPersistent = true,
                         ExpiresUtc = DateTimeOffset.UtcNow.AddDays(30)
                     });
-                context.Response.Redirect("/");
+
+                // Only honour local return URLs (prevents open-redirect). Used by the
+                // OAuth /connect/authorize flow to resume after an interactive login.
+                var redirectTo = IsLocalUrl(returnUrl) ? returnUrl : "/";
+                context.Response.Redirect(redirectTo);
             }
             else
             {
@@ -109,4 +114,13 @@ public static class AuthEndpoints
 
         return endpoints;
     }
+
+    /// <summary>
+    /// True only for same-site relative URLs ("/path..."). Rejects absolute URLs
+    /// and protocol-relative ("//host", "/\host") forms to prevent open redirects.
+    /// </summary>
+    private static bool IsLocalUrl(string? url)
+        => !string.IsNullOrEmpty(url)
+           && url[0] == '/'
+           && (url.Length == 1 || (url[1] != '/' && url[1] != '\\'));
 }

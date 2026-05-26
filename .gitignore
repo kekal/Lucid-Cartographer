@@ -25,6 +25,10 @@ LucidCartographer/wwwroot/css/tailwind.css
 scrape-diag.log
 *.diag.log
 
+# OAuth frontdoor signing/encryption keys — generated at runtime, secret. Never commit.
+oauth-signing.key
+oauth-encryption.key
+
 
 .claude/
 coverage/

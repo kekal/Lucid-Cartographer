@@ -23,6 +23,7 @@ builder.Services
     .AddAppResiliencePipelines()
     .AddPageViewModels()
     .AddMcpServerServices()
+    .AddOAuthFrontdoor(builder.Configuration, builder.Environment)
     .AddHealthChecks().Services
     .AddHostedService<StartupCleanupService>();
 
@@ -68,6 +69,7 @@ app.UseStaticFiles();
 
 app.MapHealthChecks("/health"); // MED-01
 app.MapAuthEndpoints();
+app.MapOAuthEndpoints();
 app.MapPoiImageEndpoints();
 
 // MCP endpoint for external agents (Claude Code). DisableAntiforgery because the

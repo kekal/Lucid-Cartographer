@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -37,6 +38,15 @@ public sealed class McpEndpointTests : IAsyncLifetime
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
+
+        // This suite exercises the MCP tool/prompt/resource surface over loopback,
+        // not auth (that's McpApiKeyFilterTests). Pin the loopback bypass on so the
+        // test is independent of the ambient environment — the copied
+        // appsettings.Production.json otherwise turns it off and every call 401s.
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Mcp:AllowLocalNetworkBypass"] = "true"
+        });
 
         builder.Services.AddSingleton(_poiService.Object);
         builder.Services.AddSingleton<EnrichmentTrigger>();

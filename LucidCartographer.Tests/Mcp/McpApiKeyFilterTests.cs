@@ -77,10 +77,35 @@ public sealed class McpApiKeyFilterTests : IDisposable
         status.Should().Be(StatusCodes.Status401Unauthorized);
     }
 
-    private static McpApiKeyFilter Filter(string? configuredKey)
+    [Fact]
+    public async Task LocalBypassDisabled_LanAddress_RequiresKey()
+    {
+        // With the bypass off (Production), an RFC1918 peer — a reverse proxy or
+        // tunnel — must present the key instead of being trusted by IP.
+        var (nextCalled, status) = await InvokeAsync(
+            Filter(configuredKey: "s3cret", allowLocalBypass: false),
+            Context("192.168.1.50"));
+        nextCalled.Should().BeFalse();
+        status.Should().Be(StatusCodes.Status401Unauthorized);
+    }
+
+    [Fact]
+    public async Task LocalBypassDisabled_LanAddress_WithKey_IsAllowed()
+    {
+        var (nextCalled, _) = await InvokeAsync(
+            Filter(configuredKey: "s3cret", allowLocalBypass: false),
+            Context("192.168.1.50", authHeader: "Bearer s3cret"));
+        nextCalled.Should().BeTrue();
+    }
+
+    private static McpApiKeyFilter Filter(string? configuredKey, bool allowLocalBypass = true)
     {
         var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["Mcp:ApiKey"] = configuredKey })
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Mcp:ApiKey"] = configuredKey,
+                ["Mcp:AllowLocalNetworkBypass"] = allowLocalBypass ? "true" : "false"
+            })
             .Build();
         return new McpApiKeyFilter(config, NullLogger<McpApiKeyFilter>.Instance);
     }
