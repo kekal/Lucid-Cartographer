@@ -1,0 +1,2 @@
+# Bind-mount target for the container's /data volume (SQLite DB + OAuth keys).
+# Tracked so the folder exists right after a clone/pull; its contents are gitignored.

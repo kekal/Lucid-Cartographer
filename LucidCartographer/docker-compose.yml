@@ -10,7 +10,10 @@ services:
     ports:
       - "5087:8080"
     volumes:
-      - ./data:/data
+      # Host folder is tracked (appdata/.gitkeep) so it exists after a clone/pull.
+      # Named "appdata" (not "data") to avoid colliding with the source Data/ folder
+      # on case-insensitive filesystems.
+      - ./appdata:/data
     restart: unless-stopped
     environment:
       - ASPNETCORE_ENVIRONMENT=Production

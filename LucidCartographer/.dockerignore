@@ -26,3 +26,4 @@ tailwindcss-windows-x64.exe
 **/*.db-wal
 **/oauth-signing.key
 **/oauth-encryption.key
+appdata/

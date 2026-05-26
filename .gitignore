@@ -29,6 +29,11 @@ scrape-diag.log
 oauth-signing.key
 oauth-encryption.key
 
+# Runtime state volume (bind-mounted to /data in the container). Keep the folder
+# tracked so the bind mount works right after a clone/pull, but ignore its contents.
+/LucidCartographer/appdata/*
+!/LucidCartographer/appdata/.gitkeep
+
 
 .claude/
 coverage/
