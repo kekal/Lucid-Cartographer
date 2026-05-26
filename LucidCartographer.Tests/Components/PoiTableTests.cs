@@ -73,7 +73,7 @@ public class PoiTableTests : BunitTestContext
     }
 
     [Fact]
-    public void Shows_GoogleMapsSearchFallback_WhenGoogleMapsUrlIsNull()
+    public void Shows_GoogleMapsNameSearchFallback_WhenGoogleMapsUrlIsNull()
     {
         List<Poi> pois = [CreatePoi(lat: 48.8566, lon: 2.3522)];
 
@@ -81,8 +81,10 @@ public class PoiTableTests : BunitTestContext
             .Add(p => p.Pois, pois));
 
         var link = cut.Find("a[target='_blank']");
-        link.GetAttribute("href").Should()
-            .Contain("https://www.google.com/maps/search/?api=1&query=48.8566,2.3522");
+        var href = link.GetAttribute("href");
+        // Name-based search ("Test Place"), never a bare coordinate link.
+        href.Should().Contain("https://www.google.com/maps/search/?api=1&query=Test%20Place");
+        href.Should().NotContain("48.8566,2.3522");
     }
 
     [Fact]

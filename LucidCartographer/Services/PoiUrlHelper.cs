@@ -17,18 +17,17 @@ public static class PoiUrlHelper
             return poi.GoogleMapsUrl;
         }
 
-        if (!poi.Latitude.HasValue || !poi.Longitude.HasValue)
+        // Never expose a bare coordinate link (?query=lat,lon) — it just drops a
+        // pin and looks broken. Fall back to a name-based Google Maps search,
+        // which resolves to the real place far more often. Mirrors the query
+        // EnrichFallbackDialog builds for the same purpose.
+        if (!string.IsNullOrWhiteSpace(poi.Name))
         {
-            return "#";
+            var query = string.IsNullOrWhiteSpace(poi.Category) ? poi.Name : $"{poi.Name} {poi.Category}";
+            return "https://www.google.com/maps/search/?api=1&query=" + Uri.EscapeDataString(query);
         }
 
-        if (double.IsNaN(poi.Latitude.Value) || double.IsNaN(poi.Longitude.Value)
-                                             || double.IsInfinity(poi.Latitude.Value) || double.IsInfinity(poi.Longitude.Value))
-        {
-            return "#";
-        }
-
-        return $"https://www.google.com/maps/search/?api=1&query={poi.Latitude.Value.ToString(CultureInfo.InvariantCulture)},{poi.Longitude.Value.ToString(CultureInfo.InvariantCulture)}";
+        return "#";
     }
 
     /// <summary>

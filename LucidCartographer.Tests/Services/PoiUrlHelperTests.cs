@@ -38,31 +38,38 @@ public class PoiUrlHelperTests
     }
 
     [Fact]
-    public void GetGoogleMapsUrl_FallsBackToCoordSearch_WhenNoUrlPresent()
+    public void GetGoogleMapsUrl_FallsBackToNameSearch_WhenNoUrlPresent()
     {
         var poi = new Poi { Name = "Place", Latitude = 50.0541, Longitude = 19.9354 };
 
         var url = PoiUrlHelper.GetGoogleMapsUrl(poi);
 
         url.Should().StartWith("https://www.google.com/maps/search/?api=1&query=");
-        url.Should().Contain("50.0541,19.9354");
+        url.Should().Contain("Place");
+        // A bare coordinate link must never be produced.
+        url.Should().NotContain("50.0541");
     }
 
     [Fact]
-    public void GetGoogleMapsUrl_ReturnsHash_WhenNoUrlAndNoCoords()
+    public void GetGoogleMapsUrl_NameSearchIncludesCategory_WhenPresent()
     {
-        var poi = new Poi { Name = "Nowhere" };
-        PoiUrlHelper.GetGoogleMapsUrl(poi).Should().Be("#");
+        var poi = new Poi { Name = "Blue Cafe", Category = "cafe" };
+
+        PoiUrlHelper.GetGoogleMapsUrl(poi)
+            .Should().Contain(Uri.EscapeDataString("Blue Cafe cafe"));
     }
 
-    [Theory]
-    [InlineData(double.NaN, 19.0)]
-    [InlineData(50.0, double.NaN)]
-    [InlineData(double.PositiveInfinity, 19.0)]
-    [InlineData(50.0, double.NegativeInfinity)]
-    public void GetGoogleMapsUrl_ReturnsHash_WhenCoordsAreNaNOrInfinity(double lat, double lon)
+    [Fact]
+    public void GetGoogleMapsUrl_FallsBackToNameSearch_EvenWithoutCoords()
     {
-        var poi = new Poi { Name = "Place", Latitude = lat, Longitude = lon };
+        var poi = new Poi { Name = "Nowhere" };
+        PoiUrlHelper.GetGoogleMapsUrl(poi).Should().Contain("query=Nowhere");
+    }
+
+    [Fact]
+    public void GetGoogleMapsUrl_ReturnsHash_WhenNoUrlAndNoName()
+    {
+        var poi = new Poi { Name = "" };
         PoiUrlHelper.GetGoogleMapsUrl(poi).Should().Be("#");
     }
 
