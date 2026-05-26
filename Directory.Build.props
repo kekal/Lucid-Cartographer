@@ -1,7 +1,12 @@
 <Project>
 
   <PropertyGroup>
-    <LangVersion>latest</LangVersion>
+    <!-- Pinned, NOT "latest": "latest" resolves to whatever the building SDK
+         supports, so a newer dev SDK silently compiles C# features an older
+         build environment (e.g. the Docker image) can't. An explicit version
+         makes any mismatch fail loudly (CS9202) instead. Bump this and the
+         Dockerfile build-stage SDK together. -->
+    <LangVersion>14.0</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>

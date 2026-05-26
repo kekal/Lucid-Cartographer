@@ -1,5 +1,7 @@
-# Build stage
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+# Build stage. Must be a .NET 10 SDK: the code uses C# 14 (LangVersion is pinned
+# to 14.0 in Directory.Build.props), which the .NET 8 SDK cannot compile. The app
+# still targets net8.0 and runs on the .NET 8 runtime image below.
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 # Download standalone Tailwind CLI (no Node.js needed)
 ADD https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.17/tailwindcss-linux-x64 /usr/local/bin/tailwindcss
 RUN chmod +x /usr/local/bin/tailwindcss

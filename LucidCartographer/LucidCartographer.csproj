@@ -2,6 +2,11 @@
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
+    <!-- Re-declared here (not only in Directory.Build.props) because the Docker
+         build context excludes the parent props file. Keep LangVersion in sync
+         with Directory.Build.props and the Dockerfile build-stage SDK: C# 14
+         needs the .NET 10 SDK even though the app targets net8.0. -->
+    <LangVersion>14.0</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- Suppresses NavigationException in Blazor Server to prevent enhanced-nav
