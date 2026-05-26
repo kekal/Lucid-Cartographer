@@ -118,6 +118,13 @@ public sealed class OAuthFrontdoorTests : IAsyncLifetime
         root.GetProperty("resource").GetString().Should().Be(Issuer);
         root.GetProperty("authorization_servers").EnumerateArray()
             .Select(e => e.GetString()).Should().Contain(Issuer);
+
+        // "header" must not be advertised twice (regression: it was set both by
+        // the SDK default and explicitly).
+        if (root.TryGetProperty("bearer_methods_supported", out var methods))
+        {
+            methods.EnumerateArray().Select(e => e.GetString()).Should().Equal("header");
+        }
     }
 
     [Fact]

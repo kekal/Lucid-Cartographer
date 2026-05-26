@@ -111,8 +111,9 @@ public static class OAuthFrontdoorExtensions
             {
                 Resource = issuer,
                 AuthorizationServers = { issuer },
-                ScopesSupported = { McpScope },
-                BearerMethodsSupported = { "header" }
+                ScopesSupported = { McpScope }
+                // BearerMethodsSupported defaults to "header" in the SDK — don't set
+                // it again or it appears twice in the metadata document.
             };
         });
 
