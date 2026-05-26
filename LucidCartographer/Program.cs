@@ -22,6 +22,7 @@ builder.Services
     .AddAppAuthentication(builder.Configuration)
     .AddAppResiliencePipelines()
     .AddPageViewModels()
+    .AddMcpServerServices()
     .AddHealthChecks().Services
     .AddHostedService<StartupCleanupService>();
 
@@ -68,6 +69,14 @@ app.UseStaticFiles();
 app.MapHealthChecks("/health"); // MED-01
 app.MapAuthEndpoints();
 app.MapPoiImageEndpoints();
+
+// MCP endpoint for external agents (Claude Code). DisableAntiforgery because the
+// JSON-RPC POSTs carry no antiforgery token; McpApiKeyFilter enforces auth
+// (loopback/LAN bypass, else MCP_API_KEY). /mcp is exempt from UseLanBypassOrAuth's
+// cookie redirect (see AuthRouteGuardExtensions).
+app.MapMcp("/mcp")
+    .DisableAntiforgery()
+    .AddEndpointFilter<IEndpointConventionBuilder, McpApiKeyFilter>();
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

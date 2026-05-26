@@ -19,6 +19,7 @@ public class StubMapService : IMapService
     public Task FitBoundsAsync() => Task.CompletedTask;
     public Task RefreshLayoutAsync() => Task.CompletedTask;
     public Task HighlightMarkerAsync(int poiId) => Task.CompletedTask;
+    public Task SetLabelsVisibleAsync(bool visible) => Task.CompletedTask;
     public Task DestroyMapAsync() => Task.CompletedTask;
     public Task EnableBoundsTrackingAsync() => Task.CompletedTask;
 }

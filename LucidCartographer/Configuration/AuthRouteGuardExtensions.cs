@@ -22,6 +22,10 @@ public static class AuthRouteGuardExtensions
                 path.StartsWith("/js", StringComparison.Ordinal) ||
                 path.StartsWith("/lib", StringComparison.Ordinal) ||
                 path == "/health" ||
+                // The MCP endpoint is an API for non-browser clients (Claude Code).
+                // It must NOT be 302-redirected to /login; its own endpoint filter
+                // (McpApiKeyFilter) enforces loopback/LAN-or-API-key auth instead.
+                path.StartsWith("/mcp", StringComparison.Ordinal) ||
                 path.StartsWith("/_blazor", StringComparison.Ordinal))
             {
                 await next();
@@ -51,7 +55,12 @@ public static class AuthRouteGuardExtensions
         return app;
     }
 
-    private static bool IsLocalNetwork(IPAddress? address)
+    /// <summary>
+    /// True when the address is loopback or in an RFC 1918 private range.
+    /// Exposed internally so the MCP endpoint filter reuses the exact same
+    /// definition of "local" rather than duplicating the byte checks.
+    /// </summary>
+    internal static bool IsLocalNetwork(IPAddress? address)
     {
         if (address is null)
         {
