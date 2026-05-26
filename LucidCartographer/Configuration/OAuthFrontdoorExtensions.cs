@@ -28,10 +28,12 @@ public static class OAuthFrontdoorExtensions
     /// <summary>Default issuer used in Development when OAuth:Issuer is unset.</summary>
     private const string DevelopmentIssuer = "http://localhost:5087";
 
-    public static IServiceCollection AddOAuthFrontdoor(
-        this IServiceCollection services,
-        IConfiguration configuration,
-        IHostEnvironment environment)
+    /// <summary>
+    /// Resolves the OAuth issuer / public base URL, or null when the frontdoor is
+    /// disabled. Falls back to a localhost issuer in Development. Shared so the
+    /// server config and the scope seeder agree on the exact same value.
+    /// </summary>
+    internal static string? ResolveIssuer(IConfiguration configuration, IHostEnvironment environment)
     {
         var issuer = configuration["OAuth:Issuer"];
         if (string.IsNullOrWhiteSpace(issuer) && environment.IsDevelopment())
@@ -39,7 +41,26 @@ public static class OAuthFrontdoorExtensions
             issuer = DevelopmentIssuer;
         }
 
-        if (string.IsNullOrWhiteSpace(issuer))
+        return string.IsNullOrWhiteSpace(issuer) ? null : issuer.TrimEnd('/');
+    }
+
+    /// <summary>
+    /// The canonical RFC 8707 resource identifier for the MCP server: the public
+    /// /mcp endpoint URL. Claude sends this as the <c>resource</c> authorization
+    /// parameter (it matches both the connector URL and the protected-resource
+    /// metadata). A path-bearing URL is used deliberately — its Uri.AbsoluteUri
+    /// is stable, unlike an authority-only URL which .NET rewrites with a
+    /// trailing slash and would then fail OpenIddict's ordinal resource match.
+    /// </summary>
+    internal static string McpResource(string issuer) => issuer.TrimEnd('/') + "/mcp";
+
+    public static IServiceCollection AddOAuthFrontdoor(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        IHostEnvironment environment)
+    {
+        var issuer = ResolveIssuer(configuration, environment);
+        if (issuer is null)
         {
             // No public issuer configured -> OAuth frontdoor disabled. /mcp stays
             // protected by the API key / LAN bypass. Set OAuth:Issuer to enable
@@ -68,6 +89,19 @@ public static class OAuthFrontdoorExtensions
                        .AllowRefreshTokenFlow();
 
                 options.RegisterScopes(Scopes.Email, Scopes.Profile, Scopes.OfflineAccess, McpScope);
+
+                // Register the MCP resource identifier so OpenIddict accepts the
+                // RFC 8707 `resource` parameter Claude sends (otherwise it rejects
+                // the authorization request with invalid_target). Validation
+                // compares against Options.Resources, not the scope store.
+                options.RegisterResources(McpResource(issuer));
+
+                // Don't enforce per-client resource permissions: every DCR-registered
+                // client is an MCP connector that legitimately targets the single MCP
+                // resource. Without this OpenIddict rejects with "client not allowed
+                // to use the specified resource(s)" (ID2192). The resource itself is
+                // still validated against the registered set above.
+                options.IgnoreResourcePermissions();
 
                 options.SetIssuer(new Uri(issuer));
 
@@ -109,7 +143,10 @@ public static class OAuthFrontdoorExtensions
         {
             options.ResourceMetadata = new ProtectedResourceMetadata
             {
-                Resource = issuer,
+                // Must equal the registered resource (McpResource) so the value
+                // Claude derives from this metadata and sends as `resource`
+                // matches Options.Resources exactly.
+                Resource = McpResource(issuer),
                 AuthorizationServers = { issuer },
                 ScopesSupported = { McpScope }
                 // BearerMethodsSupported defaults to "header" in the SDK — don't set

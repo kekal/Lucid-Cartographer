@@ -19,7 +19,7 @@ builder.Services
     .AddImportPipeline()
     .AddEnrichmentPipeline(builder.Configuration)
     .AddExportPipeline()
-    .AddAppAuthentication(builder.Configuration)
+    .AddAppAuthentication(builder.Configuration, builder.Environment)
     .AddAppResiliencePipelines()
     .AddPageViewModels()
     .AddMcpServerServices()
@@ -37,6 +37,12 @@ TaskScheduler.UnobservedTaskException += (_, e) =>
     e.SetObserved();
 };
 
+// Forwarded headers MUST run first — before HTTPS redirection, auth, and the
+// OAuth/OpenIddict endpoints — so the request scheme is rewritten to https from
+// the tunnel's X-Forwarded-Proto before any middleware reads it. Otherwise
+// OpenIddict rejects the (apparently http) request with "only accepts HTTPS".
+app.UseForwardedHeaders();
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
@@ -49,7 +55,6 @@ if (!app.Environment.IsDevelopment())
     app.UseHttpsRedirection();
 }
 
-app.UseForwardedHeaders();
 app.UseSecurityHeaders();
 
 // ARCH-HIGH-06: Response compression placed AFTER security headers to avoid BREACH issues.

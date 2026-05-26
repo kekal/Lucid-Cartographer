@@ -4,6 +4,7 @@ using System.Threading.RateLimiting;
 using LucidCartographer.Services.Auth;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 
 namespace LucidCartographer.Configuration;
@@ -17,8 +18,23 @@ public static class AppAuthenticationExtensions
     /// </summary>
     public static IServiceCollection AddAppAuthentication(
         this IServiceCollection services,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IHostEnvironment environment)
     {
+        // Persist Data Protection keys to the /data volume. Without this they
+        // land in the ephemeral container filesystem (~/.aspnet/DataProtection-Keys),
+        // so every redeploy regenerates them — invalidating all auth cookies,
+        // antiforgery tokens, and any in-flight OAuth authorization-code state.
+        // A fixed application name keeps the key ring stable across instances.
+        var keysDir = Path.Combine(
+            DatabaseServicesExtensions.ResolveDataDirectory(configuration, environment),
+            "dataprotection-keys");
+        Directory.CreateDirectory(keysDir);
+        services
+            .AddDataProtection()
+            .PersistKeysToFileSystem(new DirectoryInfo(keysDir))
+            .SetApplicationName("LucidCartographer");
+
         services.Configure<ForwardedHeadersOptions>(options =>
         {
             options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
@@ -31,6 +47,24 @@ public static class AppAuthenticationExtensions
                 if (IPAddress.TryParse(trustedProxy, out var parsedAddress))
                 {
                     options.KnownProxies.Add(parsedAddress);
+                }
+            }
+
+            // Trusted networks (CIDR), e.g. "172.16.0.0/12" for the Docker bridge
+            // range. Behind a container NAT the immediate peer is a gateway whose
+            // exact IP is hard to predict and can change, so trusting the private
+            // network is more robust than pinning a single proxy IP. Only matters
+            // for which peer may set X-Forwarded-Proto/For; the app is reachable
+            // solely via the tunnel and LAN, so trusting RFC1918 here is safe.
+            var trustedNetworks = configuration.GetSection("Auth:TrustedNetworks").Get<string[]>() ?? [];
+            foreach (var entry in trustedNetworks)
+            {
+                var parts = entry.Split('/', 2);
+                if (parts.Length == 2
+                    && IPAddress.TryParse(parts[0], out var prefix)
+                    && int.TryParse(parts[1], out var prefixLength))
+                {
+                    options.KnownNetworks.Add(new Microsoft.AspNetCore.HttpOverrides.IPNetwork(prefix, prefixLength));
                 }
             }
         });

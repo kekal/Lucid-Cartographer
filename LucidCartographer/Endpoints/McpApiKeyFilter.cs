@@ -67,7 +67,7 @@ public sealed class McpApiKeyFilter(IConfiguration configuration, ILogger<McpApi
             statusCode: StatusCodes.Status401Unauthorized);
     }
 
-    private static async Task<bool> TryAuthenticateOAuthAsync(HttpContext http)
+    private async Task<bool> TryAuthenticateOAuthAsync(HttpContext http)
     {
         var schemeProvider = http.RequestServices?.GetService<IAuthenticationSchemeProvider>();
         if (schemeProvider is null ||
@@ -76,11 +76,27 @@ public sealed class McpApiKeyFilter(IConfiguration configuration, ILogger<McpApi
             return false;
         }
 
+        var hasBearer = http.Request.Headers.Authorization.ToString()
+            .StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase);
+
         var result = await http.AuthenticateAsync(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
         if (result.Succeeded && result.Principal is not null)
         {
             http.User = result.Principal;
             return true;
+        }
+
+        // Diagnostics: distinguish "client sent no token" (token exchange likely
+        // failed upstream) from "token present but rejected" (and why).
+        if (hasBearer)
+        {
+            logger.LogWarning(
+                "OAuth bearer token present but validation failed: {Reason}",
+                result.Failure?.Message ?? "no principal returned");
+        }
+        else
+        {
+            logger.LogInformation("No OAuth bearer token on the MCP request.");
         }
 
         return false;

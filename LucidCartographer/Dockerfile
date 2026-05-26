@@ -17,7 +17,6 @@ RUN dotnet publish -c Release -o /app/publish
 # Runtime stage — official Playwright image includes Chromium and all OS dependencies (CRIT-02 fix)
 FROM mcr.microsoft.com/playwright/dotnet:v1.49.0-noble
 WORKDIR /app
-COPY --from=build /app/publish .
 
 # MED-02: Run as a non-root user. UID/GID are build args so the container user
 # matches the owner of the bind-mounted /data volume on the host (e.g. a NAS
@@ -29,8 +28,23 @@ COPY --from=build /app/publish .
 ARG PUID=1026
 ARG PGID=100
 RUN groupadd --gid ${PGID} appgroup 2>/dev/null || true && \
-    useradd --uid ${PUID} --gid ${PGID} --home-dir /app --no-create-home --shell /usr/sbin/nologin appuser && \
-    mkdir -p /data && chown -R ${PUID}:${PGID} /app /data
+    useradd --uid ${PUID} --gid ${PGID} --home-dir /app --no-create-home --shell /usr/sbin/nologin appuser 2>/dev/null || true && \
+    mkdir -p /data
+
+# Copy the published app (root-owned at this point).
+COPY --from=build /app/publish .
+
+# Set ownership and permissions in a shell RUN, NOT via `COPY --chown=${VAR}`:
+# the COPY --chown directive does not reliably expand build-arg variables on
+# older Docker daemons (e.g. Synology Container Manager), which silently leaves
+# the files root-owned and unreadable to the non-root user. A shell RUN always
+# expands ${PUID}/${PGID}. The extra `chmod -R a+rX /app` makes every file
+# readable and every dir traversable by ANY uid — app files hold no secrets
+# (those come from env vars), so this is safe and decouples "can read /app"
+# from the container uid entirely. Only /data is uid-sensitive (its ownership
+# is set on the host for the bind mount).
+RUN chown -R ${PUID}:${PGID} /app /data && chmod -R a+rX /app
+
 USER ${PUID}:${PGID}
 
 ENV ASPNETCORE_URLS=http://+:8080
@@ -39,6 +53,8 @@ ENV ASPNETCORE_ENVIRONMENT=Production
 # On non-container hosts this variable is unset and Program.cs falls back to
 # <ContentRoot>/data/cartographer.db, which works on any OS.
 ENV DB_PATH=/data/cartographer.db
+# Keep the diagnostic log on the writable /data volume, not in /app.
+ENV SCRAPE_DIAG_LOG=/data/scrape-diag.log
 
 EXPOSE 8080
 

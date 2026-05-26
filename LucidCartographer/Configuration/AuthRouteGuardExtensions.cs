@@ -17,6 +17,9 @@ public static class AuthRouteGuardExtensions
             var path = context.Request.Path.Value ?? "";
 
             if (path == "/login" ||
+                // The login form POSTs here; an unauthenticated POST must not be
+                // bounced to /login (that would drop the credentials).
+                path == "/auth/login" ||
                 path.StartsWith("/_framework", StringComparison.Ordinal) ||
                 path.StartsWith("/css", StringComparison.Ordinal) ||
                 path.StartsWith("/js", StringComparison.Ordinal) ||

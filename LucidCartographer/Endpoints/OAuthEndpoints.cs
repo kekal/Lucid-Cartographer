@@ -5,6 +5,7 @@ using LucidCartographer.Configuration;
 using Microsoft.AspNetCore; // OpenIddict HttpContext.GetOpenIddictServerRequest()
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.Extensions.DependencyInjection;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
 using static OpenIddict.Abstractions.OpenIddictConstants;
@@ -64,6 +65,11 @@ public static class OAuthEndpoints
                 .SetClaim(Claims.Name, username);
 
         identity.SetScopes(request.GetScopes());
+
+        // Echo the validated RFC 8707 resource(s) back as the token audience, so
+        // the access token is bound to the MCP resource server it's meant for.
+        identity.SetResources(request.GetResources());
+
         identity.SetDestinations(GetDestinations);
 
         return Results.SignIn(
@@ -84,6 +90,12 @@ public static class OAuthEndpoints
             var result = await http.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
             if (result.Principal is null)
             {
+                http.RequestServices.GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("OAuthEndpoints")
+                    .LogWarning(
+                        "Token exchange failed for grant '{Grant}': {Reason}",
+                        request.GrantType,
+                        result.Failure?.Message ?? "no principal restored from the code/refresh token");
                 return Results.Forbid(
                     authenticationSchemes: [OpenIddictServerAspNetCoreDefaults.AuthenticationScheme]);
             }

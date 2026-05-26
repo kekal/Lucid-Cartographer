@@ -62,6 +62,9 @@ public sealed class OAuthFrontdoorTests : IAsyncLifetime
             sp.GetRequiredService<IDbContextFactory<AppDbContext>>().CreateDbContext());
         builder.Services.AddMcpServerServices();
         builder.Services.AddOAuthFrontdoor(builder.Configuration, builder.Environment);
+        // Cookie scheme so /connect/authorize's interactive-login passthrough has a
+        // handler to challenge (the real app registers it via AddAppAuthentication).
+        builder.Services.AddAuthentication().AddCookie();
         builder.Services.AddAuthorization();
 
         _app = builder.Build();
@@ -115,7 +118,10 @@ public sealed class OAuthFrontdoorTests : IAsyncLifetime
     {
         var root = await GetJsonAsync("/.well-known/oauth-protected-resource");
 
-        root.GetProperty("resource").GetString().Should().Be(Issuer);
+        // The resource identifier is the canonical /mcp endpoint URL (must match
+        // the value registered via options.RegisterResources so OpenIddict accepts
+        // the RFC 8707 `resource` parameter Claude derives from this metadata).
+        root.GetProperty("resource").GetString().Should().Be(Issuer + "/mcp");
         root.GetProperty("authorization_servers").EnumerateArray()
             .Select(e => e.GetString()).Should().Contain(Issuer);
 
@@ -155,6 +161,68 @@ public sealed class OAuthFrontdoorTests : IAsyncLifetime
 
         resp.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         resp.Headers.WwwAuthenticate.ToString().Should().Contain("resource_metadata");
+    }
+
+    [Fact]
+    public async Task Authorize_WithMcpResource_NotRejectedAsInvalidTarget()
+    {
+        var clientId = await RegisterClientAsync();
+
+        using var resp = await SendAuthorizeAsync(clientId, Issuer + "/mcp");
+        var body = await resp.Content.ReadAsStringAsync();
+
+        // A valid resource passes OpenIddict's RFC 8707 validation and falls
+        // through to the interactive login challenge (302 to the cookie login
+        // path) — it must NOT come back as invalid_target.
+        var combined = $"status={(int)resp.StatusCode} location={resp.Headers.Location} body={body}";
+        combined.Should().NotContain("invalid_target");
+        resp.StatusCode.Should().Be(HttpStatusCode.Redirect, because: combined);
+    }
+
+    [Fact]
+    public async Task Authorize_WithUnknownResource_RejectedAsInvalidTarget()
+    {
+        var clientId = await RegisterClientAsync();
+
+        using var resp = await SendAuthorizeAsync(clientId, "https://attacker.example/resource");
+        var body = await resp.Content.ReadAsStringAsync();
+
+        // An unregistered resource is rejected as invalid_target (returned directly
+        // since it fails request validation before the redirect stage).
+        body.Should().Contain("invalid_target");
+    }
+
+    private async Task<string> RegisterClientAsync()
+    {
+        var resp = await _client.PostAsJsonAsync("/connect/register", new
+        {
+            redirect_uris = new[] { "https://claude.ai/api/mcp/auth_callback" },
+            client_name = "Test Connector",
+            token_endpoint_auth_method = "none"
+        });
+        resp.StatusCode.Should().Be(HttpStatusCode.Created);
+        return JsonDocument.Parse(await resp.Content.ReadAsStringAsync())
+            .RootElement.GetProperty("client_id").GetString()!;
+    }
+
+    private async Task<HttpResponseMessage> SendAuthorizeAsync(string clientId, string resource)
+    {
+        using var noRedirect = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+        {
+            BaseAddress = new Uri(Issuer)
+        };
+        var query = new Dictionary<string, string?>
+        {
+            ["client_id"] = clientId,
+            ["response_type"] = "code",
+            ["redirect_uri"] = "https://claude.ai/api/mcp/auth_callback",
+            ["scope"] = "openid mcp",
+            ["code_challenge"] = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+            ["code_challenge_method"] = "S256",
+            ["resource"] = resource
+        };
+        var url = Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString("/connect/authorize", query);
+        return await noRedirect.GetAsync(url);
     }
 
     private async Task<JsonElement> GetJsonAsync(string path)

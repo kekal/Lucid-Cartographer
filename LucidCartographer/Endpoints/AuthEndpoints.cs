@@ -12,8 +12,11 @@ public static class AuthEndpoints
 {
     public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        // Login endpoint with rate limiting + CSRF validation.
-        endpoints.MapPost("/login", async context =>
+        // Login endpoint with rate limiting + CSRF validation. Mapped at
+        // /auth/login, NOT /login: the Login.razor page is routable at /login,
+        // and MapRazorComponents registers a POST handler for routable pages,
+        // so a POST /login would match two endpoints (AmbiguousMatchException).
+        endpoints.MapPost("/auth/login", async context =>
         {
             // ARCH-CRIT-03: Validate antiforgery token on login POST.
             // Failure surfaces as 400 (not a redirect) so anomaly-detection

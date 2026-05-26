@@ -26,9 +26,17 @@ services:
       - MCP_API_KEY=${MCP_API_KEY:-}
       # Public https base URL (e.g. https://maps.example.com). Enables the OAuth
       # frontdoor so Claude.ai connectors can self-register and sign in. Blank =
-      # OAuth disabled (MCP via MCP_API_KEY only). Behind the tunnel you must also
-      # set Auth__TrustedProxies__0 to the tunnel's source IP (see README).
+      # OAuth disabled (MCP via MCP_API_KEY only).
       - OAuth__Issuer=${PUBLIC_URL:-}
+      # Networks (CIDR) allowed to set X-Forwarded-Proto/For. Behind the tunnel
+      # the request reaches the container from a Docker bridge gateway, so the
+      # forwarded https scheme is only honored if that gateway is trusted here.
+      # The private ranges cover all Docker bridge subnets; the container is only
+      # reachable via the tunnel and LAN, so trusting RFC1918 is safe. Without
+      # this the OAuth endpoints see http and reject with "only accepts HTTPS".
+      - Auth__TrustedNetworks__0=172.16.0.0/12
+      - Auth__TrustedNetworks__1=10.0.0.0/8
+      - Auth__TrustedNetworks__2=192.168.0.0/16
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health"]
       interval: 30s
