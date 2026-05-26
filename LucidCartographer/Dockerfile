@@ -19,10 +19,16 @@ FROM mcr.microsoft.com/playwright/dotnet:v1.49.0-noble
 WORKDIR /app
 COPY --from=build /app/publish .
 
-# MED-02: Run as non-root user for container security
-RUN adduser --disabled-password --gecos '' --home /app appuser && \
-    mkdir -p /data && chown -R appuser:appuser /app /data
-USER appuser
+# MED-02: Run as a non-root user. UID/GID are build args so the container user
+# matches the owner of the bind-mounted /data volume on the host (e.g. a NAS
+# PUID/PGID) — otherwise it can't write the SQLite DB or the OAuth keys. Defaults
+# match the target NAS; override with --build-arg APP_UID/APP_GID (or via compose).
+ARG APP_UID=1026
+ARG APP_GID=100
+RUN groupadd --gid ${APP_GID} appgroup 2>/dev/null || true && \
+    useradd --uid ${APP_UID} --gid ${APP_GID} --home-dir /app --no-create-home --shell /usr/sbin/nologin appuser && \
+    mkdir -p /data && chown -R ${APP_UID}:${APP_GID} /app /data
+USER ${APP_UID}:${APP_GID}
 
 ENV ASPNETCORE_URLS=http://+:8080
 ENV ASPNETCORE_ENVIRONMENT=Production
