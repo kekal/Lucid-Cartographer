@@ -538,6 +538,11 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
         poi.EnrichmentFailureCount = 0;
         poi.LastEnrichmentAttemptAt = null;
         poi.EnrichmentNeedsManualUrl = false;
+        // Re-enrichment is idempotent: pressing enrich again means the current
+        // link/result is unsatisfactory, so discard the stored Google Maps URL
+        // and let the BG service run a fresh name search. Coordinates are kept
+        // so that search is still biased to the right area.
+        poi.GoogleMapsUrl = null;
         // Drop the cached thumbnail so the BG service re-downloads at the
         // upscaled size (the existing-image short-circuit at
         // BackfillImageAsync would otherwise keep the small copy).

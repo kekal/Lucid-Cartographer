@@ -206,11 +206,16 @@ public sealed class MapPageViewModel(
             return;
         }
 
-        // Authoritative signal from the BG service: it ran without errors
-        // but the place panel produced nothing useful, so manual URL entry
-        // is the only path forward. The old "still empty" heuristic also
-        // fired for rows the user had partly filled in by hand.
-        if (fresh.EnrichmentNeedsManualUrl)
+        // Offer manual URL entry whenever the (re-)enrichment the user just
+        // triggered did not land on a canonical Google place — either the BG
+        // service flagged it, or there is still no /maps/place/ URL on the row.
+        // This makes the enrich button idempotent: press it again to re-search,
+        // and if the place still can't be resolved you get the manual-URL
+        // dialog (this also fires for POIs that already had an address, which
+        // the old EnrichmentNeedsManualUrl-only check skipped).
+        var hasCanonicalPlace = !string.IsNullOrEmpty(fresh.GoogleMapsUrl)
+                                && fresh.GoogleMapsUrl.Contains("/maps/place/", StringComparison.OrdinalIgnoreCase);
+        if (fresh.EnrichmentNeedsManualUrl || !hasCanonicalPlace)
         {
             EnrichFallbackPoi = fresh;
         }
