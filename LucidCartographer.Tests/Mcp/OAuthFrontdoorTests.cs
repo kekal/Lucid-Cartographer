@@ -180,6 +180,23 @@ public sealed class OAuthFrontdoorTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Authorize_WithIssuerRootResource_NotRejectedAsInvalidTarget()
+    {
+        var clientId = await RegisterClientAsync();
+
+        // Claude chat (unlike the connector, which sends "<issuer>/mcp") derives
+        // the RFC 8707 resource as the bare server root with a trailing slash.
+        // The registered bare-issuer Uri normalizes to "<issuer>/", so this must
+        // pass validation and fall through to the login challenge, not 400.
+        using var resp = await SendAuthorizeAsync(clientId, Issuer + "/");
+        var body = await resp.Content.ReadAsStringAsync();
+
+        var combined = $"status={(int)resp.StatusCode} location={resp.Headers.Location} body={body}";
+        combined.Should().NotContain("invalid_target");
+        resp.StatusCode.Should().Be(HttpStatusCode.Redirect, because: combined);
+    }
+
+    [Fact]
     public async Task Authorize_WithUnknownResource_RejectedAsInvalidTarget()
     {
         var clientId = await RegisterClientAsync();

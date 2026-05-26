@@ -90,11 +90,18 @@ public static class OAuthFrontdoorExtensions
 
                 options.RegisterScopes(Scopes.Email, Scopes.Profile, Scopes.OfflineAccess, McpScope);
 
-                // Register the MCP resource identifier so OpenIddict accepts the
-                // RFC 8707 `resource` parameter Claude sends (otherwise it rejects
-                // the authorization request with invalid_target). Validation
-                // compares against Options.Resources, not the scope store.
-                options.RegisterResources(McpResource(issuer));
+                // Register the resource identifiers OpenIddict accepts in the
+                // RFC 8707 `resource` parameter (otherwise it rejects the request
+                // with invalid_target). Different Claude surfaces derive a
+                // DIFFERENT value: the remote-MCP connector sends the /mcp
+                // endpoint URL, while Claude chat sends the bare server root.
+                // Register both. Validation is an ordinal compare of the request
+                // string against each registered Uri's AbsoluteUri, so the bare
+                // issuer normalizes to "<issuer>/" (Uri adds the trailing slash) —
+                // exactly what the chat client sends — while the /mcp URL stays
+                // verbatim. (Comparison is against Options.Resources, not the
+                // scope store.)
+                options.RegisterResources(issuer, McpResource(issuer));
 
                 // Don't enforce per-client resource permissions: every DCR-registered
                 // client is an MCP connector that legitimately targets the single MCP
