@@ -505,12 +505,13 @@ public sealed class DataSourcesPageViewModel(
             var kmlExporter = exporters.First(e => e.FormatName == "KML");
             var bytes = kmlExporter.Export(pois, col.Name);
 
-            var exportDir = Path.Combine(AppContext.BaseDirectory, "data", "exports");
-            Directory.CreateDirectory(exportDir);
-            var filePath = Path.Combine(exportDir, $"{col.Name}.kml");
-            await File.WriteAllBytesAsync(filePath, bytes);
-
-            await js.InvokeVoidAsync("navigator.clipboard.writeText", filePath);
+            // Push the KML to the client's browser as a download. The app may
+            // run in a container, where a server-side file path (the previous
+            // approach) is meaningless to the user. Then open Google My Maps so
+            // they can import the file that just landed in their Downloads.
+            var fileName = $"{SanitizeFileName(col.Name)}.kml";
+            await js.InvokeVoidAsync("LucidCartographer.downloadFile",
+                fileName, "application/vnd.google-earth.kml+xml", Convert.ToBase64String(bytes));
             await js.InvokeVoidAsync("window.open", "https://www.google.com/maps/d/", "_blank");
         }
         catch (Exception ex)
@@ -522,6 +523,19 @@ public sealed class DataSourcesPageViewModel(
         {
             ExportingId = null;
         }
+    }
+
+    /// <summary>
+    /// Strips characters that are invalid in file names (and ':' / '/' which the
+    /// browser's download attribute mishandles) so a collection name like
+    /// "4-7.06: Запад → Kalisz" yields a usable .kml download. Unicode letters
+    /// are preserved; only the unsafe punctuation is replaced with '_'.
+    /// </summary>
+    private static string SanitizeFileName(string name)
+    {
+        var invalid = Path.GetInvalidFileNameChars().Concat(['/', '\\', ':']).ToHashSet();
+        var sanitized = new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray()).Trim();
+        return string.IsNullOrWhiteSpace(sanitized) ? "export" : sanitized;
     }
 
     // --- Delete confirmation ---
