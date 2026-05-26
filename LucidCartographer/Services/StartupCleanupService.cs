@@ -2,7 +2,6 @@ using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
 using LucidCartographer.Services.Auth;
 using Microsoft.EntityFrameworkCore;
-using System.Security.Cryptography;
 
 namespace LucidCartographer.Services;
 
@@ -201,47 +200,40 @@ public sealed class StartupCleanupService(
             return;
         }
 
-        var initialPassword = GenerateUrlSafePassword(24);
-        var now = DateTime.UtcNow;
+        var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+        var logger = loggerFactory.CreateLogger<StartupCleanupService>();
+
+        var username = configuration["Auth:InitialAdminUsername"];
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            username = "admin";
+        }
+
+        var initialPassword = configuration["Auth:InitialAdminPassword"];
+        if (string.IsNullOrWhiteSpace(initialPassword))
+        {
+            // Fail closed. We never auto-generate or log a credential: an
+            // operator must supply the first password explicitly. WebApplication
+            // reads this from env vars (Auth__InitialAdminPassword) and the
+            // command line (--Auth:InitialAdminPassword=...), so it works for
+            // both `docker compose` and `dotnet` launches.
+            throw new InvalidOperationException(
+                "No users exist yet and no initial admin password was provided. Set the password and " +
+                "restart: env var Auth__InitialAdminPassword=... (docker compose: ADMIN_PASSWORD in .env) " +
+                "or --Auth:InitialAdminPassword=... on the command line. It is read once to seed the " +
+                $"'{username}' account, then can be removed.");
+        }
 
         db.Users.Add(new User
         {
-            Username = "admin",
+            Username = username,
             PasswordHash = PasswordHasher.HashPassword(initialPassword),
-            CreatedAt = now
+            CreatedAt = DateTime.UtcNow
         });
 
         await db.SaveChangesAsync(cancellationToken);
 
-        var logger = loggerFactory.CreateLogger<StartupCleanupService>();
-        logger.LogWarning(
-            "════════════════════════════════════════════════════════\n" +
-            "  INITIAL ADMIN USER CREATED\n" +
-            "      Username: admin\n" +
-            "      Password: {InitialPassword}\n" +
-            "  Save this password - it will not be shown again.\n" +
-            "════════════════════════════════════════════════════════",
-            initialPassword);
-    }
-
-    private static string GenerateUrlSafePassword(int length)
-    {
-        // 64 chars — power of two so byte % 64 is uniformly distributed.
-        // Deliberately omits 0 / O / 1 / l / I to keep the bootstrap
-        // password unambiguous when an operator copies it out of logs.
-        // Resist the urge to "fill in" the missing characters: the modest
-        // entropy loss (≈0.8 bits in a 24-char password) is dwarfed by
-        // the cost of someone mistyping `1` for `l` and getting locked
-        // out of a fresh deploy.
-        const string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-        var buffer = RandomNumberGenerator.GetBytes(length);
-        var chars = new char[length];
-
-        for (var i = 0; i < length; i++)
-        {
-            chars[i] = alphabet[buffer[i] % alphabet.Length];
-        }
-
-        return new string(chars);
+        // Log that the account exists, never the secret itself.
+        logger.LogInformation("Created initial admin user '{Username}' from the configured password.", username);
     }
 }
