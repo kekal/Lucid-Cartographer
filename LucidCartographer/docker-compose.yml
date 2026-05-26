@@ -8,7 +8,18 @@ services:
     restart: unless-stopped
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - AUTH__PASSWORD=${AUTH_PASSWORD:-}
+      # Seeds the "admin" account on the FIRST run only (empty user database).
+      # Startup fails fast if this is blank and no users exist yet.
+      - Auth__InitialAdminPassword=${ADMIN_PASSWORD:-}
+      # Key remote MCP clients (e.g. Claude Code) must present as
+      # "Authorization: Bearer <key>" or "X-Api-Key: <key>". Blank = remote MCP
+      # disabled (fail-closed); in Production the LAN bypass is off too.
+      - MCP_API_KEY=${MCP_API_KEY:-}
+      # Public https base URL (e.g. https://maps.example.com). Enables the OAuth
+      # frontdoor so Claude.ai connectors can self-register and sign in. Blank =
+      # OAuth disabled (MCP via MCP_API_KEY only). Behind the tunnel you must also
+      # set Auth__TrustedProxies__0 to the tunnel's source IP (see README).
+      - OAuth__Issuer=${PUBLIC_URL:-}
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health"]
       interval: 30s
