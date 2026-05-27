@@ -31,7 +31,13 @@
                         <div class="text-sm font-medium truncate">@vm.Name</div>
                     </div>
                     <span class="text-xs text-on-surface-variant flex-shrink-0">@vm.PoiCount</span>
-                    <button class="p-0.5 rounded hover:bg-surface-container-highest transition-colors flex-shrink-0"
+                    @* `relative` makes this button the containing block for the
+                       sr-only span below. Without a positioned ancestor the
+                       absolutely-positioned span resolves against <html>, escapes
+                       the sidebar's overflow-y-auto clipping, and (for collections
+                       below the fold) stretches the document height — making the
+                       whole app scroll. Containing it here keeps the page fixed. *@
+                    <button class="relative p-0.5 rounded hover:bg-surface-container-highest transition-colors flex-shrink-0"
                             aria-label="@($"Toggle visibility for {vm.Name}")"
                             @onclick:stopPropagation="true"
                             @onclick="() => HandleVisibilityClick(vm.Id)">
