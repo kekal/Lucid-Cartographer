@@ -422,6 +422,37 @@ public sealed class MapPageViewModel(
         navigation.NavigateTo("/", replace: true);
     }
 
+    /// <summary>
+    /// Renames a POI. Used by the detail pane's inline name editor and its
+    /// "use the Google Maps name" action. No-ops on a blank name or when the
+    /// name is unchanged. Refreshes the map (markers/labels) and the table so
+    /// the new name shows everywhere.
+    /// </summary>
+    public async Task HandleRenamePoiAsync((int PoiId, string NewName) args)
+    {
+        var newName = args.NewName?.Trim();
+        if (string.IsNullOrWhiteSpace(newName))
+        {
+            return;
+        }
+
+        var poi = await poiService.GetPoiAsync(args.PoiId);
+        if (poi is null || poi.Name == newName)
+        {
+            return;
+        }
+
+        poi.Name = newName;
+        await poiService.UpdatePoiAsync(poi);
+
+        await RefreshAfterMutationAsync();
+        if (SelectedPoiId == args.PoiId)
+        {
+            SelectedPoi = await poiService.GetPoiAsync(args.PoiId);
+        }
+        Notify();
+    }
+
     public async Task HandleEnrichPoiAsync(int poiId)
     {
         await poiService.MarkPoiForReEnrichmentAsync(poiId);

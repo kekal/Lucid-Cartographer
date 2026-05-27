@@ -116,4 +116,36 @@ public class PoiUrlHelperTests
         PoiUrlHelper.ExtractCoordinatesFromUrl("https://example.com/no/coords").Should().BeNull();
         PoiUrlHelper.ExtractCoordinatesFromUrl("").Should().BeNull();
     }
+
+    [Fact]
+    public void ExtractPlaceNameFromUrl_DecodesPlusAndPercentEncoding()
+    {
+        var url = "https://www.google.com/maps/place/Wawel+Royal+Castle/@50.05,19.93,17z";
+        PoiUrlHelper.ExtractPlaceNameFromUrl(url).Should().Be("Wawel Royal Castle");
+    }
+
+    [Fact]
+    public void ExtractPlaceNameFromUrl_DecodesNonAsciiNames()
+    {
+        // "Zamek Królewski na Wawelu" percent-encoded as Google serves it.
+        var url = "https://www.google.com/maps/place/Zamek+Kr%C3%B3lewski+na+Wawelu/@50.05,19.93,17z";
+        PoiUrlHelper.ExtractPlaceNameFromUrl(url).Should().Be("Zamek Królewski na Wawelu");
+    }
+
+    [Fact]
+    public void ExtractPlaceNameFromUrl_HandlesPlaceSegmentAtEndOfUrl()
+    {
+        var url = "https://www.google.com/maps/place/Some+Place";
+        PoiUrlHelper.ExtractPlaceNameFromUrl(url).Should().Be("Some Place");
+    }
+
+    [Theory]
+    [InlineData("https://maps.google.com/?q=foo")] // not a /maps/place/ link
+    [InlineData("https://www.google.com/maps/place//@50.0,19.0,17z")] // empty segment
+    [InlineData("")]
+    [InlineData(null)]
+    public void ExtractPlaceNameFromUrl_ReturnsNull_WhenNoUsableName(string? url)
+    {
+        PoiUrlHelper.ExtractPlaceNameFromUrl(url).Should().BeNull();
+    }
 }

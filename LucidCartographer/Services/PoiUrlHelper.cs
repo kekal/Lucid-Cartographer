@@ -31,6 +31,52 @@ public static class PoiUrlHelper
     }
 
     /// <summary>
+    /// Extracts the human-readable place name embedded in a canonical Google
+    /// Maps place URL — the segment between <c>/maps/place/</c> and the next
+    /// <c>/</c> (e.g. <c>.../maps/place/Wawel+Royal+Castle/@50.05,...</c> →
+    /// "Wawel Royal Castle"). Google encodes spaces as '+' and the rest with
+    /// percent-encoding, so we reverse both. Returns null when the URL is not a
+    /// <c>/maps/place/</c> link or the decoded segment is empty.
+    /// </summary>
+    public static string? ExtractPlaceNameFromUrl(string? url)
+    {
+        if (string.IsNullOrEmpty(url))
+        {
+            return null;
+        }
+
+        const string marker = "/maps/place/";
+        var idx = url.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0)
+        {
+            return null;
+        }
+
+        var start = idx + marker.Length;
+        var end = url.IndexOf('/', start);
+        var segment = end < 0 ? url[start..] : url[start..end];
+        if (string.IsNullOrWhiteSpace(segment))
+        {
+            return null;
+        }
+
+        // Google uses '+' for spaces in the /place/ segment; the rest is
+        // percent-encoded. Replace '+' first, then unescape the remainder.
+        segment = segment.Replace('+', ' ');
+        string decoded;
+        try
+        {
+            decoded = Uri.UnescapeDataString(segment).Trim();
+        }
+        catch (UriFormatException)
+        {
+            return null;
+        }
+
+        return string.IsNullOrWhiteSpace(decoded) ? null : decoded;
+    }
+
+    /// <summary>
     /// Extracts coordinates from a Google Maps URL.
     /// IE-14: Consolidated from GoogleMapsListScraper's duplicated @/ parsing blocks.
     /// Checks !3d/!4d parameters first, then @/ anywhere in the URL.

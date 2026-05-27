@@ -112,7 +112,8 @@ else
             <PoiDetailPane Poi="Vm.SelectedPoi"
                            CollectionNames="@(Vm.SelectedPoiId is { } sid && Vm.PoiCollectionNames.TryGetValue(sid, out var cn) ? cn : null)"
                            OnClose="Vm.CloseDetailPane"
-                           OnEnrichRequested="Vm.HandleEnrichPoiAsync" />
+                           OnEnrichRequested="Vm.HandleEnrichPoiAsync"
+                           OnRenameRequested="Vm.HandleRenamePoiAsync" />
         </div>
     }
 </div>

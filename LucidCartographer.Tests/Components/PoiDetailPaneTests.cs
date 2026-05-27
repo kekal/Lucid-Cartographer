@@ -3,6 +3,7 @@ using BunitTestContext = Bunit.TestContext;
 using FluentAssertions;
 using LucidCartographer.Components.Shared;
 using LucidCartographer.Data.Entities;
+using LucidCartographer.Services;
 using Microsoft.AspNetCore.Components;
 
 namespace LucidCartographer.Tests.Components;
@@ -174,5 +175,105 @@ public class PoiDetailPaneTests : BunitTestContext
         closeButton.Click();
 
         closed.Should().BeTrue();
+    }
+
+    [Fact]
+    public void EditNameButton_EntersEditMode_WithInputPrefilledWithCurrentName()
+    {
+        var poi = CreateFullPoi();
+
+        var cut = RenderComponent<PoiDetailPane>(parameters => parameters
+            .Add(p => p.Poi, poi));
+
+        cut.Find("button[aria-label='Edit name']").Click();
+
+        var input = cut.Find("input[aria-label='Edit location name']");
+        input.GetAttribute("value").Should().Be("Test Cafe");
+    }
+
+    [Fact]
+    public void EditingName_AndSaving_Fires_OnRenameRequested_WithTrimmedName()
+    {
+        var poi = CreateFullPoi();
+        (int PoiId, string NewName)? captured = null;
+
+        var cut = RenderComponent<PoiDetailPane>(parameters => parameters
+            .Add(p => p.Poi, poi)
+            .Add(p => p.OnRenameRequested,
+                EventCallback.Factory.Create<(int, string)>(this, a => captured = a)));
+
+        cut.Find("button[aria-label='Edit name']").Click();
+        cut.Find("input[aria-label='Edit location name']").Input("  Renamed Cafe  ");
+        cut.Find("button[aria-label='Save name']").Click();
+
+        captured.Should().NotBeNull();
+        captured!.Value.PoiId.Should().Be(1);
+        captured.Value.NewName.Should().Be("Renamed Cafe");
+    }
+
+    [Fact]
+    public void Cancelling_NameEdit_DoesNotFire_OnRenameRequested()
+    {
+        var poi = CreateFullPoi();
+        var fired = false;
+
+        var cut = RenderComponent<PoiDetailPane>(parameters => parameters
+            .Add(p => p.Poi, poi)
+            .Add(p => p.OnRenameRequested,
+                EventCallback.Factory.Create<(int, string)>(this, _ => fired = true)));
+
+        cut.Find("button[aria-label='Edit name']").Click();
+        cut.Find("input[aria-label='Edit location name']").Input("Something Else");
+        cut.Find("button[aria-label='Cancel rename']").Click();
+
+        fired.Should().BeFalse();
+        // Back to display mode, original name intact.
+        cut.FindAll("input[aria-label='Edit location name']").Should().BeEmpty();
+        cut.Markup.Should().Contain("Test Cafe");
+    }
+
+    [Fact]
+    public void UseGoogleMapsNameButton_IsDisabled_WhenPoiNotEnriched()
+    {
+        var poi = CreateFullPoi(); // IsEnriched defaults to false
+        poi.GoogleMapsUrl = "https://www.google.com/maps/place/Real+Name/@51.5,-0.12,17z";
+
+        var cut = RenderComponent<PoiDetailPane>(parameters => parameters
+            .Add(p => p.Poi, poi));
+
+        cut.Find($"button[aria-label='{UiStrings.UseGoogleMapsName}']")
+            .HasAttribute("disabled").Should().BeTrue();
+    }
+
+    [Fact]
+    public void UseGoogleMapsNameButton_IsDisabled_WhenEnrichedButUrlHasNoPlaceName()
+    {
+        var poi = CreateFullPoi();
+        poi.IsEnriched = true; // but GoogleMapsUrl is a ?q= link — no /maps/place/ segment
+
+        var cut = RenderComponent<PoiDetailPane>(parameters => parameters
+            .Add(p => p.Poi, poi));
+
+        cut.Find($"button[aria-label='{UiStrings.UseGoogleMapsName}']")
+            .HasAttribute("disabled").Should().BeTrue();
+    }
+
+    [Fact]
+    public void UseGoogleMapsNameButton_Enabled_AndPrefillsEditor_WhenEnrichedWithPlaceUrl()
+    {
+        var poi = CreateFullPoi();
+        poi.IsEnriched = true;
+        poi.GoogleMapsUrl = "https://www.google.com/maps/place/The+Real+Name/@51.5,-0.12,17z";
+
+        var cut = RenderComponent<PoiDetailPane>(parameters => parameters
+            .Add(p => p.Poi, poi));
+
+        var button = cut.Find($"button[aria-label='{UiStrings.UseGoogleMapsName}']");
+        button.HasAttribute("disabled").Should().BeFalse();
+
+        button.Click();
+
+        var input = cut.Find("input[aria-label='Edit location name']");
+        input.GetAttribute("value").Should().Be("The Real Name");
     }
 }
