@@ -440,10 +440,11 @@ public class PoiEnrichmentBackgroundService : BackgroundService
 
             await BackfillImageAsync(context, db, poi, details.ImageUrl, ct);
 
-            var hasUsefulData = !string.IsNullOrWhiteSpace(poi.Address)
-                                || !string.IsNullOrWhiteSpace(poi.Website)
-                                || !string.IsNullOrWhiteSpace(poi.Phone)
-                                || (poi.GoogleMapsUrl?.Contains("/maps/place/", StringComparison.OrdinalIgnoreCase) == true);
+            // Success is decided by what THIS pass scraped (details.*), not the
+            // merged poi.*: a POI created via MCP/import may already have an
+            // address, and counting that would mask a failed lookup and skip the
+            // manual-URL fallback.
+            var hasUsefulData = details.ResolvedPlace;
             poi.LastEnrichmentAttemptAt = DateTime.UtcNow;
             if (hasUsefulData)
             {

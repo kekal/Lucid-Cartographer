@@ -9,7 +9,26 @@ public record EnrichedDetails(
     double? Latitude,
     double? Longitude,
     string? GoogleMapsUrl,
-    string? ImageUrl);
+    string? ImageUrl)
+{
+    /// <summary>
+    /// True when THIS enrichment pass actually resolved a Google place — i.e.
+    /// the scraper read at least one real detail (address / website / phone),
+    /// a photo, or landed on a canonical /maps/place/ URL.
+    ///
+    /// Deliberately evaluated on the freshly-scraped <see cref="EnrichedDetails"/>
+    /// and NOT on the merged POI: a row created via MCP/import may already carry
+    /// an address, and counting that as success would mask a failed lookup and
+    /// suppress the manual-URL fallback (the row would show "Enriched" with no
+    /// photo and no canonical URL — exactly the bug this guards against).
+    /// </summary>
+    public bool ResolvedPlace =>
+        !string.IsNullOrWhiteSpace(Address)
+        || !string.IsNullOrWhiteSpace(Website)
+        || !string.IsNullOrWhiteSpace(Phone)
+        || !string.IsNullOrWhiteSpace(ImageUrl)
+        || !string.IsNullOrWhiteSpace(GoogleMapsUrl);
+}
 
 /// <summary>
 /// Opens a Google Maps place on a provided Playwright page and reads the
