@@ -40,6 +40,8 @@ public static class UiStrings
     public const string OpenInGoogleMaps = "Open in Google Maps";
     public const string EnrichDetails = "Enrich Details";
     public const string EnrichDetailsAria = "Re-fetch address, website, phone, and image for this location";
+    public const string ManualEnrich = "Manual Enrich";
+    public const string ManualEnrichAria = "Paste a Google Maps URL to enrich this location manually";
     public const string UseGoogleMapsName = "Use the name from Google Maps";
     public const string EnrichFallbackTitle = "Couldn't find details for {0}";
     public const string EnrichFallbackBody = "Open Google Maps, locate the correct place, then paste its URL below to enrich this POI.";

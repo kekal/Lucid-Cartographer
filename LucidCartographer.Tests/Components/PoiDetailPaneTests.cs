@@ -233,6 +233,22 @@ public class PoiDetailPaneTests : BunitTestContext
     }
 
     [Fact]
+    public void ManualEnrichButton_Fires_OnManualEnrichRequested_WithPoiId()
+    {
+        var poi = CreateFullPoi();
+        int? captured = null;
+
+        var cut = RenderComponent<PoiDetailPane>(parameters => parameters
+            .Add(p => p.Poi, poi)
+            .Add(p => p.OnManualEnrichRequested,
+                EventCallback.Factory.Create<int>(this, id => captured = id)));
+
+        cut.Find($"button[aria-label='{UiStrings.ManualEnrichAria}']").Click();
+
+        captured.Should().Be(1);
+    }
+
+    [Fact]
     public void UseGoogleMapsNameButton_IsDisabled_WhenPoiNotEnriched()
     {
         var poi = CreateFullPoi(); // IsEnriched defaults to false

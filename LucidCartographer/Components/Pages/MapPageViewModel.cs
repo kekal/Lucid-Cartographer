@@ -227,6 +227,24 @@ public sealed class MapPageViewModel(
         Notify();
     }
 
+    /// <summary>
+    /// Opens the manual-URL dialog directly, skipping the automatic enrichment
+    /// pass. Lets the user paste a Google Maps place URL for a POI whose name
+    /// search is hopeless (ambiguous results, no online presence, etc.) without
+    /// first waiting for the background scraper to fail.
+    /// </summary>
+    public async Task OpenManualEnrichAsync(int poiId)
+    {
+        var poi = await poiService.GetPoiAsync(poiId);
+        if (poi is null)
+        {
+            return;
+        }
+
+        EnrichFallbackPoi = poi;
+        Notify();
+    }
+
     public async Task SubmitEnrichFallbackAsync(string googleMapsUrl)
     {
         if (EnrichFallbackPoi is null)

@@ -225,6 +225,13 @@
             <span class="material-symbols-outlined text-base" aria-hidden="true">auto_fix_high</span>
             @(_enrichRequested ? "Queued…" : UiStrings.EnrichDetails)
         </button>
+        <button type="button"
+                @onclick="HandleManualEnrichClick"
+                aria-label="@UiStrings.ManualEnrichAria"
+                class="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg border border-surface-container-high bg-surface text-on-surface font-medium text-sm hover:bg-surface-container-low transition-all">
+            <span class="material-symbols-outlined text-base" aria-hidden="true">edit_location_alt</span>
+            @UiStrings.ManualEnrich
+        </button>
         <a href="@PoiUrlHelper.GetGoogleMapsUrl(Poi)"
            target="_blank" rel="noopener"
            class="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg bg-gradient-to-r from-primary to-primary-container text-white font-medium text-sm hover:shadow-lg transition-all">
@@ -241,6 +248,7 @@
     [Parameter] public IReadOnlyList<string>? CollectionNames { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback<int> OnEnrichRequested { get; set; }
+    [Parameter] public EventCallback<int> OnManualEnrichRequested { get; set; }
     [Parameter] public EventCallback<(int PoiId, string NewName)> OnRenameRequested { get; set; }
 
     private int _lastSeenPoiId;
@@ -335,6 +343,8 @@
         _enrichRequested = true;
         await OnEnrichRequested.InvokeAsync(Poi.Id);
     }
+
+    private Task HandleManualEnrichClick() => OnManualEnrichRequested.InvokeAsync(Poi.Id);
 
     private static string TruncateUrl(string url)
     {

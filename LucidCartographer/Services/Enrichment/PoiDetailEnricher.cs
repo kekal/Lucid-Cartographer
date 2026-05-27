@@ -29,7 +29,7 @@ public record EnrichedDetails(
 public static class PoiDetailEnricher
 {
     public static Task<EnrichedDetails> EnrichAsync(IPage page, string placeUrl, CancellationToken ct, ILogger? logger = null)
-        => EnrichCoreAsync(page, placeUrl, ct, logger);
+        => EnrichCoreAsync(page, placeUrl, searchName: null, ct, logger);
 
     public static Task<EnrichedDetails> EnrichByNameAsync(IPage page, string name, string? hint, CancellationToken ct, ILogger? logger = null)
         => EnrichByNameAsync(page, name, hint, latitude: null, longitude: null, ct, logger);
@@ -59,10 +59,12 @@ public static class PoiDetailEnricher
         {
             url = "https://www.google.com/maps/search/?api=1&query=" + Uri.EscapeDataString(query);
         }
-        return EnrichCoreAsync(page, url, ct, logger);
+        // Pass the bare POI name (not the hint-augmented query) so the
+        // results-list auto-picker matches against the actual place name.
+        return EnrichCoreAsync(page, url, searchName: name, ct, logger);
     }
 
-    private static async Task<EnrichedDetails> EnrichCoreAsync(IPage page, string navUrl, CancellationToken ct, ILogger? logger)
+    private static async Task<EnrichedDetails> EnrichCoreAsync(IPage page, string navUrl, string? searchName, CancellationToken ct, ILogger? logger)
     {
         ct.ThrowIfCancellationRequested();
 
@@ -130,16 +132,34 @@ public static class PoiDetailEnricher
         // form — Google redirects the search URL to the matched place.
         // We also accept an @lat,lon segment as a sign that the map
         // has focused on the place.
-        for (var i = 0; i < 30; i++)
-        {
-            ct.ThrowIfCancellationRequested();
-            var u = page.Url;
-            if (u.Contains("/maps/place/") && u.Contains("/@"))
-            {
-                break;
-            }
+        await WaitForPlaceUrlAsync(page, ct);
 
-            await Task.Delay(300, ct);
+        // Still on a results list (the search was ambiguous and Google didn't
+        // auto-open a single place). If exactly one result card unambiguously
+        // matches the POI name, navigate to it; otherwise leave the page as-is
+        // so the caller flags a manual-URL fallback.
+        if (searchName is not null && !IsOnPlacePage(page.Url))
+        {
+            var picked = await TryPickResultUrlAsync(page, searchName, logger);
+            if (picked is not null)
+            {
+                try
+                {
+                    await page.GotoAsync(picked, new PageGotoOptions
+                    {
+                        WaitUntil = WaitUntilState.DOMContentLoaded,
+                        Timeout = 20000
+                    });
+                    await WaitForPlaceUrlAsync(page, ct);
+                    logger?.LogInformation(
+                        "Enrichment auto-picked the single matching search result for '{Name}'", searchName);
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogWarning(ex,
+                        "Failed to open auto-picked search result for '{Name}'; falling back", searchName);
+                }
+            }
         }
 
         // Wait for the detail panel to hydrate enough to expose data-item-id
@@ -199,6 +219,84 @@ public static class PoiDetailEnricher
             Longitude: coords?.lon,
             GoogleMapsUrl: finalUrl.Contains("/maps/place/") ? finalUrl : null,
             ImageUrl: imageUrl);
+    }
+
+    private static bool IsOnPlacePage(string url)
+        => url.Contains("/maps/place/") && url.Contains("/@");
+
+    /// <summary>
+    /// Polls (up to ~9s) for the URL to settle on the canonical /maps/place/
+    /// form. Google redirects a name search to the matched place; the @lat,lon
+    /// segment confirms the map focused on it.
+    /// </summary>
+    private static async Task WaitForPlaceUrlAsync(IPage page, CancellationToken ct)
+    {
+        for (var i = 0; i < 30; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (IsOnPlacePage(page.Url))
+            {
+                break;
+            }
+
+            await Task.Delay(300, ct);
+        }
+    }
+
+    /// <summary>
+    /// Reads the search-results feed and returns the href of the single card
+    /// whose name unambiguously matches <paramref name="searchName"/>, or null
+    /// when there is no result list, no match, or more than one match. Selector
+    /// misses degrade gracefully to null (→ manual fallback).
+    /// </summary>
+    private static async Task<string?> TryPickResultUrlAsync(IPage page, string searchName, ILogger? logger)
+    {
+        try
+        {
+            // Result cards in the Maps feed are <a class="hfpxzc"> with the
+            // place name in aria-label and the canonical place URL in href.
+            try
+            {
+                await page.WaitForSelectorAsync("a.hfpxzc", new() { Timeout = 4000 });
+            }
+            catch (TimeoutException)
+            {
+                return null;
+            }
+
+            var anchors = await page.Locator("a.hfpxzc").AllAsync();
+            if (anchors.Count == 0)
+            {
+                return null;
+            }
+
+            var names = new List<string>(anchors.Count);
+            var hrefs = new List<string?>(anchors.Count);
+            foreach (var anchor in anchors)
+            {
+                names.Add((await anchor.GetAttributeAsync("aria-label"))?.Trim() ?? string.Empty);
+                hrefs.Add(await anchor.GetAttributeAsync("href"));
+            }
+
+            var index = EnrichmentResultPicker.PickUnambiguousMatch(searchName, names);
+            if (index is null)
+            {
+                logger?.LogDebug(
+                    "Search for '{Name}' returned {Count} result(s); no single unambiguous match",
+                    searchName, anchors.Count);
+                return null;
+            }
+
+            var href = hrefs[index.Value];
+            return href is not null && href.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                ? href
+                : null;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogDebug(ex, "Search-result auto-pick failed for '{Name}'", searchName);
+            return null;
+        }
     }
 
     private static async Task<string?> TryInnerTextAsync(IPage page, string selector, string field, ILogger? logger)
