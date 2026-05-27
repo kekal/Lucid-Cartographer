@@ -483,12 +483,8 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
         poi.EnrichmentFailureCount = 0;
         poi.LastEnrichmentAttemptAt = null;
         poi.EnrichmentNeedsManualUrl = false;
-        poi.ImageUrl = null;
-        var existingImage = await db.PoiImages.FindAsync([poiId], cancellationToken);
-        if (existingImage is not null)
-        {
-            db.PoiImages.Remove(existingImage);
-        }
+        // Keep the current photo until enrichment from the new URL succeeds —
+        // BackfillImageAsync replaces it in place once it has the new bytes.
         await db.SaveChangesAsync(cancellationToken);
     }
 
@@ -511,13 +507,9 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
             poi.IsEnriched = false;
             poi.EnrichmentFailureCount = 0;
             poi.LastEnrichmentAttemptAt = null;
-            poi.ImageUrl = null;
-        }
-
-        var images = await db.PoiImages.Where(i => poiIds.Contains(i.PoiId)).ToListAsync(cancellationToken);
-        if (images.Count > 0)
-        {
-            db.PoiImages.RemoveRange(images);
+            // Keep existing photos; BackfillImageAsync replaces each in place
+            // only when a fresh photo is fetched, so a failed re-enrichment
+            // doesn't strip the whole collection's images.
         }
 
         await db.SaveChangesAsync(cancellationToken);
@@ -543,15 +535,9 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
         // and let the BG service run a fresh name search. Coordinates are kept
         // so that search is still biased to the right area.
         poi.GoogleMapsUrl = null;
-        // Drop the cached thumbnail so the BG service re-downloads at the
-        // upscaled size (the existing-image short-circuit at
-        // BackfillImageAsync would otherwise keep the small copy).
-        poi.ImageUrl = null;
-        var existingImage = await db.PoiImages.FindAsync([poiId], cancellationToken);
-        if (existingImage is not null)
-        {
-            db.PoiImages.Remove(existingImage);
-        }
+        // Keep the existing photo (and ImageUrl) until the BG service fetches a
+        // replacement — BackfillImageAsync swaps it in place only on success, so
+        // a failed re-enrichment no longer wipes a perfectly good photo.
         await db.SaveChangesAsync(cancellationToken);
     }
 

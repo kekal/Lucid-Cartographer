@@ -300,4 +300,91 @@ public class PoiServiceTests
         result.Should().HaveCount(1);
         result[0].PoiCount.Should().Be(2); // Computed, not the stored 0
     }
+
+    [Fact]
+    public async Task MarkPoiForReEnrichmentAsync_KeepsExistingPhoto_UntilEnrichmentReplacesIt()
+    {
+        var (service, factory) = await CreateServiceAsync(db =>
+        {
+            db.Pois.Add(new Poi
+            {
+                Id = 1,
+                Name = "Has Photo",
+                Latitude = 52.0,
+                Longitude = 21.0,
+                IsEnriched = true,
+                GoogleMapsUrl = "https://www.google.com/maps/place/X/@52,21,17z",
+                ImageUrl = "https://lh3.googleusercontent.com/photo=w1024",
+                AddedDate = DateTime.UtcNow
+            });
+            db.PoiImages.Add(new PoiImage { PoiId = 1, Data = [1, 2, 3], ContentType = "image/jpeg" });
+        });
+
+        await service.MarkPoiForReEnrichmentAsync(1);
+
+        await using var db = await factory.CreateDbContextAsync();
+        var poi = await db.Pois.FindAsync(1);
+        poi!.IsEnriched.Should().BeFalse();
+        poi.GoogleMapsUrl.Should().BeNull();       // re-search forces a fresh lookup
+        poi.ImageUrl.Should().NotBeNull();          // but the photo is kept...
+        var image = await db.PoiImages.FindAsync(1);
+        image.Should().NotBeNull();                 // ...bytes and all
+        image!.Data.Should().Equal([1, 2, 3]);
+    }
+
+    [Fact]
+    public async Task ReplacePoiGoogleMapsUrlAsync_KeepsExistingPhoto_UntilEnrichmentReplacesIt()
+    {
+        var (service, factory) = await CreateServiceAsync(db =>
+        {
+            db.Pois.Add(new Poi
+            {
+                Id = 1,
+                Name = "Has Photo",
+                Latitude = 52.0,
+                Longitude = 21.0,
+                IsEnriched = true,
+                ImageUrl = "https://lh3.googleusercontent.com/photo=w1024",
+                AddedDate = DateTime.UtcNow
+            });
+            db.PoiImages.Add(new PoiImage { PoiId = 1, Data = [9, 9], ContentType = "image/jpeg" });
+        });
+
+        await service.ReplacePoiGoogleMapsUrlAsync(1, "https://www.google.com/maps/place/Correct/@52,21,17z");
+
+        await using var db = await factory.CreateDbContextAsync();
+        var poi = await db.Pois.FindAsync(1);
+        poi!.IsEnriched.Should().BeFalse();
+        poi.GoogleMapsUrl.Should().Contain("/maps/place/Correct");
+        poi.Latitude.Should().BeNull();             // stale coords dropped for the new place
+        (await db.PoiImages.FindAsync(1)).Should().NotBeNull();   // photo survives until re-enrich
+    }
+
+    [Fact]
+    public async Task MarkCollectionForReEnrichmentAsync_KeepsExistingPhotos()
+    {
+        var (service, factory) = await CreateServiceAsync(db =>
+        {
+            db.Pois.AddRange(
+                new Poi { Id = 1, Name = "A", Latitude = 52.0, Longitude = 21.0, IsEnriched = true, ImageUrl = "https://lh3.googleusercontent.com/a=w1024", AddedDate = DateTime.UtcNow },
+                new Poi { Id = 2, Name = "B", Latitude = 50.0, Longitude = 19.0, IsEnriched = true, ImageUrl = "https://lh3.googleusercontent.com/b=w1024", AddedDate = DateTime.UtcNow });
+            db.PoiCollections.Add(new PoiCollection { Id = 1, Name = "Col", Color = "#005bbf", CreatedDate = DateTime.UtcNow });
+            db.PoiCollectionItems.AddRange(
+                new PoiCollectionItem { PoiId = 1, PoiCollectionId = 1 },
+                new PoiCollectionItem { PoiId = 2, PoiCollectionId = 1 });
+            db.PoiImages.AddRange(
+                new PoiImage { PoiId = 1, Data = [1], ContentType = "image/jpeg" },
+                new PoiImage { PoiId = 2, Data = [2], ContentType = "image/jpeg" });
+        });
+
+        var count = await service.MarkCollectionForReEnrichmentAsync(1);
+
+        count.Should().Be(2);
+        await using var db = await factory.CreateDbContextAsync();
+        (await db.Pois.FindAsync(1))!.IsEnriched.Should().BeFalse();
+        (await db.Pois.FindAsync(2))!.IsEnriched.Should().BeFalse();
+        // No photos stripped.
+        (await db.PoiImages.FindAsync(1)).Should().NotBeNull();
+        (await db.PoiImages.FindAsync(2)).Should().NotBeNull();
+    }
 }

@@ -558,33 +558,16 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         string? imageUrl,
         CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(imageUrl))
+        // No usable new photo this pass → keep whatever the POI already has.
+        // A failed (or photo-less) re-enrichment must never strip an existing
+        // photo; the only way an image leaves the row is being overwritten by a
+        // freshly-downloaded one below.
+        if (string.IsNullOrWhiteSpace(imageUrl) || !IsLikelyPlacePhotoUrl(imageUrl))
         {
             return;
-        }
-
-        if (!IsLikelyPlacePhotoUrl(imageUrl))
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(poi.ImageUrl))
-        {
-            poi.ImageUrl = imageUrl;
         }
 
         var existingImage = await db.PoiImages.FindAsync([poi.Id], ct);
-        if (existingImage != null)
-        {
-            if (IsLikelyPlacePhotoUrl(poi.ImageUrl ?? string.Empty))
-            {
-                return;
-            }
-
-            // Existing bytes appear to be a non-photo artifact (tile/snapshot);
-            // replace with a validated place-photo candidate when available.
-            db.PoiImages.Remove(existingImage);
-        }
 
         foreach (var candidateUrl in BuildImageFetchCandidates(imageUrl))
         {
@@ -606,12 +589,27 @@ public class PoiEnrichmentBackgroundService : BackgroundService
                     ? ctHeader
                     : "image/jpeg";
 
-                db.PoiImages.Add(new PoiImage
+                // Swap in the new photo only now that the bytes are in hand.
+                // Update the existing row in place (PoiId is the PK, so a
+                // remove+add would collide on the key); the old bytes survive
+                // until this same SaveChanges commits the new ones, so the
+                // replacement is atomic and a download failure leaves the
+                // previous photo untouched.
+                if (existingImage is not null)
                 {
-                    PoiId = poi.Id,
-                    Data = bytes,
-                    ContentType = contentType
-                });
+                    existingImage.Data = bytes;
+                    existingImage.ContentType = contentType;
+                }
+                else
+                {
+                    db.PoiImages.Add(new PoiImage
+                    {
+                        PoiId = poi.Id,
+                        Data = bytes,
+                        ContentType = contentType
+                    });
+                }
+
                 poi.ImageUrl = candidateUrl;
                 _logger.LogInformation("Image fetched for Poi {PoiId}: {Bytes} bytes from {ImageUrl}",
                     poi.Id, bytes.Length, candidateUrl);
@@ -622,6 +620,7 @@ public class PoiEnrichmentBackgroundService : BackgroundService
                 _logger.LogDebug(ex, "Image download failed for Poi {PoiId} from {ImageUrl}", poi.Id, candidateUrl);
             }
         }
+        // Every candidate failed → leave the existing photo (and ImageUrl) intact.
     }
 
     private static IEnumerable<string> BuildImageFetchCandidates(string imageUrl)
