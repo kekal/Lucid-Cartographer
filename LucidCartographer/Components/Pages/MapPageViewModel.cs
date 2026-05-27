@@ -487,6 +487,78 @@ public sealed class MapPageViewModel(
         await RefreshAfterMutationAsync();
     }
 
+    // --- Batch commands (act on a set of selected POIs, then refresh once) ---
+
+    public async Task HandleBatchDeleteAsync(IReadOnlyList<int> poiIds)
+    {
+        foreach (var poiId in poiIds)
+        {
+            if (PoiCollectionIds.TryGetValue(poiId, out var collectionId))
+            {
+                await poiService.RemovePoiFromCollectionAsync(poiId, collectionId);
+            }
+            if (SelectedPoiId == poiId)
+            {
+                CloseDetailPane();
+            }
+        }
+        await RefreshAfterMutationAsync();
+    }
+
+    public async Task HandleBatchMoveAsync((IReadOnlyList<int> PoiIds, int TargetCollectionId) args)
+    {
+        foreach (var poiId in args.PoiIds)
+        {
+            await poiService.AddPoiToCollectionAsync(poiId, args.TargetCollectionId);
+            if (PoiCollectionMemberships.TryGetValue(poiId, out var sourceCollectionIds))
+            {
+                foreach (var sourceCollectionId in sourceCollectionIds.Where(id => id != args.TargetCollectionId))
+                {
+                    await poiService.RemovePoiFromCollectionAsync(poiId, sourceCollectionId);
+                }
+            }
+        }
+        await RefreshAfterMutationAsync();
+    }
+
+    public async Task HandleBatchMoveToNewCollectionAsync((IReadOnlyList<int> PoiIds, string NewCollectionName) args)
+    {
+        var newCol = await poiService.CreateCollectionAsync(args.NewCollectionName);
+        foreach (var poiId in args.PoiIds)
+        {
+            await poiService.AddPoiToCollectionAsync(poiId, newCol.Id);
+            if (PoiCollectionMemberships.TryGetValue(poiId, out var sourceCollectionIds))
+            {
+                foreach (var sourceCollectionId in sourceCollectionIds)
+                {
+                    await poiService.RemovePoiFromCollectionAsync(poiId, sourceCollectionId);
+                }
+            }
+        }
+        CollectionStates.Insert(0, new CollectionDisplayState(newCol));
+        await RefreshAfterMutationAsync();
+    }
+
+    public async Task HandleBatchCopyAsync((IReadOnlyList<int> PoiIds, int TargetCollectionId) args)
+    {
+        foreach (var poiId in args.PoiIds)
+        {
+            await poiService.AddPoiToCollectionAsync(poiId, args.TargetCollectionId);
+        }
+        await RefreshAfterMutationAsync();
+    }
+
+    public async Task HandleBatchCopyToNewCollectionAsync((IReadOnlyList<int> PoiIds, string NewCollectionName) args)
+    {
+        var newCol = await poiService.CreateCollectionAsync(args.NewCollectionName);
+        foreach (var poiId in args.PoiIds)
+        {
+            await poiService.AddPoiToCollectionAsync(poiId, newCol.Id);
+        }
+        CollectionStates.Insert(0, new CollectionDisplayState(newCol));
+        await RefreshAfterMutationAsync();
+    }
+
     private async Task RefreshPoiCollectionMapsAsync(IEnumerable<Poi> pois)
     {
         var poiIds = pois.Select(p => p.Id).Distinct().ToList();

@@ -114,9 +114,9 @@ public class PoiTableTests : BunitTestContext
             .Add(p => p.OnFocusClicked,
                 EventCallback.Factory.Create<int>(this, id => focusedId = id)));
 
-        // The focus button is the second button-like element in the actions cell
-        // It contains the "my_location" icon
-        var focusButton = cut.Find("button");
+        // Find the focus button by its accessible label (header now also holds
+        // batch-operation buttons, so "first button" is no longer the focus one).
+        var focusButton = cut.Find("button[aria-label='Focus map on Test Place']");
         focusButton.Click();
 
         focusedId.Should().Be(99);
@@ -192,6 +192,101 @@ public class PoiTableTests : BunitTestContext
             .ToList();
 
         options.Should().BeEquivalentTo(["Gamma"]);
+    }
+
+    [Fact]
+    public void EachRow_RendersSelectionCheckbox()
+    {
+        List<Poi> pois = [CreatePoi(1, "Eiffel Tower"), CreatePoi(2, "Louvre Museum")];
+
+        var cut = RenderComponent<PoiTable>(parameters => parameters
+            .Add(p => p.Pois, pois));
+
+        cut.FindAll("input[type='checkbox']").Should().HaveCount(2);
+        cut.Find("input[aria-label='Select Eiffel Tower']").Should().NotBeNull();
+    }
+
+    [Fact]
+    public void BatchDelete_FiresOnBatchDeleteClicked_WithCheckedIds()
+    {
+        IReadOnlyList<int>? deleted = null;
+        List<Poi> pois = [CreatePoi(1, "A"), CreatePoi(2, "B"), CreatePoi(3, "C")];
+
+        var cut = RenderComponent<PoiTable>(parameters => parameters
+            .Add(p => p.Pois, pois)
+            .Add(p => p.OnBatchDeleteClicked,
+                EventCallback.Factory.Create<IReadOnlyList<int>>(this, ids => deleted = ids)));
+
+        cut.Find("input[aria-label='Select A']").Change(true);
+        cut.Find("input[aria-label='Select C']").Change(true);
+        cut.Find("button[aria-label='Delete selected']").Click();
+
+        deleted.Should().BeEquivalentTo([1, 3]);
+    }
+
+    [Fact]
+    public void SelectAll_ThenBatchDelete_FiresWithEveryId()
+    {
+        IReadOnlyList<int>? deleted = null;
+        List<Poi> pois = [CreatePoi(1, "A"), CreatePoi(2, "B"), CreatePoi(3, "C")];
+
+        var cut = RenderComponent<PoiTable>(parameters => parameters
+            .Add(p => p.Pois, pois)
+            .Add(p => p.OnBatchDeleteClicked,
+                EventCallback.Factory.Create<IReadOnlyList<int>>(this, ids => deleted = ids)));
+
+        cut.Find("button[aria-label='Select all']").Click();
+        cut.Find("button[aria-label='Delete selected']").Click();
+
+        deleted.Should().BeEquivalentTo([1, 2, 3]);
+    }
+
+    [Fact]
+    public void BatchButtons_Disabled_WhenNothingSelected()
+    {
+        List<Poi> pois = [CreatePoi(1, "A")];
+
+        var cut = RenderComponent<PoiTable>(parameters => parameters
+            .Add(p => p.Pois, pois));
+
+        cut.Find("button[aria-label='Delete selected']").HasAttribute("disabled").Should().BeTrue();
+        cut.Find("button[aria-label='Move selected to collection']").HasAttribute("disabled").Should().BeTrue();
+        cut.Find("button[aria-label='Copy selected to collection']").HasAttribute("disabled").Should().BeTrue();
+    }
+
+    [Fact]
+    public void BatchMove_OpensModalWithAllCollections_AndFiresWithCheckedIds()
+    {
+        (IReadOnlyList<int> PoiIds, int TargetCollectionId)? moved = null;
+        List<Poi> pois = [CreatePoi(1, "A"), CreatePoi(2, "B")];
+        List<CollectionDisplayState> collections =
+        [
+            new(new PoiCollection { Id = 10, Name = "Alpha", Color = "#005bbf" }),
+            new(new PoiCollection { Id = 20, Name = "Beta", Color = "#006e2c" })
+        ];
+
+        var cut = RenderComponent<PoiTable>(parameters => parameters
+            .Add(p => p.Pois, pois)
+            .Add(p => p.Collections, collections)
+            // Even though POI 1 already belongs to Alpha, batch mode offers all.
+            .Add(p => p.PoiCollectionMemberships, new Dictionary<int, IReadOnlyList<int>> { [1] = [10] })
+            .Add(p => p.OnBatchMoveClicked,
+                EventCallback.Factory.Create<(IReadOnlyList<int>, int)>(this, args => moved = args)));
+
+        cut.Find("input[aria-label='Select A']").Change(true);
+        cut.Find("input[aria-label='Select B']").Change(true);
+        cut.Find("button[aria-label='Move selected to collection']").Click();
+
+        var options = cut.FindAll("div.flex-1.overflow-y-auto.p-2 > button")
+            .Select(x => x.TextContent.Trim())
+            .ToList();
+        options.Should().BeEquivalentTo(["Alpha", "Beta"]);
+
+        cut.FindAll("div.flex-1.overflow-y-auto.p-2 > button").First(b => b.TextContent.Contains("Beta")).Click();
+
+        moved.Should().NotBeNull();
+        moved!.Value.PoiIds.Should().BeEquivalentTo([1, 2]);
+        moved.Value.TargetCollectionId.Should().Be(20);
     }
 
     [Fact]
