@@ -18,17 +18,29 @@
         return div.innerHTML;
     }
 
-    // Bind a permanent, non-interactive tooltip showing the POI name to the
-    // right of the marker dot. Non-interactive => pointer-events:none, so the
-    // label never swallows clicks meant for the marker underneath.
+    // Bind a permanent tooltip showing the POI name to the right of the marker
+    // dot. The label is interactive: clicking it does the same as clicking the
+    // dot (opens the popup + selects the POI). It sits to the right of the dot
+    // (offset clears the 24px circle) so it never overlaps — and thus never
+    // steals — clicks meant for the marker itself.
     function bindLabel(marker) {
         marker.bindTooltip(escapeHtml(marker._poiName || ''), {
             permanent: true,
             direction: 'right',
-            offset: [8, 0],
+            offset: [16, 0],
             className: 'poi-label',
-            interactive: false
+            interactive: true
         });
+
+        var tooltip = marker.getTooltip();
+        if (tooltip) {
+            tooltip.on('click', function () {
+                marker.openPopup();
+                if (state.dotnetRef && marker._poiId != null) {
+                    state.dotnetRef.invokeMethodAsync('OnMarkerClickedJs', marker._poiId);
+                }
+            });
+        }
     }
 
     window.leafletInterop = {
@@ -120,9 +132,9 @@
             pois.forEach(function (poi) {
                 var icon = L.divIcon({
                     className: 'custom-marker',
-                    html: '<div style="width:12px;height:12px;border-radius:50%;background:' + color + ';border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>',
-                    iconSize: [12, 12],
-                    iconAnchor: [6, 6]
+                    html: '<div style="width:24px;height:24px;border-radius:50%;background:' + color + ';border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>',
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 12]
                 });
 
                 var marker = L.marker([poi.latitude, poi.longitude], { icon: icon });
@@ -142,9 +154,11 @@
                     }
                 });
 
-                // Remember the name so the labels toggle can (re)bind tooltips
-                // for markers added at any time (enrichment refresh, re-show).
+                // Remember the name + id so the labels toggle can (re)bind
+                // tooltips — and wire their click to selection — for markers
+                // added at any time (enrichment refresh, re-show).
                 marker._poiName = poi.name;
+                marker._poiId = poi.id;
                 if (state.labelsVisible) {
                     bindLabel(marker);
                 }
