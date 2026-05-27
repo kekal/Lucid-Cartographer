@@ -54,19 +54,21 @@ else
             }
             @if (Vm.CollectionStates.Any(c => c.IsVisible))
             {
-                <button class="text-xs text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1"
-                        @onclick="Vm.FitMapBoundsAsync"
-                        aria-label="@UiStrings.FitMapToVisible">
-                    <span class="material-symbols-outlined text-sm" aria-hidden="true">fit_screen</span>
-                    @UiStrings.FitAll
-                </button>
-                <button class="text-xs transition-colors flex items-center gap-1 @(Vm.ShowPoiLabels ? "text-primary" : "text-on-surface-variant hover:text-primary")"
-                        @onclick="Vm.TogglePoiLabelsAsync"
-                        aria-pressed="@Vm.ShowPoiLabels"
-                        aria-label="@UiStrings.ToggleLabels">
-                    <span class="material-symbols-outlined text-sm" aria-hidden="true">@(Vm.ShowPoiLabels ? "label" : "label_off")</span>
-                    @UiStrings.Labels
-                </button>
+                <div class="ml-auto flex items-center gap-4">
+                    <button class="text-sm text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1.5"
+                            @onclick="Vm.FitMapBoundsAsync"
+                            aria-label="@UiStrings.FitMapToVisible">
+                        <span class="material-symbols-outlined text-base" aria-hidden="true">fit_screen</span>
+                        @UiStrings.FitAll
+                    </button>
+                    <button class="text-sm transition-colors flex items-center gap-1.5 @(Vm.ShowPoiLabels ? "text-primary" : "text-on-surface-variant hover:text-primary")"
+                            @onclick="Vm.TogglePoiLabelsAsync"
+                            aria-pressed="@Vm.ShowPoiLabels"
+                            aria-label="@UiStrings.ToggleLabels">
+                        <span class="material-symbols-outlined text-base" aria-hidden="true">@(Vm.ShowPoiLabels ? "label" : "label_off")</span>
+                        @UiStrings.Labels
+                    </button>
+                </div>
             }
         </div>
 
