@@ -36,6 +36,7 @@ public interface IPoiService
     Task UpdatePoiAsync(Poi poi, CancellationToken cancellationToken = default);
     Task DeleteCollectionAsync(int collectionId, CancellationToken cancellationToken = default);
     Task UpdateCollectionColorAsync(int collectionId, string color, CancellationToken cancellationToken = default);
+    Task RenameCollectionAsync(int collectionId, string name, CancellationToken cancellationToken = default);
     Task<PoiCollection> CreateCollectionAsync(string name, CancellationToken cancellationToken = default);
     /// <summary>
     /// Resets enrichment failure tracking for non-enriched POIs so they can be retried.

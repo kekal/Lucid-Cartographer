@@ -278,6 +278,45 @@ public class PoiServiceTests
     }
 
     [Fact]
+    public async Task RenameCollectionAsync_UpdatesName_AndTrimsWhitespace()
+    {
+        var (service, factory) = await CreateServiceAsync(db =>
+        {
+            db.PoiCollections.Add(new PoiCollection { Color = "#005bbf", Id = 1, Name = "Old", CreatedDate = DateTime.UtcNow });
+        });
+
+        await service.RenameCollectionAsync(1, "  Замки 2  ");
+
+        await using var db = await factory.CreateDbContextAsync();
+        var col = await db.PoiCollections.FindAsync(1);
+        col!.Name.Should().Be("Замки 2");
+    }
+
+    [Fact]
+    public async Task RenameCollectionAsync_BlankName_Throws()
+    {
+        var (service, _) = await CreateServiceAsync(db =>
+        {
+            db.PoiCollections.Add(new PoiCollection { Color = "#005bbf", Id = 1, Name = "Old", CreatedDate = DateTime.UtcNow });
+        });
+
+        var act = () => service.RenameCollectionAsync(1, "   ");
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task RenameCollectionAsync_UnknownCollection_Throws()
+    {
+        var (service, _) = await CreateServiceAsync(_ => { });
+
+        var act = () => service.RenameCollectionAsync(999, "New");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*999*");
+    }
+
+    [Fact]
     public async Task GetCollectionsAsync_ComputesPoiCountFromDb()
     {
         var (service, _) = await CreateServiceAsync(db =>

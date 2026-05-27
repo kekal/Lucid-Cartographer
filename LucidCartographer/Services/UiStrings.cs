@@ -18,6 +18,7 @@ public static class UiStrings
     public const string Save = "Save";
     public const string Yes = "Yes";
     public const string No = "No";
+    public const string Rename = "Rename";
     public const string Logout = "Logout";
     public const string SearchPois = "Search POIs...";
     public const string Settings = "Settings";

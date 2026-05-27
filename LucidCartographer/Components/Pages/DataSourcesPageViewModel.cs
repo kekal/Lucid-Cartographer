@@ -57,6 +57,12 @@ public sealed class DataSourcesPageViewModel(
     public bool IsSavingColorPicker { get; private set; }
     public string? ColorPickerError { get; private set; }
 
+    // Rename modal
+    public int? RenameCollectionId { get; private set; }
+    public string RenameValue { get; set; } = string.Empty;
+    public bool IsSavingRename { get; private set; }
+    public string? RenameError { get; private set; }
+
     // Add-POI modal
     public int? AddPoiCollectionId { get; private set; }
     public string AddPoiUrl { get; set; } = string.Empty;
@@ -596,6 +602,57 @@ public sealed class DataSourcesPageViewModel(
         finally
         {
             IsSavingColorPicker = false;
+        }
+    }
+
+    // --- Rename modal ---
+
+    public void OpenRename(PoiCollection collection)
+    {
+        RenameCollectionId = collection.Id;
+        RenameValue = collection.Name;
+        RenameError = null;
+    }
+
+    public void CloseRename()
+    {
+        RenameCollectionId = null;
+        RenameError = null;
+    }
+
+    public async Task SaveCollectionRenameAsync()
+    {
+        if (RenameCollectionId == null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(RenameValue))
+        {
+            RenameError = "Name cannot be empty.";
+            return;
+        }
+
+        IsSavingRename = true;
+        RenameError = null;
+
+        try
+        {
+            await poiService.RenameCollectionAsync(RenameCollectionId.Value, RenameValue, _cts.Token);
+            await LoadCollectionsAsync();
+            CloseRename();
+        }
+        catch (InvalidOperationException ex)
+        {
+            RenameError = ex.Message;
+        }
+        catch (ArgumentException ex)
+        {
+            RenameError = ex.Message;
+        }
+        finally
+        {
+            IsSavingRename = false;
         }
     }
 

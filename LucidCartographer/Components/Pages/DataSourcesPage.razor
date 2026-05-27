@@ -212,6 +212,12 @@
                                                 @(Vm.ExportingId == col.Id ? "hourglass_empty" : "map")
                                             </span>
                                         </button>
+                                        <button class="text-primary hover:bg-primary/10 p-1 rounded-lg transition-colors"
+                                                aria-label="@($"Rename {col.Name}")"
+                                                title="@UiStrings.Rename"
+                                                @onclick="() => Vm.OpenRename(col)">
+                                            <span class="material-symbols-outlined text-sm" aria-hidden="true">edit</span>
+                                        </button>
                                         <button class="text-tertiary hover:bg-tertiary/10 p-1 rounded-lg transition-colors"
                                                 aria-label="@($"Delete {col.Name}")"
                                                 @onclick="() => Vm.RequestDelete(col.Id)">
@@ -333,6 +339,51 @@
                         @onclick="Vm.SaveCollectionColorAsync"
                         disabled="@Vm.IsSavingColorPicker">
                     @(Vm.IsSavingColorPicker ? "Saving..." : "Save")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (Vm.RenameCollectionId != null)
+{
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="Rename collection">
+        <div class="w-full max-w-md rounded-xl bg-surface-container p-5 shadow-xl">
+            <div class="flex items-center justify-between mb-4">
+                <h4 class="font-bold font-headline text-base">@UiStrings.Rename</h4>
+                <button type="button"
+                        class="p-1 rounded hover:bg-surface-container-high transition-colors"
+                        aria-label="@UiStrings.Close"
+                        @onclick="Vm.CloseRename">
+                    <span class="material-symbols-outlined text-sm">close</span>
+                </button>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(Vm.RenameError))
+            {
+                <div class="mb-3 p-2 rounded-lg bg-tertiary/10 text-tertiary text-sm">@Vm.RenameError</div>
+            }
+
+            <div class="mb-4">
+                <label class="block text-sm font-medium mb-2">Dataset name</label>
+                <input type="text"
+                       class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                       @bind="Vm.RenameValue" @bind:event="oninput"
+                       @onkeydown="@(async e => { if (e.Key == "Enter") await Vm.SaveCollectionRenameAsync(); })" />
+            </div>
+
+            <div class="flex justify-end gap-2">
+                <button type="button"
+                        class="px-3 py-2 text-sm rounded-lg border border-outline-variant hover:bg-surface-container-high transition-colors"
+                        @onclick="Vm.CloseRename"
+                        disabled="@Vm.IsSavingRename">
+                    @UiStrings.Cancel
+                </button>
+                <button type="button"
+                        class="px-3 py-2 text-sm rounded-lg bg-primary text-on-primary hover:bg-primary/90 transition-colors disabled:opacity-50"
+                        @onclick="Vm.SaveCollectionRenameAsync"
+                        disabled="@(Vm.IsSavingRename || string.IsNullOrWhiteSpace(Vm.RenameValue))">
+                    @(Vm.IsSavingRename ? "Saving..." : UiStrings.Save)
                 </button>
             </div>
         </div>

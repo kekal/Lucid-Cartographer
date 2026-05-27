@@ -415,6 +415,25 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task RenameCollectionAsync(int collectionId, string name, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException("Collection name cannot be empty.", nameof(name));
+        }
+
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var collection = await db.PoiCollections.FindAsync([collectionId], cancellationToken);
+        if (collection == null)
+        {
+            logger.LogWarning("RenameCollectionAsync: Collection {CollectionId} not found", collectionId);
+            throw new InvalidOperationException($"Collection {collectionId} not found");
+        }
+
+        collection.Name = name.Trim();
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<PoiCollection> CreateCollectionAsync(string name, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(name))

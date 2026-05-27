@@ -185,4 +185,76 @@ public class DataSourcesPageViewModelTests
         vm.PendingDeleteId.Should().BeNull();
         _poi.Verify(p => p.DeleteCollectionAsync(7, It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    [Fact]
+    public void OpenRename_PrefillsCurrentName()
+    {
+        var vm = CreateVm();
+        var col = MakeCollection(11, "Замки");
+
+        vm.OpenRename(col);
+
+        vm.RenameCollectionId.Should().Be(11);
+        vm.RenameValue.Should().Be("Замки");
+        vm.RenameError.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SaveCollectionRename_DispatchesToService_ReloadsAndCloses()
+    {
+        _poi.Setup(p => p.GetCollectionsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        _poi.Setup(p => p.GetFailedEnrichmentCountAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
+
+        var vm = CreateVm();
+        vm.OpenRename(MakeCollection(5, "Old"));
+        vm.RenameValue = "New Name";
+
+        await vm.SaveCollectionRenameAsync();
+
+        _poi.Verify(p => p.RenameCollectionAsync(5, "New Name", It.IsAny<CancellationToken>()), Times.Once);
+        vm.RenameCollectionId.Should().BeNull();
+        vm.RenameError.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SaveCollectionRename_BlankName_SetsErrorAndDoesNotCallService()
+    {
+        var vm = CreateVm();
+        vm.OpenRename(MakeCollection(5, "Old"));
+        vm.RenameValue = "   ";
+
+        await vm.SaveCollectionRenameAsync();
+
+        vm.RenameError.Should().NotBeNull();
+        vm.RenameCollectionId.Should().Be(5); // modal stays open
+        _poi.Verify(p => p.RenameCollectionAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SaveCollectionRename_SurfacesServiceError()
+    {
+        _poi.Setup(p => p.RenameCollectionAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Collection 5 not found"));
+
+        var vm = CreateVm();
+        vm.OpenRename(MakeCollection(5, "Old"));
+        vm.RenameValue = "New";
+
+        await vm.SaveCollectionRenameAsync();
+
+        vm.RenameError.Should().Be("Collection 5 not found");
+        vm.RenameCollectionId.Should().Be(5); // stays open so the user can retry
+    }
+
+    [Fact]
+    public void CloseRename_ClearsState()
+    {
+        var vm = CreateVm();
+        vm.OpenRename(MakeCollection(5, "Old"));
+
+        vm.CloseRename();
+
+        vm.RenameCollectionId.Should().BeNull();
+        vm.RenameError.Should().BeNull();
+    }
 }
