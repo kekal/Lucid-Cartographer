@@ -1,6 +1,8 @@
 using System.ComponentModel;
+using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
 using LucidCartographer.Services.Enrichment;
+using Microsoft.EntityFrameworkCore;
 using ModelContextProtocol.Server;
 
 namespace LucidCartographer.Services.Mcp;
@@ -79,6 +81,55 @@ public static class PoiWriteTools
         // the next idle poll.
         enrichmentTrigger.Signal();
         return PoiSummaryDto.From(created);
+    }
+
+    [McpServerTool(Name = "edit_poi")]
+    [Description(
+        "Edit a POI's name and/or description (notes). Only these two fields can be changed; " +
+        "all other fields (coordinates, address, category, photo, enrichment state, etc.) are " +
+        "preserved untouched. To change anything else, delete and recreate the POI instead. " +
+        "Omit a parameter (or pass null) to leave that field unchanged; pass an empty string " +
+        "for description to clear it. Returns the updated POI.")]
+    public static async Task<PoiDetailDto?> EditPoi(
+        IPoiService poiService,
+        IDbContextFactory<AppDbContext> dbFactory,
+        [Description("POI id.")] int poiId,
+        [Description("New name. Omit to leave the name unchanged.")] string? name = null,
+        [Description("New description/notes. Omit to leave unchanged; pass \"\" to clear.")] string? description = null,
+        CancellationToken ct = default)
+    {
+        var poi = await poiService.GetPoiAsync(poiId, ct);
+        if (poi is null)
+        {
+            return null;
+        }
+
+        if (name is not null)
+        {
+            // Name is required; reject a blank rename (the service also validates,
+            // but fail early with a clearer message).
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw new ArgumentException("Name cannot be blank.", nameof(name));
+            }
+            poi.Name = name;
+        }
+
+        if (description is not null)
+        {
+            poi.Notes = description;
+        }
+
+        await poiService.UpdatePoiAsync(poi, ct);
+
+        var namesById = await poiService.GetPoiCollectionNamesAsync([poiId], ct);
+        var collections = namesById.TryGetValue(poiId, out var names) ? names : [];
+
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var hasImage = await db.PoiImages.AsNoTracking()
+            .AnyAsync(i => i.PoiId == poiId && i.Data.Length > 0, ct);
+
+        return PoiDetailDto.From(poi, collections, hasImage);
     }
 
     [McpServerTool(Name = "move_poi")]
