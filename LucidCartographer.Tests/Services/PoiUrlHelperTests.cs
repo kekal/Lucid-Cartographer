@@ -148,4 +148,34 @@ public class PoiUrlHelperTests
     {
         PoiUrlHelper.ExtractPlaceNameFromUrl(url).Should().BeNull();
     }
+
+    [Theory]
+    [InlineData(
+        "https://www.google.com/maps/place/X/@52.4,16.9,15z/data=!4m6!3m5!1s0x470444d2e7e43305:0xc522afd5119f73c7!8m2!3d52.4!4d16.9!16s%2Fg%2F1226snj_",
+        "0x470444d2e7e43305:0xc522afd5119f73c7")]
+    [InlineData("https://maps.google.com/?q=foo", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void ExtractFeatureId_ReadsThe1sSegment(string? url, string? expected)
+    {
+        PoiUrlHelper.ExtractFeatureId(url).Should().Be(expected);
+    }
+
+    [Fact]
+    public void ExtractFeatureId_LowercasesHex_SoCasingDoesNotMatter()
+    {
+        var url = "https://www.google.com/maps/place/X/data=!3m1!1s0x47045B3F13482675:0x4B73EB10AFC87207!8m2";
+        PoiUrlHelper.ExtractFeatureId(url).Should().Be("0x47045b3f13482675:0x4b73eb10afc87207");
+    }
+
+    [Theory]
+    [InlineData("https://www.google.com/maps/place/X/data=!16s%2Fg%2F1226snj_?entry=tts", "/g/1226snj_")]
+    [InlineData("https://www.google.com/maps/place/X/data=!16s%2Fm%2F0abc123", "/m/0abc123")]
+    [InlineData("https://maps.google.com/?q=foo", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void ExtractPlaceEntityId_ReadsAndDecodesThe16sSegment(string? url, string? expected)
+    {
+        PoiUrlHelper.ExtractPlaceEntityId(url).Should().Be(expected);
+    }
 }

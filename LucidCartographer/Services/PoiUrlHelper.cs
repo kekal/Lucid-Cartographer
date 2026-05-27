@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using LucidCartographer.Data.Entities;
 
 namespace LucidCartographer.Services;
@@ -28,6 +29,68 @@ public static class PoiUrlHelper
         }
 
         return "#";
+    }
+
+    // The two stable, language-independent place identifiers embedded in a
+    // canonical /maps/place/ URL's data segment:
+    //   !1s0x47045b3f13482675:0xc522afd5119f73c7  → feature id (cell:cid)
+    //   !16s%2Fg%2F1226snj_                        → Knowledge Graph mid (/g/… or /m/…)
+    // Unlike the /maps/place/<Name>/ segment (which is the *localized* display
+    // name and varies by request language), these never change with language.
+    private static readonly Regex FeatureIdRegex =
+        new(@"!1s(0x[0-9a-fA-F]+:0x[0-9a-fA-F]+)", RegexOptions.Compiled);
+    private static readonly Regex EntityIdTokenRegex =
+        new(@"!16s([^!?&]+)", RegexOptions.Compiled);
+    private static readonly Regex PlaceMidRegex =
+        new(@"^/[gm]/[0-9a-zA-Z_]+$", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Extracts the Google Maps <b>feature id</b> (<c>0x…:0x…</c>) from the
+    /// <c>!1s</c> segment of a place URL. This is the most reliable
+    /// language-independent identity for a place. Returned lower-cased so two
+    /// URLs differing only in hex casing compare equal. Null if absent.
+    /// </summary>
+    public static string? ExtractFeatureId(string? url)
+    {
+        if (string.IsNullOrEmpty(url))
+        {
+            return null;
+        }
+
+        var m = FeatureIdRegex.Match(url);
+        return m.Success ? m.Groups[1].Value.ToLowerInvariant() : null;
+    }
+
+    /// <summary>
+    /// Extracts the Google Knowledge Graph place id (<c>/g/…</c> or <c>/m/…</c>)
+    /// from the <c>!16s</c> segment of a place URL (it is percent-encoded in
+    /// the URL, e.g. <c>%2Fg%2F1226snj_</c>). Also language-independent, but
+    /// not always present. Null if absent or malformed.
+    /// </summary>
+    public static string? ExtractPlaceEntityId(string? url)
+    {
+        if (string.IsNullOrEmpty(url))
+        {
+            return null;
+        }
+
+        var m = EntityIdTokenRegex.Match(url);
+        if (!m.Success)
+        {
+            return null;
+        }
+
+        string token;
+        try
+        {
+            token = Uri.UnescapeDataString(m.Groups[1].Value);
+        }
+        catch (UriFormatException)
+        {
+            return null;
+        }
+
+        return PlaceMidRegex.IsMatch(token) ? token : null;
     }
 
     /// <summary>

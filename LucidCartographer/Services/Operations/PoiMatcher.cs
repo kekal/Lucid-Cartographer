@@ -33,12 +33,50 @@ public partial class PoiMatcher : IPoiMatcher
     {
         ArgumentNullException.ThrowIfNull(a);
         ArgumentNullException.ThrowIfNull(b);
-        // Compare on the canonical Google Maps name for enriched POIs
-        // (PoiIdentity.ComparisonName) rather than the user-facing Name.
-        return PoiIdentity.AreSamePlace(
-            PoiIdentity.ComparisonName(a), a.Latitude, a.Longitude,
-            PoiIdentity.ComparisonName(b), b.Latitude, b.Longitude,
-            toleranceMeters, nameSimilarityThreshold);
+
+        // Stable Google place id decides identity first: two rows carrying the
+        // same feature id (or KG mid) are the same place regardless of language
+        // or small coord drift; two carrying *different* ids are distinct. Only
+        // when the id comparison is indeterminate (at least one row has no id)
+        // do we fall back to the name + proximity rule.
+        var byId = SamePlaceById(a, b);
+        if (byId.HasValue)
+        {
+            return byId.Value;
+        }
+
+        return PoiIdentity.AreSamePlace(a, b, toleranceMeters, nameSimilarityThreshold);
+    }
+
+    /// <summary>
+    /// Compares two POIs by their stable Google place identifiers parsed from
+    /// the canonical <c>/maps/place/</c> URL. Returns true/false when a decision
+    /// can be made (both have a feature id, or both have a KG mid), and null
+    /// when indeterminate (at least one side lacks a comparable id).
+    /// </summary>
+    private static bool? SamePlaceById(Poi a, Poi b)
+        => SamePlaceById(
+            PoiUrlHelper.ExtractFeatureId(a.GoogleMapsUrl), PoiUrlHelper.ExtractPlaceEntityId(a.GoogleMapsUrl),
+            PoiUrlHelper.ExtractFeatureId(b.GoogleMapsUrl), PoiUrlHelper.ExtractPlaceEntityId(b.GoogleMapsUrl));
+
+    /// <summary>
+    /// Core place-id comparison over pre-extracted ids. Feature id takes
+    /// precedence over the KG mid. Returns null (indeterminate) when neither
+    /// id type is present on both sides.
+    /// </summary>
+    private static bool? SamePlaceById(string? ftidA, string? midA, string? ftidB, string? midB)
+    {
+        if (ftidA is not null && ftidB is not null)
+        {
+            return string.Equals(ftidA, ftidB, StringComparison.Ordinal);
+        }
+
+        if (midA is not null && midB is not null)
+        {
+            return string.Equals(midA, midB, StringComparison.Ordinal);
+        }
+
+        return null;
     }
 
     /// <inheritdoc />
@@ -49,27 +87,29 @@ public partial class PoiMatcher : IPoiMatcher
 
         Poi? bestMatch = null;
         var bestDistance = double.MaxValue;
-        var poiName = PoiIdentity.ComparisonName(poi);
 
-        // Scan all candidates. Ties break toward the closest candidate
-        // so the result is stable when several rows pass the threshold.
+        // Scan all candidates. Identity is decided by IsMatch (stable Google
+        // place id first, then name + proximity). Among the matches, ties break
+        // toward the closest candidate that carries real coordinates so the
+        // result is stable when several rows pass.
         foreach (var c in candidates)
         {
-            // Compare on the canonical Google Maps name for enriched POIs.
-            if (!PoiIdentity.AreSamePlace(
-                    poiName, poi.Latitude, poi.Longitude,
-                    PoiIdentity.ComparisonName(c), c.Latitude, c.Longitude,
-                    toleranceMeters, nameSimilarityThreshold))
+            if (!IsMatch(poi, c, toleranceMeters, nameSimilarityThreshold))
             {
                 continue;
             }
 
-            // AreSamePlace already requires non-null coords on both sides,
-            // so the .Value dereferences here are safe.
-            var dist = GeoUtils.HaversineDistance(
-                poi.Latitude!.Value, poi.Longitude!.Value,
-                c.Latitude!.Value, c.Longitude!.Value);
-            if (dist < bestDistance)
+            // A row matched purely by place id might lack real coords; treat
+            // it as the farthest possible so a coord-bearing match still wins
+            // the tie-break, while a sole id-only match is still returned.
+            var dist = poi is { Latitude: not null, Longitude: not null }
+                       && c is { Latitude: not null, Longitude: not null }
+                ? GeoUtils.HaversineDistance(
+                    poi.Latitude.Value, poi.Longitude.Value,
+                    c.Latitude.Value, c.Longitude.Value)
+                : double.MaxValue;
+
+            if (bestMatch is null || dist < bestDistance)
             {
                 bestDistance = dist;
                 bestMatch = c;
@@ -89,12 +129,15 @@ public partial class PoiMatcher : IPoiMatcher
         pois = pois.Where(p => p is { Latitude: not null, Longitude: not null }).ToList();
 
         var n = pois.Count;
-        // Resolve each POI's comparison name once (Google Maps name for
-        // enriched rows, own Name otherwise) so the O(N^2) pairwise loop
-        // below doesn't re-parse URLs.
-        var names = new string[n];
+        // Pre-extract each POI's stable Google place ids once so the O(N^2)
+        // pairwise loop below doesn't re-parse URLs.
+        var ftids = new string?[n];
+        var mids = new string?[n];
         for (var i = 0; i < n; i++)
-            names[i] = PoiIdentity.ComparisonName(pois[i]);
+        {
+            ftids[i] = PoiUrlHelper.ExtractFeatureId(pois[i].GoogleMapsUrl);
+            mids[i] = PoiUrlHelper.ExtractPlaceEntityId(pois[i].GoogleMapsUrl);
+        }
 
         var parent = new int[n];
         var rank = new int[n];
@@ -111,6 +154,18 @@ public partial class PoiMatcher : IPoiMatcher
 
             for (var j = i + 1; j < n; j++)
             {
+                // Stable place id decides first and ignores proximity — two
+                // rows for the same place can carry slightly different coords.
+                var byId = SamePlaceById(ftids[i], mids[i], ftids[j], mids[j]);
+                if (byId.HasValue)
+                {
+                    if (byId.Value)
+                    {
+                        Union(i, j);
+                    }
+                    continue;
+                }
+
                 // Fast latitude pre-filter. Coords are guaranteed non-null
                 // by the Where() pass at the top of the method.
                 if (Math.Abs(pois[i].Latitude!.Value - pois[j].Latitude!.Value) > latThresholdDegrees)
@@ -118,10 +173,7 @@ public partial class PoiMatcher : IPoiMatcher
                     continue;
                 }
 
-                if (PoiIdentity.AreSamePlace(
-                        names[i], pois[i].Latitude, pois[i].Longitude,
-                        names[j], pois[j].Latitude, pois[j].Longitude,
-                        toleranceMeters, nameSimilarityThreshold))
+                if (PoiIdentity.AreSamePlace(pois[i], pois[j], toleranceMeters, nameSimilarityThreshold))
                 {
                     Union(i, j);
                 }

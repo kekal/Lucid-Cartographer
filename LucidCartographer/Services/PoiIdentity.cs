@@ -69,34 +69,6 @@ public static class PoiIdentity
         return PoiMatcher.NameSimilarity(nameA, nameB) >= nameSimilarityThreshold;
     }
 
-    /// <summary>
-    /// The name to use when <em>comparing</em> a POI for identity. For an
-    /// enriched POI whose canonical Google Maps URL carries a place name, that
-    /// place name is authoritative: the user may have given the row a personal
-    /// label, but Google's name is what decides whether two rows are the same
-    /// real place. Falls back to the POI's own <see cref="Poi.Name"/> when the
-    /// POI is not enriched or no place name can be parsed from its URL.
-    /// <para>
-    /// This NEVER renames the POI — it only affects how comparisons are made
-    /// (currently the operations-page matcher in <see cref="PoiMatcher"/>).
-    /// </para>
-    /// </summary>
-    public static string ComparisonName(Poi poi)
-    {
-        ArgumentNullException.ThrowIfNull(poi);
-
-        if (poi.IsEnriched)
-        {
-            var googleName = PoiUrlHelper.ExtractPlaceNameFromUrl(poi.GoogleMapsUrl);
-            if (!string.IsNullOrWhiteSpace(googleName))
-            {
-                return googleName;
-            }
-        }
-
-        return poi.Name;
-    }
-
     private static bool IsRealCoord(double? lat, double? lon)
     {
         if (!lat.HasValue || !lon.HasValue)

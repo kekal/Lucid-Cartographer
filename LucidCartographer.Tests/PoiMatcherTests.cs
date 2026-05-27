@@ -71,62 +71,55 @@ public class PoiMatcherTests
         _matcher.IsMatch(a, b).Should().BeFalse();
     }
 
+    // The /maps/place/ name segment is the *localized* display name and varies
+    // by request language, so the matcher keys on the stable feature id
+    // (!1s0x…:0x…) / KG mid (!16s…) instead. These tests pin that behaviour.
+
+    // Same place, two different localized URL names (Russian vs Polish), but an
+    // identical feature id — must match despite divergent names and personal labels.
+    private const string ParkWilsonaRu =
+        "https://www.google.com/maps/place/%D0%9F%D0%B0%D1%80%D0%BA+%D0%92%D0%B8%D0%BB%D1%8C%D1%81%D0%BE%D0%BD%D0%B0/@52.399486,16.8861559,15z/data=!4m6!3m5!1s0x470444d2e7e43305:0xc522afd5119f73c7!8m2!3d52.399486!4d16.9021787!16s%2Fg%2F1226snj_";
+    private const string ParkWilsonaPl =
+        "https://www.google.com/maps/place/Park+Wilsona/@52.399486,16.8861559,15z/data=!4m6!3m5!1s0x470444d2e7e43305:0xc522afd5119f73c7!8m2!3d52.399486!4d16.9021787!16s%2Fg%2F1226snj_";
+
     [Fact]
-    public void IsMatch_EnrichedPois_CompareOnGoogleMapsName_NotPersonalName()
+    public void IsMatch_SameFeatureId_MatchesAcrossLocalizedNames()
     {
-        // Both rows are the same real place ("Wawel Royal Castle") per their
-        // canonical Google Maps URLs, but the user gave them different personal
-        // labels. Because both are enriched, the comparison uses the Google
-        // name and the rows match despite the divergent personal names.
-        var a = new Poi
-        {
-            Id = 1, Name = "My favourite castle", Latitude = 50.0540, Longitude = 19.9354,
-            IsEnriched = true,
-            GoogleMapsUrl = "https://www.google.com/maps/place/Wawel+Royal+Castle/@50.0540,19.9354,17z"
-        };
-        var b = new Poi
-        {
-            Id = 2, Name = "Zamek do zwiedzenia", Latitude = 50.0541, Longitude = 19.9355,
-            IsEnriched = true,
-            GoogleMapsUrl = "https://www.google.com/maps/place/Wawel+Royal+Castle/@50.0541,19.9355,17z"
-        };
+        var a = CreatePoi(1, "Парк Вильсона", 52.399486, 16.9021787, ParkWilsonaRu);
+        var b = CreatePoi(2, "Park Wilsona", 52.399490, 16.9021800, ParkWilsonaPl);
 
         _matcher.IsMatch(a, b).Should().BeTrue();
     }
 
     [Fact]
-    public void IsMatch_EnrichedPois_DifferentGoogleMapsName_DoNotMatch_DespiteSamePersonalName()
+    public void IsMatch_DifferentFeatureId_DoesNotMatch_EvenWhenNameAndCoordsAlign()
     {
-        // Same personal name and within tolerance, but their canonical Google
-        // names differ, so the enriched comparison keeps them distinct.
-        var a = new Poi
-        {
-            Id = 1, Name = "Cafe", Latitude = 50.0540, Longitude = 19.9354,
-            IsEnriched = true,
-            GoogleMapsUrl = "https://www.google.com/maps/place/Cafe+Camelot/@50.0540,19.9354,17z"
-        };
-        var b = new Poi
-        {
-            Id = 2, Name = "Cafe", Latitude = 50.0541, Longitude = 19.9355,
-            IsEnriched = true,
-            GoogleMapsUrl = "https://www.google.com/maps/place/Bunkier+Sztuki/@50.0541,19.9355,17z"
-        };
+        // Same name, within tolerance, but different feature ids → distinct places.
+        var a = CreatePoi(1, "Cafe", 52.4066425, 16.9351378,
+            "https://www.google.com/maps/place/Cafe/@52.4066425,16.9351378,17z/data=!3m1!1s0x47045b3f13482675:0x4b73eb10afc87207");
+        var b = CreatePoi(2, "Cafe", 52.4066500, 16.9351400,
+            "https://www.google.com/maps/place/Cafe/@52.4066500,16.9351400,17z/data=!3m1!1s0x47045b3f13482675:0xDEADBEEFDEADBEEF");
 
         _matcher.IsMatch(a, b).Should().BeFalse();
     }
 
     [Fact]
-    public void IsMatch_NonEnrichedPoi_FallsBackToPersonalName()
+    public void IsMatch_SameMid_WhenNoFeatureId_Matches()
     {
-        // A row that is NOT enriched keeps using its own Name even if it has a
-        // Google Maps URL — only enriched rows switch to the Google name.
-        var a = new Poi
-        {
-            Id = 1, Name = "Coffee Shop", Latitude = 50.0540, Longitude = 19.9354,
-            IsEnriched = false,
-            GoogleMapsUrl = "https://www.google.com/maps/place/Totally+Different/@50.0540,19.9354,17z"
-        };
-        var b = CreatePoi(2, "Coffee Shop", 50.0541, 19.9355);
+        // Neither URL has a feature id, but both carry the same KG mid.
+        var a = CreatePoi(1, "X", 52.4, 16.9, "https://www.google.com/maps/place/X/data=!16s%2Fg%2F1226snj_");
+        var b = CreatePoi(2, "Y", 52.6, 17.1, "https://www.google.com/maps/place/Y/data=!16s%2Fg%2F1226snj_");
+
+        _matcher.IsMatch(a, b).Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsMatch_NoComparableId_FallsBackToNameAndProximity()
+    {
+        // A row with no place id (e.g. file import, no Google URL) falls back to
+        // the Name + proximity rule, exactly as before.
+        var a = CreatePoi(1, "Coffee Shop", 52.22970, 21.01220);
+        var b = CreatePoi(2, "Coffee Shop", 52.22975, 21.01225);
 
         _matcher.IsMatch(a, b).Should().BeTrue();
     }
@@ -178,6 +171,24 @@ public class PoiMatcherTests
         groups.Should().HaveCount(1);
         groups[0].Should().HaveCount(2);
         groups[0].Select(p => p.Id).Should().Contain([1, 2]);
+    }
+
+    [Fact]
+    public void FindDuplicateGroups_GroupsSameFeatureId_DespiteDivergentCoords()
+    {
+        // Same feature id but coords ~220m apart — well beyond the proximity
+        // tolerance. The id tier must group them, proving it runs before (and
+        // independently of) the latitude pre-filter.
+        List<Poi> pois =
+        [
+            CreatePoi(1, "Парк Вильсона", 52.399486, 16.9021787, ParkWilsonaRu),
+            CreatePoi(2, "Park Wilsona", 52.401500, 16.9050000, ParkWilsonaPl),
+        ];
+
+        var groups = _matcher.FindDuplicateGroups(pois);
+
+        groups.Should().HaveCount(1);
+        groups[0].Should().HaveCount(2);
     }
 
     [Fact]
