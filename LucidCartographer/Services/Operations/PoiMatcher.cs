@@ -33,7 +33,12 @@ public partial class PoiMatcher : IPoiMatcher
     {
         ArgumentNullException.ThrowIfNull(a);
         ArgumentNullException.ThrowIfNull(b);
-        return PoiIdentity.AreSamePlace(a, b, toleranceMeters, nameSimilarityThreshold);
+        // Compare on the canonical Google Maps name for enriched POIs
+        // (PoiIdentity.ComparisonName) rather than the user-facing Name.
+        return PoiIdentity.AreSamePlace(
+            PoiIdentity.ComparisonName(a), a.Latitude, a.Longitude,
+            PoiIdentity.ComparisonName(b), b.Latitude, b.Longitude,
+            toleranceMeters, nameSimilarityThreshold);
     }
 
     /// <inheritdoc />
@@ -44,12 +49,17 @@ public partial class PoiMatcher : IPoiMatcher
 
         Poi? bestMatch = null;
         var bestDistance = double.MaxValue;
+        var poiName = PoiIdentity.ComparisonName(poi);
 
         // Scan all candidates. Ties break toward the closest candidate
         // so the result is stable when several rows pass the threshold.
         foreach (var c in candidates)
         {
-            if (!PoiIdentity.AreSamePlace(poi, c, toleranceMeters, nameSimilarityThreshold))
+            // Compare on the canonical Google Maps name for enriched POIs.
+            if (!PoiIdentity.AreSamePlace(
+                    poiName, poi.Latitude, poi.Longitude,
+                    PoiIdentity.ComparisonName(c), c.Latitude, c.Longitude,
+                    toleranceMeters, nameSimilarityThreshold))
             {
                 continue;
             }
@@ -79,6 +89,13 @@ public partial class PoiMatcher : IPoiMatcher
         pois = pois.Where(p => p is { Latitude: not null, Longitude: not null }).ToList();
 
         var n = pois.Count;
+        // Resolve each POI's comparison name once (Google Maps name for
+        // enriched rows, own Name otherwise) so the O(N^2) pairwise loop
+        // below doesn't re-parse URLs.
+        var names = new string[n];
+        for (var i = 0; i < n; i++)
+            names[i] = PoiIdentity.ComparisonName(pois[i]);
+
         var parent = new int[n];
         var rank = new int[n];
         for (var i = 0; i < n; i++)
@@ -101,7 +118,10 @@ public partial class PoiMatcher : IPoiMatcher
                     continue;
                 }
 
-                if (PoiIdentity.AreSamePlace(pois[i], pois[j], toleranceMeters, nameSimilarityThreshold))
+                if (PoiIdentity.AreSamePlace(
+                        names[i], pois[i].Latitude, pois[i].Longitude,
+                        names[j], pois[j].Latitude, pois[j].Longitude,
+                        toleranceMeters, nameSimilarityThreshold))
                 {
                     Union(i, j);
                 }

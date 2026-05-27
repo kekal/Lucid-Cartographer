@@ -72,6 +72,66 @@ public class PoiMatcherTests
     }
 
     [Fact]
+    public void IsMatch_EnrichedPois_CompareOnGoogleMapsName_NotPersonalName()
+    {
+        // Both rows are the same real place ("Wawel Royal Castle") per their
+        // canonical Google Maps URLs, but the user gave them different personal
+        // labels. Because both are enriched, the comparison uses the Google
+        // name and the rows match despite the divergent personal names.
+        var a = new Poi
+        {
+            Id = 1, Name = "My favourite castle", Latitude = 50.0540, Longitude = 19.9354,
+            IsEnriched = true,
+            GoogleMapsUrl = "https://www.google.com/maps/place/Wawel+Royal+Castle/@50.0540,19.9354,17z"
+        };
+        var b = new Poi
+        {
+            Id = 2, Name = "Zamek do zwiedzenia", Latitude = 50.0541, Longitude = 19.9355,
+            IsEnriched = true,
+            GoogleMapsUrl = "https://www.google.com/maps/place/Wawel+Royal+Castle/@50.0541,19.9355,17z"
+        };
+
+        _matcher.IsMatch(a, b).Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsMatch_EnrichedPois_DifferentGoogleMapsName_DoNotMatch_DespiteSamePersonalName()
+    {
+        // Same personal name and within tolerance, but their canonical Google
+        // names differ, so the enriched comparison keeps them distinct.
+        var a = new Poi
+        {
+            Id = 1, Name = "Cafe", Latitude = 50.0540, Longitude = 19.9354,
+            IsEnriched = true,
+            GoogleMapsUrl = "https://www.google.com/maps/place/Cafe+Camelot/@50.0540,19.9354,17z"
+        };
+        var b = new Poi
+        {
+            Id = 2, Name = "Cafe", Latitude = 50.0541, Longitude = 19.9355,
+            IsEnriched = true,
+            GoogleMapsUrl = "https://www.google.com/maps/place/Bunkier+Sztuki/@50.0541,19.9355,17z"
+        };
+
+        _matcher.IsMatch(a, b).Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsMatch_NonEnrichedPoi_FallsBackToPersonalName()
+    {
+        // A row that is NOT enriched keeps using its own Name even if it has a
+        // Google Maps URL — only enriched rows switch to the Google name.
+        var a = new Poi
+        {
+            Id = 1, Name = "Coffee Shop", Latitude = 50.0540, Longitude = 19.9354,
+            IsEnriched = false,
+            GoogleMapsUrl = "https://www.google.com/maps/place/Totally+Different/@50.0540,19.9354,17z"
+        };
+        var b = CreatePoi(2, "Coffee Shop", 50.0541, 19.9355);
+
+        _matcher.IsMatch(a, b).Should().BeTrue();
+    }
+
+    [Fact]
     public void FindMatch_ReturnsMatchingPoi()
     {
         var poi = CreatePoi(1, "Coffee Shop", 52.22970, 21.01220);
