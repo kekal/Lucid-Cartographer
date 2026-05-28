@@ -26,7 +26,7 @@ else if (Viewport.IsMobile)
     @* ===================== MOBILE: split map + list ===================== *@
     <div class="m-app">
         <div class="screen">
-            @* Search + collections drawer trigger *@
+            @* Search bar (the collections trigger moved to the map FAB stack) *@
             <div class="app-header" style="padding:calc(8px + var(--safe-top)) 14px 8px">
                 <div class="search" style="flex:1;margin:0">
                     <span class="ms" style="color:var(--text-3)" aria-hidden="true">search</span>
@@ -42,10 +42,6 @@ else if (Viewport.IsMobile)
                         </button>
                     }
                 </div>
-                @* M11: the layers button opens the collections drawer, not the Data Sources page *@
-                <button class="icon-btn" @onclick="() => _drawerOpen = true" aria-label="@UiStrings.Collections">
-                    <span class="ms" aria-hidden="true">layers</span>
-                </button>
             </div>
 
             @* Map (top ~46%) *@
@@ -69,15 +65,61 @@ else if (Viewport.IsMobile)
                 </div>
             </div>
 
-            @* List (bottom) *@
+            @* Bottom panel — POI list by default, swapped to Collections
+               list when the layers button is pressed. The map above stays
+               put; only this lower half changes content. *@
             <div style="flex:1;min-height:0;border-top:1px solid var(--separator);display:flex;flex-direction:column">
-                <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 18px 6px">
+                @if (_drawerOpen)
+                {
+                    <div style="display:flex;align-items:center;gap:6px;padding:6px 8px 6px">
+                        <button class="icon-btn" type="button" style="background:transparent"
+                                @onclick="() => _drawerOpen = false" aria-label="@UiStrings.Back">
+                            <span class="ms" aria-hidden="true">arrow_back_ios_new</span>
+                        </button>
+                        <span style="font-family:var(--font-headline);font-weight:800;font-size:15px">@UiStrings.Collections</span>
+                        <span style="margin-left:auto;padding-right:10px;font-size:12px;color:var(--text-3)">
+                            @Vm.CollectionStates.Count(c => c.IsVisible)/@Vm.CollectionStates.Count visible
+                        </span>
+                    </div>
+                    <div class="scroll" style="flex:1">
+                        <div class="list">
+                            @foreach (var s in Vm.CollectionStates)
+                            {
+                                <div class="row" @key="s.Id" style="cursor:default">
+                                    <div class="avatar" style="@($"background:{s.Color};border-radius:50%")">
+                                        <span class="ms" style="font-size:18px" aria-hidden="true">folder</span>
+                                    </div>
+                                    <div class="meta">
+                                        <div class="name">@s.Name</div>
+                                        <div class="sub">@s.PoiCount @(s.PoiCount == 1 ? "place" : "places")</div>
+                                    </div>
+                                    <div class="trailing">
+                                        <button class="icon-btn" type="button" style="background:transparent"
+                                                @onclick="() => Vm.HandleVisibilityToggledAsync(s.Id)"
+                                                @onkeydown:stopPropagation="true"
+                                                aria-pressed="@(s.IsVisible ? "true" : "false")"
+                                                aria-label="@($"{(s.IsVisible ? "Hide" : "Show")} {s.Name}")">
+                                            <span class="ms @(s.IsVisible ? "filled" : "")" aria-hidden="true">@(s.IsVisible ? "visibility" : "visibility_off")</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+                else
+                {
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px 6px 18px">
                     <span style="font-family:var(--font-headline);font-weight:800;font-size:15px">
                         @{
                             var list = MobilePois().ToList();
                         }
                         @list.Count @(list.Count == 1 ? "place" : "places")
                     </span>
+                    <button class="icon-btn" type="button" style="background:transparent"
+                            @onclick="() => _drawerOpen = true" aria-label="@UiStrings.Collections">
+                        <span class="ms" aria-hidden="true">layers</span>
+                    </button>
                 </div>
                 <div class="scroll" style="flex:1">
                     <div class="list">
@@ -129,50 +171,11 @@ else if (Viewport.IsMobile)
                         }
                     </div>
                 </div>
+                }
             </div>
         </div>
 
         <MobileTabBar />
-
-        @* Collections drawer *@
-        @if (_drawerOpen)
-        {
-            <MobileModalScreen Title="@UiStrings.Collections" OnClose="() => _drawerOpen = false">
-                <div class="list">
-                    @foreach (var s in Vm.CollectionStates)
-                    {
-                        @* H07: outer row contains a nested visibility-toggle <button>, so keep the
-                           outer as a div with role=button + keyboard handler rather than nesting
-                           interactive elements. The row itself currently has no @onclick handler,
-                           so we only need accessibility attributes for the trailing icon-btn.
-                           L03 (Wave 7): override .row { cursor: pointer; } — the drawer row isn't
-                           itself clickable (only the trailing button is) so the pointer cursor was
-                           misleading. *@
-                        <div class="row" @key="s.Id" style="cursor:default">
-                            <div class="avatar" style="@($"background:{s.Color};border-radius:50%")">
-                                <span class="ms" style="font-size:18px" aria-hidden="true">folder</span>
-                            </div>
-                            <div class="meta">
-                                <div class="name">@s.Name</div>
-                                <div class="sub">@s.PoiCount places</div>
-                            </div>
-                            <div class="trailing">
-                                @* H02 (Wave 7): defensive — the drawer row has no @onkeydown today,
-                                   but the row IS structurally a div role-button candidate. If anyone
-                                   later wires a keydown handler on the row, this stops a double-fire. *@
-                                <button class="icon-btn" type="button" style="background:transparent"
-                                        @onclick="() => Vm.HandleVisibilityToggledAsync(s.Id)"
-                                        @onkeydown:stopPropagation="true"
-                                        aria-pressed="@(s.IsVisible ? "true" : "false")"
-                                        aria-label="@($"{(s.IsVisible ? "Hide" : "Show")} {s.Name}")">
-                                    <span class="ms @(s.IsVisible ? "filled" : "")" aria-hidden="true">@(s.IsVisible ? "visibility" : "visibility_off")</span>
-                                </button>
-                            </div>
-                        </div>
-                    }
-                </div>
-            </MobileModalScreen>
-        }
 
         @* POI detail *@
         @if (Vm.SelectedPoi is { } selected)

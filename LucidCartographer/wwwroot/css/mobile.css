@@ -423,7 +423,11 @@ html[data-theme="dark"] .m-tabbar a.active { color: #6aa1e8; }
     position: absolute;
     inset: 0;
     background: var(--bg);
-    z-index: 60;
+    /* Must clear Leaflet's overlay panes (max 700). LeafletMap on the
+       Map page doesn't establish its own stacking context, so its high-z
+       children would otherwise paint over any modal with a lower z-index
+       — POI detail, import modals, operations commit, etc. */
+    z-index: 1000;
     display: flex;
     flex-direction: column;
     transition: transform 280ms cubic-bezier(0.32, 0.72, 0, 1);
@@ -455,6 +459,23 @@ html[data-theme="dark"] .m-tabbar a.active { color: #6aa1e8; }
     padding: 18px;
     background: linear-gradient(135deg, var(--hero) 0%, color-mix(in srgb, var(--hero) 70%, transparent) 100%);
 }
+/* With a POI photo: the photo fills the whole hero (cover) and a dark
+   bottom-up scrim sits above so the collection label stays readable. */
+.m-app .m-hero.has-image {
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    /* fallback color while the image loads */
+    background-color: var(--hero);
+}
+.m-app .m-hero.has-image::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.6) 0%, rgba(0, 0, 0, 0) 50%);
+    pointer-events: none;
+}
+.m-app .m-hero.has-image .m-hero-foot { z-index: 1; }
 .m-app .m-hero-stripes {
     position: absolute;
     inset: 0;

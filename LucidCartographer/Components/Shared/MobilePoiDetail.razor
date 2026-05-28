@@ -8,13 +8,22 @@
 @if (Poi is not null)
 {
     var color = string.IsNullOrWhiteSpace(CollectionColor) ? "#005bbf" : CollectionColor;
+    var hasImage = !string.IsNullOrEmpty(Poi.ImageUrl);
+    var heroStyle = hasImage
+        ? $"--hero:{color};background-image:url('/api/poi-image/{Poi.Id}')"
+        : $"--hero:{color}";
     <div class="modal-screen m-slide-in" @ref="_root" tabindex="-1"
          role="dialog" aria-modal="true" aria-labelledby="poi-detail-name"
          @onkeydown="OnRootKeyDownAsync">
         <div class="modal-body" style="padding:0">
-            @* Hero *@
-            <div class="m-hero" style="@($"--hero:{color}")">
-                <div class="m-hero-stripes" aria-hidden="true"></div>
+            @* Hero. With an image: photo fills the whole banner and a dark
+               bottom-up scrim keeps the collection label readable. Without:
+               colored gradient + stripes + location_on icon. *@
+            <div class="m-hero @(hasImage ? "has-image" : "")" style="@heroStyle">
+                @if (!hasImage)
+                {
+                    <div class="m-hero-stripes" aria-hidden="true"></div>
+                }
                 <div class="m-hero-actions">
                     <button class="m-hero-btn" @ref="_backBtn" @onclick="OnClose" aria-label="@UiStrings.Back">
                         <span class="ms" aria-hidden="true">arrow_back_ios_new</span>
@@ -24,11 +33,7 @@
                     </button>
                 </div>
                 <div class="m-hero-foot">
-                    @if (!string.IsNullOrEmpty(Poi.ImageUrl))
-                    {
-                        <img class="m-hero-img" src="/api/poi-image/@Poi.Id" alt="@Poi.Name" loading="lazy" />
-                    }
-                    else
+                    @if (!hasImage)
                     {
                         <div class="m-hero-icon"><span class="ms filled" aria-hidden="true">location_on</span></div>
                     }
