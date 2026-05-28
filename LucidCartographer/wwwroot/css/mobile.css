@@ -83,7 +83,7 @@ html[data-theme="dark"] .m-app {
     --primary-soft: rgba(99, 154, 230, 0.16);
     --primary-tint: rgba(99, 154, 230, 0.24);
     /* M15: dark-mode soft-tone overrides. Light values produce ~2.7:1 against
-       the dark text colors used in pill.visited / pill.warn / tertiary buttons. */
+       the dark text colors used in pill.warn / tertiary buttons. */
     --secondary-soft: rgba(110, 220, 150, 0.18);
     --secondary: #6edc96;
     --tertiary-soft: rgba(255, 120, 110, 0.18);
@@ -556,7 +556,7 @@ html[data-theme="dark"] .m-tabbar a.active { color: #6aa1e8; }
     box-shadow: var(--shadow-1);
 }
 
-/* Status pills */
+/* Pills (Category, Enriching…) */
 .m-app .pill {
     display: inline-flex;
     align-items: center;
@@ -568,8 +568,6 @@ html[data-theme="dark"] .m-tabbar a.active { color: #6aa1e8; }
     background: var(--bg-elev-2);
     color: var(--text-2);
 }
-.m-app .pill.visited { background: var(--secondary-soft); color: var(--secondary); }
-.m-app .pill.want { background: var(--primary-soft); color: var(--primary); }
 /* M15: route warn pill through tokens so dark mode can override it. */
 .m-app .pill.warn { background: var(--warn-soft); color: var(--warn); }
 

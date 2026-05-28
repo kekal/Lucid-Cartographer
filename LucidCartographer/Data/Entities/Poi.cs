@@ -19,8 +19,6 @@ public class Poi
 
     public string? Category { get; set; }
 
-    public string? Status { get; set; } // Use PoiStatus constants
-
     public string? Notes { get; set; }
 
     [Range(1, 5)]
@@ -49,7 +47,6 @@ public class Poi
     public string? Region { get; set; }
 
     public DateTime AddedDate { get; set; }
-    public DateTime? VisitedDate { get; set; }
 
     /// <summary>
     /// False means the background enrichment service should fetch

@@ -65,30 +65,7 @@ else if (Viewport.IsMobile)
 
             @* List (bottom) *@
             <div style="flex:1;min-height:0;border-top:1px solid var(--separator);display:flex;flex-direction:column">
-                @* H04 (Wave 7): drop role="radiogroup" + role="radio" + aria-checked.
-                   WAI-ARIA APG requires radiogroup to implement Arrow-key roving
-                   tabindex; we don't. Use the toggle-button pattern instead — chips
-                   are <button>s, aria-pressed conveys selected state, and Tab moves
-                   linearly between them (which IS what currently happens). *@
-                <div class="chip-row" style="padding-top:10px" aria-label="POI status filter">
-                    <button class="chip @(_mobileFilter == "all" ? "active" : "")" type="button"
-                            aria-pressed="@(_mobileFilter == "all" ? "true" : "false")"
-                            style="@(_mobileFilter == "all" ? "background:var(--primary)" : "")"
-                            @onclick='() => _mobileFilter = "all"'>All</button>
-                    <button class="chip @(_mobileFilter == "visited" ? "active" : "")" type="button"
-                            aria-pressed="@(_mobileFilter == "visited" ? "true" : "false")"
-                            style="@(_mobileFilter == "visited" ? "background:var(--secondary)" : "")"
-                            @onclick='() => _mobileFilter = "visited"'>
-                        <span class="ms filled" aria-hidden="true">check_circle</span>Visited
-                    </button>
-                    <button class="chip @(_mobileFilter == "want" ? "active" : "")" type="button"
-                            aria-pressed="@(_mobileFilter == "want" ? "true" : "false")"
-                            style="@(_mobileFilter == "want" ? "background:var(--primary)" : "")"
-                            @onclick='() => _mobileFilter = "want"'>
-                        <span class="ms" aria-hidden="true">bookmark</span>Want to go
-                    </button>
-                </div>
-                <div style="display:flex;align-items:center;justify-content:space-between;padding:2px 18px 6px">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 18px 6px">
                     <span style="font-family:var(--font-headline);font-weight:800;font-size:15px">
                         @{
                             var list = MobilePois().ToList();
@@ -336,7 +313,6 @@ else
 
     // Mobile-only client-side list filters + collections drawer
     private string _mobileQuery = "";
-    private string _mobileFilter = "all";
     private bool _drawerOpen;
 
     protected override async Task OnInitializedAsync()
@@ -414,14 +390,6 @@ else
     private IEnumerable<Poi> MobilePois()
     {
         IEnumerable<Poi> q = Vm.FilteredPois;
-        if (_mobileFilter == "visited")
-        {
-            q = q.Where(p => p.Status == PoiStatus.Visited);
-        }
-        else if (_mobileFilter == "want")
-        {
-            q = q.Where(p => p.Status == PoiStatus.WantToGo);
-        }
         if (!string.IsNullOrWhiteSpace(_mobileQuery))
         {
             var needle = _mobileQuery.Trim();

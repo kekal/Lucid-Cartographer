@@ -80,24 +80,10 @@
             </p>
         }
 
-        @* Status, Category & Collection chips. "imported" is an
-           internal flag rather than a real status, so we suppress it
-           and surface the actual collection memberships instead — the
-           user wanted to know which collection a POI belongs to,
-           not that it came from a file import. *@
+        @* Collection chips (blue) + a single gray Category chip from the
+           Google classification (e.g. "hotel"). The legacy Status concept
+           was removed — POIs no longer carry a state. *@
         <div class="flex flex-wrap gap-2 mb-4">
-            @if (!string.IsNullOrEmpty(Poi.Status) && Poi.Status != "imported")
-            {
-                <span class="text-xs px-2.5 py-1 rounded-full font-medium
-                    @(Poi.Status switch
-                    {
-                        "visited" => "bg-secondary/10 text-secondary",
-                        "want_to_go" => "bg-primary/10 text-primary",
-                        _ => "bg-surface-container-high text-on-surface-variant"
-                    })">
-                    @Poi.Status.Replace("_", " ")
-                </span>
-            }
             @if (!string.IsNullOrEmpty(Poi.Category))
             {
                 <span class="text-xs px-2.5 py-1 rounded-full bg-surface-container-high text-on-surface-variant">
@@ -208,10 +194,6 @@
         @* Dates *@
         <div class="text-xs text-on-surface-variant space-y-1">
             <div>Added: @Poi.AddedDate.ToString("MMMM dd, yyyy")</div>
-            @if (Poi.VisitedDate.HasValue)
-            {
-                <div>Visited: @Poi.VisitedDate.Value.ToString("MMMM dd, yyyy")</div>
-            }
         </div>
     </div>
 

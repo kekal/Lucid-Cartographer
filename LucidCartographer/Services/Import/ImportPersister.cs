@@ -29,7 +29,6 @@ internal sealed class ImportPersister(
     string? sourceFileName,
     CancellationToken ct)
 {
-    private const string ImportedStatus = "imported";
     private const string GoogleScrapeSourceType = "google_maps_scrape";
 
     // State built up during RunAsync.
@@ -390,7 +389,6 @@ internal sealed class ImportPersister(
             // EF Core's relationship fixup on a one-to-one with a
             // store-generated principal key fails if we set it here
             // ("PoiImage.PoiId unknown" on save).
-            Status = ImportedStatus,
             AddedDate = DateTime.UtcNow,
             // Every imported row goes through enrichment. The BG service
             // fills only empty fields (preserves whatever the file gave us)

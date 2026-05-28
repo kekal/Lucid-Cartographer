@@ -1,5 +1,3 @@
-using LucidCartographer.Data.Entities;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Playwright;
 
 namespace LucidCartographer.Tests.Integration;
@@ -57,39 +55,6 @@ public class MobileMapTests : MobileTestBase
         // M09: verify the surviving row IS Wawel Castle, not just "one row".
         var remainingText = await Page.Locator(".m-app .list .row .name").InnerTextAsync();
         Assert.Contains("Wawel Castle", remainingText);
-    }
-
-    [Fact]
-    public async Task Mobile_StatusChip_FiltersList()
-    {
-        await ImportTestFileAsync("sample.gpx", "GPX Places", "#005bbf");
-        // H08: GPX rows have no Visited status, so any filter that wiped every
-        // row would have passed the old < check. Seed exactly ONE Visited POI
-        // so we can assert filteredCount == 1.
-        await SeedDataAsync(async db =>
-        {
-            var firstPoi = await db.Pois.OrderBy(p => p.Id).FirstAsync();
-            firstPoi.Status = PoiStatus.Visited;
-            await db.SaveChangesAsync();
-        });
-        await MobileNavigateAndWaitForAppAsync("/");
-
-        // Wait for POIs to load
-        await Page.WaitForSelectorAsync(".m-app .list .row", new() { Timeout = 15000 });
-        var allCount = await Page.Locator(".m-app .list .row").CountAsync();
-        Assert.True(allCount > 1, "Should have multiple POI rows before filtering");
-
-        // Click the "Visited" chip
-        var visitedChip = Page.Locator(".m-app .chip-row .chip").Filter(new LocatorFilterOptions { HasText = "Visited" });
-        await visitedChip.ClickAsync();
-        // M07: state-based wait on row count rather than fixed timeout.
-        await Page.WaitForFunctionAsync(
-            "() => document.querySelectorAll('.m-app .list .row').length === 1",
-            null, new PageWaitForFunctionOptions { Timeout = 5000 });
-
-        // H08: exactly the seeded Visited row should remain.
-        var filteredCount = await Page.Locator(".m-app .list .row").CountAsync();
-        Assert.Equal(1, filteredCount);
     }
 
     [Fact]

@@ -10,7 +10,7 @@ namespace LucidCartographer.Services.Mcp;
 /// <summary>
 /// MCP write tools — create collections/POIs and move/copy/delete POIs between
 /// collections. All calls delegate to the existing <see cref="IPoiService"/>;
-/// validation (name, coordinate ranges, category/status enums) is enforced by
+/// validation (name, coordinate ranges, category enum) is enforced by
 /// the service. No business logic is duplicated here.
 /// </summary>
 [McpServerToolType]
@@ -38,7 +38,7 @@ public static class PoiWriteTools
         "Create a new POI in a collection. The POI is always created unenriched and is automatically " +
         "queued for background enrichment (scrapes address/photo/website/phone from its Google Maps URL " +
         "or name). Category must be one of: restaurant, cafe, bar, hotel, attraction, shopping, nature, " +
-        "other (or omitted). Status must be one of: visited, want_to_go, imported (or omitted).")]
+        "other (or omitted).")]
     public static async Task<PoiSummaryDto> CreatePoi(
         IPoiService poiService,
         EnrichmentTrigger enrichmentTrigger,
@@ -49,7 +49,6 @@ public static class PoiWriteTools
         [Description("Google Maps URL (used as the enrichment source when enrich=true).")] string? googleMapsUrl = null,
         [Description("Street address.")] string? address = null,
         [Description("Category (see allowed values).")] string? category = null,
-        [Description("Status (see allowed values).")] string? status = null,
         [Description("Free-text notes.")] string? notes = null,
         [Description("Website URL.")] string? website = null,
         [Description("Phone number.")] string? phone = null,
@@ -64,7 +63,6 @@ public static class PoiWriteTools
             GoogleMapsUrl = googleMapsUrl,
             Address = address,
             Category = category,
-            Status = status,
             Notes = notes,
             Website = website,
             Phone = phone,

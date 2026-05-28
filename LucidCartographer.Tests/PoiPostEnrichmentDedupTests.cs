@@ -21,8 +21,7 @@ public class PoiPostEnrichmentDedupTests
             Longitude = lon,
             GoogleMapsUrl = url,
             IsEnriched = true,
-            AddedDate = DateTime.UtcNow,
-            Status = "imported"
+            AddedDate = DateTime.UtcNow
         };
 
     [Fact]
@@ -220,7 +219,6 @@ public class PoiPostEnrichmentDedupTests
                 Latitude = 0,
                 Longitude = 0,
                 IsEnriched = false,
-                Status = "imported",
                 AddedDate = DateTime.UtcNow
             };
             seed.Pois.AddRange(a, pending);
@@ -255,7 +253,6 @@ public class PoiPostEnrichmentDedupTests
                 Latitude = 52.091133,
                 Longitude = 21.161223,
                 IsEnriched = false,
-                Status = "imported",
                 AddedDate = DateTime.UtcNow,
                 Address = null,
                 Phone = null

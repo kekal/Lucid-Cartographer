@@ -53,24 +53,21 @@ public static class PoiResources
         - `id` (int), `name` (string, required)
         - `latitude` / `longitude` (nullable; lat in [-90, 90], lon in [-180, 180])
         - `googleMapsUrl` (nullable) — canonical link is a `/maps/place/...` URL
-        - `address`, `category`, `status`, `notes`, `website`, `phone` (nullable strings)
+        - `address`, `category`, `notes`, `website`, `phone` (nullable strings)
         - `rating` (1–5, personal), `googleRating` (1.0–5.0), `reviewCount` (>= 0)
         - `country`, `region` (nullable strings)
         - `imageUrl` (external), `hasStoredImage` (bool), `imageEndpoint` (path for get_poi_image)
-        - `addedDate`, `visitedDate`
+        - `addedDate`
         - `isEnriched`, `enrichmentNeedsManualUrl`, `enrichmentFailureCount`
         - `collections` (names this POI belongs to)
 
         ## Allowed `category` values
         restaurant, cafe, bar, hotel, attraction, shopping, nature, other (or omitted)
 
-        ## Allowed `status` values
-        visited, want_to_go, imported (or omitted)
-
         ## Validation enforced on create/update
         - name: required, <= 500 chars
         - latitude in [-90, 90], longitude in [-180, 180]
         - rating in [1, 5], googleRating in [1.0, 5.0], reviewCount >= 0
-        - category/status must be one of the allowed values above
+        - category must be one of the allowed values above
         """;
 }

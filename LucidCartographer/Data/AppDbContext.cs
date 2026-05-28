@@ -23,7 +23,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.Property(e => e.GoogleMapsUrl).HasMaxLength(2048);
             entity.Property(e => e.Address).HasMaxLength(1000);
             entity.Property(e => e.Category).HasMaxLength(100);
-            entity.Property(e => e.Status).HasMaxLength(50);
             entity.Property(e => e.Notes).HasMaxLength(10000);
             entity.Property(e => e.Website).HasMaxLength(2048);
             entity.Property(e => e.Phone).HasMaxLength(50);
@@ -35,7 +34,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
             entity.HasIndex(e => e.GoogleMapsUrl);
             entity.HasIndex(e => new { e.Latitude, e.Longitude });
-            entity.HasIndex(e => e.Status);
             entity.HasIndex(e => e.Name);
             // Used by PoiEnrichmentBackgroundService to page through
             // the queue of un-enriched Pois cheaply.

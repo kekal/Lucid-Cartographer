@@ -78,16 +78,9 @@
                     }
                 </div>
 
-                @* Status pills *@
+                @* Pills: gray Category from Google classification + enrichment hint.
+                   Collection chips (blue) are rendered separately further below. *@
                 <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
-                    @if (Poi.Status == PoiStatus.Visited)
-                    {
-                        <span class="pill visited"><span class="ms" style="font-size:12px" aria-hidden="true">check_circle</span>Visited</span>
-                    }
-                    @if (Poi.Status == PoiStatus.WantToGo)
-                    {
-                        <span class="pill want"><span class="ms" style="font-size:12px" aria-hidden="true">bookmark</span>Want to go</span>
-                    }
                     @if (!string.IsNullOrEmpty(Poi.Category))
                     {
                         <span class="pill">@Poi.Category</span>

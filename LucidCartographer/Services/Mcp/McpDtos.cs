@@ -30,12 +30,11 @@ public record PoiSummaryDto(
     double? Latitude,
     double? Longitude,
     string? Category,
-    string? Status,
     string? Address,
     bool IsEnriched)
 {
     public static PoiSummaryDto From(Poi p) => new(
-        p.Id, p.Name, p.Latitude, p.Longitude, p.Category, p.Status, p.Address, p.IsEnriched);
+        p.Id, p.Name, p.Latitude, p.Longitude, p.Category, p.Address, p.IsEnriched);
 }
 
 /// <summary>
@@ -51,7 +50,6 @@ public record PoiDetailDto(
     string? GoogleMapsUrl,
     string? Address,
     string? Category,
-    string? Status,
     string? Notes,
     int? Rating,
     double? GoogleRating,
@@ -64,7 +62,6 @@ public record PoiDetailDto(
     bool HasStoredImage,
     string? ImageEndpoint,
     DateTime AddedDate,
-    DateTime? VisitedDate,
     bool IsEnriched,
     bool EnrichmentNeedsManualUrl,
     int EnrichmentFailureCount,
@@ -78,7 +75,6 @@ public record PoiDetailDto(
         p.GoogleMapsUrl,
         p.Address,
         p.Category,
-        p.Status,
         p.Notes,
         p.Rating,
         p.GoogleRating,
@@ -91,7 +87,6 @@ public record PoiDetailDto(
         hasStoredImage,
         hasStoredImage ? $"/api/poi-image/{p.Id}" : null,
         p.AddedDate,
-        p.VisitedDate,
         p.IsEnriched,
         p.EnrichmentNeedsManualUrl,
         p.EnrichmentFailureCount,

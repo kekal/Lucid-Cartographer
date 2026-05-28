@@ -464,7 +464,6 @@ public sealed class DataSourcesPageViewModel(
                 Latitude = coords?.lat,
                 Longitude = coords?.lon,
                 GoogleMapsUrl = url,
-                Status = PoiStatus.WantToGo,
                 IsEnriched = false  // enrichment service will fill details
             };
 

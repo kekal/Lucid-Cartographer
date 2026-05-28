@@ -25,7 +25,7 @@ public static class McpServerExtensions
            get_enrichment_status (remaining reaches 0 when the queue drains).
 
         Allowed category values: restaurant, cafe, bar, hotel, attraction, shopping,
-        nature, other. Allowed status values: visited, want_to_go, imported.
+        nature, other.
         Coordinate ranges: latitude [-90, 90], longitude [-180, 180].
 
         Reference resources: lucid://guide/usage and lucid://reference/poi-schema.

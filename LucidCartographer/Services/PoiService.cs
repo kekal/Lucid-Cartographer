@@ -97,7 +97,7 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
     /// <summary>
     /// Updates a POI by loading the existing entity and applying all incoming values.
     /// EF change tracking generates minimal SQL for only the properties that actually changed.
-    /// [REVIEW-3] Validates Status and Category against known constants.
+    /// [REVIEW-3] Validates Category against known constants.
     /// [REVIEW-4] Validates coordinates, name, and numeric ranges before persistence.
     /// [REVIEW-6] Version is NOT copied from the incoming entity; the existing entity's
     /// Version is preserved so that <see cref="AppDbContext.SetTimestamps"/> can increment
@@ -123,7 +123,6 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
         existing.GoogleMapsUrl = poi.GoogleMapsUrl;
         existing.Address = poi.Address;
         existing.Category = poi.Category;
-        existing.Status = poi.Status;
         existing.Notes = poi.Notes;
         existing.Rating = poi.Rating;
         existing.GoogleRating = poi.GoogleRating;
@@ -133,7 +132,6 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
         existing.ImageUrl = poi.ImageUrl;
         existing.Country = poi.Country;
         existing.Region = poi.Region;
-        existing.VisitedDate = poi.VisitedDate;
 
         await db.SaveChangesAsync(cancellationToken);
     }
@@ -562,7 +560,7 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
 
     /// <summary>
     /// Validates a POI entity before persistence.
-    /// [REVIEW-3] Validates Status against PoiStatus.IsValid and Category against PoiCategory.All.
+    /// [REVIEW-3] Validates Category against PoiCategory.All.
     /// [REVIEW-4] Validates coordinates, name, and numeric ranges.
     /// </summary>
     private static void ValidatePoi(Poi poi)
@@ -600,11 +598,6 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
         if (poi.GoogleRating is < 1.0 or > 5.0)
         {
             throw new ArgumentOutOfRangeException(nameof(poi), "GoogleRating must be between 1.0 and 5.0.");
-        }
-
-        if (!PoiStatus.IsValid(poi.Status))
-        {
-            throw new ArgumentException($"Invalid POI status: '{poi.Status}'. Valid values: {string.Join(", ", PoiStatus.All)}.", nameof(poi));
         }
 
         if (poi.Category != null && !PoiCategory.IsValid(poi.Category))
@@ -656,11 +649,6 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
         if (poi.Category?.Length > 100)
         {
             throw new ArgumentException("Category cannot exceed 100 characters.", nameof(poi));
-        }
-
-        if (poi.Status?.Length > 50)
-        {
-            throw new ArgumentException("Status cannot exceed 50 characters.", nameof(poi));
         }
     }
 }

@@ -22,7 +22,6 @@ public class PoiDetailPaneTests : BunitTestContext
         Website = "https://www.testcafe.com/menu",
         Phone = "+44 20 1234 5678",
         Category = "cafe",
-        Status = "visited",
         ImageUrl = "https://example.com/image.jpg",
         GoogleMapsUrl = "https://maps.google.com/?q=testcafe",
         AddedDate = new DateTime(2025, 1, 10)
@@ -94,7 +93,7 @@ public class PoiDetailPaneTests : BunitTestContext
     }
 
     [Fact]
-    public void Renders_Category_AndStatus_Chips()
+    public void Renders_Category_Chip()
     {
         var poi = CreateFullPoi();
 
@@ -102,8 +101,6 @@ public class PoiDetailPaneTests : BunitTestContext
             .Add(p => p.Poi, poi));
 
         cut.Markup.Should().Contain("cafe");
-        // Status "visited" is rendered with underscore replaced by space
-        cut.Markup.Should().Contain("visited");
     }
 
     [Fact]

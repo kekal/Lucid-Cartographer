@@ -56,7 +56,6 @@ public class ImportOrchestratorTests
         var wawel = pois.First(p => p.Name == "Wawel Castle");
         wawel.Latitude.Should().Be(50.0647);
         wawel.Longitude.Should().Be(19.9450);
-        wawel.Status.Should().Be("imported");
         wawel.Notes.Should().Be("Historic royal castle in Kraków");
     }
 
@@ -101,8 +100,7 @@ public class ImportOrchestratorTests
             {
                 Name = "Wrocław Market Square",
                 Latitude = 51.1079,
-                Longitude = 17.0385,
-                Status = "imported"
+                Longitude = 17.0385
             });
             await db.SaveChangesAsync();
         }
@@ -243,7 +241,6 @@ public class ImportOrchestratorTests
                 Latitude = 50.0,
                 Longitude = 20.0,
                 IsEnriched = true,
-                Status = "imported",
                 AddedDate = DateTime.UtcNow,
                 ImageUrl = "https://example.com/old-image.jpg"
             };
@@ -292,7 +289,6 @@ public class ImportOrchestratorTests
                 Longitude = 17.7016002,
                 GoogleMapsUrl = "https://www.google.com/maps/search/?api=1&query=50.9856105,17.7016002",
                 IsEnriched = true,
-                Status = "imported",
                 AddedDate = DateTime.UtcNow
             });
             await seed.SaveChangesAsync();
@@ -342,7 +338,6 @@ public class ImportOrchestratorTests
                 Latitude = 50.0647,
                 Longitude = 19.9450,
                 IsEnriched = true,
-                Status = "imported",
                 AddedDate = DateTime.UtcNow
             });
             await seed.SaveChangesAsync();

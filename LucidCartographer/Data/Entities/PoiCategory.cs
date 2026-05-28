@@ -2,7 +2,6 @@ namespace LucidCartographer.Data.Entities;
 
 /// <summary>
 /// String constants for POI category values.
-/// [REVIEW-16] Added IsValid method for parity with PoiStatus.
 /// </summary>
 public static class PoiCategory
 {

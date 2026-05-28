@@ -99,7 +99,6 @@ public class KmlExporter : IFileExporter
 
         AddLabelled(nodes, "Address", poi.Address);
         AddLabelled(nodes, "Category", poi.Category);
-        AddLabelled(nodes, "Status", poi.Status);
         AddLabelled(nodes, "Country", poi.Country);
         AddLabelled(nodes, "Region", poi.Region);
 
@@ -130,12 +129,6 @@ public class KmlExporter : IFileExporter
         }
 
         AddLabelled(nodes, "Notes", poi.Notes);
-
-        if (poi.VisitedDate.HasValue)
-        {
-            AddLabelled(nodes, "Visited",
-                poi.VisitedDate.Value.ToString("MMM dd, yyyy", CultureInfo.InvariantCulture));
-        }
 
         if (!string.IsNullOrEmpty(poi.GoogleMapsUrl))
         {
