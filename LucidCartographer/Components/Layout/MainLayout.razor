@@ -7,7 +7,7 @@
    queries: the top header hides under 768px and the bottom tab bar appears.
    The structurally-different *page content* is branched at render time inside
    the interactive pages via ViewportService. *@
-<div class="h-screen flex flex-col overflow-hidden" style="height:100dvh">
+<div class="h-full flex flex-col overflow-hidden">
     @* Top Header — hidden on phone widths *@
     <header class="m-desktop-header bg-white/80 backdrop-blur-md shadow-sm flex justify-between items-center px-6 h-16 flex-shrink-0 z-50">
         <div class="flex items-center gap-8">
