@@ -175,7 +175,7 @@
 @if (_modalPoiId != null || _batchMode)
 {
     <div class="fixed inset-0 bg-black/40 flex items-center justify-center" style="z-index: 10000;" @onclick="CloseModal">
-        <div class="bg-white rounded-xl shadow-2xl w-80 max-h-[60vh] flex flex-col" @onclick:stopPropagation="true">
+        <div class="bg-white rounded-xl shadow-2xl w-80 max-h-[60%] flex flex-col" @onclick:stopPropagation="true">
             <div class="px-4 py-3 border-b border-surface-container-high flex items-center justify-between">
                 <span class="font-headline font-bold text-sm">
                     @{ var verb = _isCopy ? "Copy" : "Move"; }
