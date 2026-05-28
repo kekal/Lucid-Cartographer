@@ -51,7 +51,13 @@ else if (Viewport.IsMobile)
             @* Map (top ~46%) *@
             <div style="flex:0 0 46%;position:relative">
                 <LeafletMap @ref="_leafletMap" OnMarkerSelected="Vm.HandleMarkerSelectedAsync" OnBoundsChanged="Vm.HandleBoundsChanged" />
-                <div style="position:absolute;top:10px;right:10px;display:flex;flex-direction:column;gap:8px;z-index:20">
+                @* Bottom-right of the map. Top-right is occupied by Leaflet's
+                   built-in zoom controls — putting our FABs there hides them
+                   behind +/−. Bottom-right is empty and thumb-friendly.
+                   z-index must clear Leaflet's overlay panes (max 700) — they
+                   are siblings of our FAB stack, so a low value lets the map
+                   tiles paint over us even though we're DOM-on-top. *@
+                <div style="position:absolute;bottom:10px;right:10px;display:flex;flex-direction:column;gap:8px;z-index:1000">
                     <button class="fab ghost mini" @onclick="Vm.FitMapBoundsAsync" aria-label="@UiStrings.FitMapToVisible">
                         <span class="ms" aria-hidden="true">fit_screen</span>
                     </button>

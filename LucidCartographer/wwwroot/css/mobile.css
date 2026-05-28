@@ -310,7 +310,18 @@ html[data-theme="dark"] .m-tabbar a.active { color: #6aa1e8; }
     z-index: 30;
 }
 .m-app .fab .ms { font-size: 26px; }
-.m-app .fab.mini { width: 40px; height: 40px; border-radius: 12px; }
+/* Mini FABs are stacked inside a positioned container (see the Map page
+   top-right control column). They must not inherit the base .fab anchors
+   — otherwise every mini sticks to the parent's bottom-right and they
+   collapse on top of each other. Reset to flow positioning so the parent
+   flex column can lay them out. */
+.m-app .fab.mini {
+    position: static;
+    inset: auto;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+}
 .m-app .fab.mini .ms { font-size: 20px; }
 .m-app .fab.ghost { background: var(--bg); color: var(--text); box-shadow: var(--shadow-2); }
 
