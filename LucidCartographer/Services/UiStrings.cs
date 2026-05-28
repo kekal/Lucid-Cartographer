@@ -14,6 +14,7 @@ public static class UiStrings
     public const string UnexpectedError = "An unexpected error occurred. Please try again.";
     public const string TryAgain = "Try Again";
     public const string Close = "Close";
+    public const string Back = "Back";
     public const string Cancel = "Cancel";
     public const string Save = "Save";
     public const string Yes = "Yes";
@@ -27,6 +28,8 @@ public static class UiStrings
     public const string NavMap = "Map";
     public const string NavDataSources = "Data Sources";
     public const string NavOperations = "Operations";
+    public const string NavMore = "More";
+    public const string NavSources = "Sources";
 
     // Map Page
     public const string MapPageTitle = "Map - Lucid Cartographer";
@@ -37,6 +40,7 @@ public static class UiStrings
     public const string FilteredResults = "Filtered Results";
     public const string NoPoiToDisplay = "No POIs to display. Toggle collection visibility or import data.";
     public const string LocationDetails = "Location Details";
+    public const string Collection = "Collection";
     public const string CloseDetailPane = "Close detail pane";
     public const string OpenInGoogleMaps = "Open in Google Maps";
     public const string EnrichDetails = "Enrich Details";

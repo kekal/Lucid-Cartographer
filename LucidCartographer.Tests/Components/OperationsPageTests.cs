@@ -55,6 +55,8 @@ public class OperationsPageTests : BunitTestContext
         // The VM injects IEnumerable<IFileExporter>; satisfy with the test's KmlExporter.
         Services.AddSingleton<IFileExporter>(sp => sp.GetRequiredService<KmlExporter>());
         Services.AddSingleton(new Mock<IJSRuntime>().Object);
+        // The page hosts a ViewportObserver that resolves ViewportService.
+        Services.AddScoped<ViewportService>();
 
         // Page-scoped ViewModel — Stage 2 ViewModel discipline.
         Services.AddScoped<OperationsPageViewModel>();

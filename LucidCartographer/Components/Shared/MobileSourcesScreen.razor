@@ -1,0 +1,396 @@
+@using LucidCartographer.Components.Pages
+@using LucidCartographer.Data.Entities
+
+@* Mobile Data Sources screen. Presentational: drives the shared
+   DataSourcesPageViewModel passed by the page. Import + collection-detail
+   flows open as full-screen push modals. *@
+<div class="m-app">
+    <div class="screen scroll">
+        <div class="app-header" style="padding-top:calc(12px + var(--safe-top))">
+            <div>
+                <div class="title">@UiStrings.NavSources</div>
+                <div class="sub">@UiStrings.DataAndImportsDesc</div>
+            </div>
+        </div>
+
+        <div class="section-title">Add new</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 18px">
+            <button class="card m-import-card" type="button" @onclick='() => OpenImport("file")'>
+                <div class="m-import-icon" style="background:#005bbf1a"><span class="ms filled" style="color:#005bbf" aria-hidden="true">upload_file</span></div>
+                <div class="m-import-title">File upload</div>
+                <div class="m-import-desc">GPX, KML/KMZ, GeoJSON, CSV</div>
+            </button>
+            <button class="card m-import-card" type="button" @onclick='() => OpenImport("takeout")'>
+                <div class="m-import-icon" style="background:#006e2c1a"><span class="ms filled" style="color:#006e2c" aria-hidden="true">cloud_download</span></div>
+                <div class="m-import-title">Google Takeout</div>
+                <div class="m-import-desc">Saved Places.json export</div>
+            </button>
+            <button class="card m-import-card" type="button" @onclick='() => OpenImport("shared")'>
+                <div class="m-import-icon" style="background:#7a4cbf1a"><span class="ms filled" style="color:#7a4cbf" aria-hidden="true">public</span></div>
+                <div class="m-import-title">Shared list</div>
+                <div class="m-import-desc">Public Google Maps list</div>
+            </button>
+            <button class="card m-import-card" type="button" @onclick='() => OpenImport("single")'>
+                <div class="m-import-icon" style="background:#c97a1a1a"><span class="ms filled" style="color:#c97a1a" aria-hidden="true">add_location</span></div>
+                <div class="m-import-title">Single POI</div>
+                <div class="m-import-desc">Paste a Google Maps link</div>
+            </button>
+        </div>
+
+        <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;padding-right:18px">
+            <span>Managed sources (@Vm.Collections.Count)</span>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(Vm.MaintenanceMessage))
+        {
+            <div style="margin:0 18px 8px;padding:10px 12px;border-radius:12px;background:var(--primary-soft);color:var(--primary);font-size:13px">@Vm.MaintenanceMessage</div>
+        }
+
+        @if (Vm.Collections.Count == 0)
+        {
+            <div class="empty"><span class="ms" aria-hidden="true">folder_open</span><div class="t">No datasets yet</div><div class="s">Add one above to get started.</div></div>
+        }
+        else
+        {
+            <div class="list">
+                @foreach (var c in Vm.Collections)
+                {
+                    @* H07: promote the row to a real <button> for keyboard + AT access. *@
+                    <button class="row" type="button" @key="c.Id" @onclick="() => OpenCollection(c)">
+                        <div class="avatar" style="@($"background:{c.Color};border-radius:12px")">
+                            <span class="ms filled" style="font-size:18px" aria-hidden="true">folder</span>
+                        </div>
+                        <div class="meta">
+                            <div class="name">@c.Name</div>
+                            <div class="sub">@c.PoiCount.ToString("N0") pts · @(c.SourceType ?? "manual") · @c.CreatedDate.ToString("MMM dd, yyyy")</div>
+                        </div>
+                        <div class="trailing"><span class="ms" style="color:var(--text-3)" aria-hidden="true">chevron_right</span></div>
+                    </button>
+                }
+            </div>
+        }
+
+        @if (Vm.FailedEnrichmentCount > 0)
+        {
+            <div style="margin:16px 18px 24px;padding:14px;border-radius:14px;background:var(--primary-soft);display:flex;gap:10px;align-items:flex-start">
+                <span class="ms" style="color:var(--primary)" aria-hidden="true">info</span>
+                <div style="flex:1;font-size:13px;color:var(--text-2)">
+                    <div style="font-weight:700;color:var(--text)">@Vm.FailedEnrichmentCount POIs failed enrichment</div>
+                    <div>Reset to retry, or open each to paste a Google Maps URL manually.</div>
+                    <button class="btn btn-primary" style="margin-top:8px;padding:8px 12px;font-size:12px"
+                            @onclick="Vm.HandleResetFailedEnrichmentAsync">
+                        Reset failed (@Vm.FailedEnrichmentCount)
+                    </button>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div style="height:24px"></div>
+        }
+    </div>
+
+    <MobileTabBar />
+
+    @* ---------------- Import modal ---------------- *@
+    @if (_activeImport is not null)
+    {
+        <MobileModalScreen Title="@ImportTitle()" OnClose="CloseImport">
+            <div style="padding:18px">
+                @if (Vm.ImportResult is not null)
+                {
+                    <div style="padding:14px;border-radius:12px;background:var(--secondary-soft);font-size:13px;color:var(--text-2)">
+                        <div style="font-weight:700;color:var(--text)">Import complete</div>
+                        <div>Added @Vm.ImportResult.AddedCount POIs@(Vm.ImportResult.SkippedCount > 0 ? $" ({Vm.ImportResult.SkippedCount} skipped)" : "").</div>
+                    </div>
+                }
+                else if (!string.IsNullOrEmpty(Vm.ImportError))
+                {
+                    <div style="padding:14px;border-radius:12px;background:var(--tertiary-soft);color:var(--tertiary);font-size:13px">@Vm.ImportError</div>
+                }
+                else if (Vm.IsImporting)
+                {
+                    <div style="display:flex;align-items:center;gap:10px;padding:14px;color:var(--text-2)">
+                        <div class="spinner"></div>
+                        <span>@(Vm.QueuedMessage ?? "Importing…")</span>
+                    </div>
+                }
+                else if (_activeImport == "single")
+                {
+                    <label class="label">Collection</label>
+                    <select class="field" style="margin-top:6px" value="@_singleCollectionId"
+                            @onchange="e => _singleCollectionId = int.TryParse(e.Value?.ToString(), out var v) ? v : 0">
+                        <option value="0">Select collection</option>
+                        @foreach (var c in Vm.Collections)
+                        {
+                            <option value="@c.Id">@c.Name (@c.PoiCount pts)</option>
+                        }
+                    </select>
+                    <label class="label" style="margin-top:14px">Google Maps URL</label>
+                    <input class="field" style="margin-top:6px" placeholder="https://maps.app.goo.gl/..."
+                           value="@Vm.AddPoiUrl" @oninput="e => Vm.AddPoiUrl = e.Value?.ToString() ?? string.Empty" />
+                    @if (!string.IsNullOrEmpty(Vm.AddPoiError))
+                    {
+                        <div style="margin-top:10px;padding:10px;border-radius:10px;background:var(--tertiary-soft);color:var(--tertiary);font-size:13px">@Vm.AddPoiError</div>
+                    }
+                    @if (Vm.AddPoiSuccess)
+                    {
+                        <div style="margin-top:10px;padding:10px;border-radius:10px;background:var(--secondary-soft);color:var(--secondary);font-size:13px">POI added — details will be filled by enrichment.</div>
+                    }
+                    <button class="btn btn-primary btn-block" type="button" style="margin-top:18px"
+                            disabled="@(_singleCollectionId == 0 || string.IsNullOrWhiteSpace(Vm.AddPoiUrl) || Vm.AddPoiSaving)"
+                            @onclick="AddSinglePoiAsync">
+                        <span class="ms" aria-hidden="true">add_location</span>@(Vm.AddPoiSaving ? "Adding…" : "Add POI")
+                    </button>
+                }
+                else if (_activeImport == "shared")
+                {
+                    <label class="label">Shared list URL</label>
+                    <input class="field" style="margin-top:6px" placeholder="https://maps.app.goo.gl/..."
+                           value="@Vm.SharedListUrl" @oninput="e => Vm.SharedListUrl = e.Value?.ToString() ?? string.Empty" />
+                    <label class="label" style="margin-top:14px">Collection name</label>
+                    <input class="field" style="margin-top:6px" placeholder="New collection"
+                           value="@Vm.CollectionName" @oninput="e => Vm.CollectionName = e.Value?.ToString() ?? string.Empty" />
+                    @ColorPalette()
+                    <button class="btn btn-primary btn-block" type="button" style="margin-top:18px"
+                            disabled="@string.IsNullOrWhiteSpace(Vm.SharedListUrl)"
+                            @onclick="ScrapeAsync">
+                        <span class="ms" aria-hidden="true">cloud_sync</span>Scrape list
+                    </button>
+                }
+                else
+                {
+                    @* file / takeout *@
+                    @if (_activeImport == "takeout")
+                    {
+                        <div style="padding:14px;border-radius:12px;background:var(--secondary-soft);margin-bottom:14px;font-size:13px;color:var(--text-2)">
+                            <div style="font-weight:700;color:var(--text);margin-bottom:6px">How to export</div>
+                            <ol style="padding-left:20px;margin:0;line-height:1.6">
+                                <li>Visit <strong>takeout.google.com</strong></li>
+                                <li>Select <strong>Saved</strong> + <strong>Maps (your places)</strong></li>
+                                <li>Download the ZIP, unzip and find <strong>Saved Places.json</strong></li>
+                            </ol>
+                        </div>
+                    }
+                    <label class="label">Collection name</label>
+                    <input class="field" style="margin-top:6px" placeholder="New collection"
+                           value="@Vm.CollectionName" @oninput="e => Vm.CollectionName = e.Value?.ToString() ?? string.Empty" />
+                    @ColorPalette()
+                    <label class="m-dropzone" style="margin-top:18px">
+                        <span class="ms" style="font-size:40px;color:var(--text-3)" aria-hidden="true">cloud_upload</span>
+                        <div style="font-family:var(--font-headline);font-weight:800;margin-top:8px">Tap to pick file</div>
+                        <div style="font-size:12px;color:var(--text-3);margin-top:4px">@Vm.AcceptDescription</div>
+                        <InputFile OnChange="Vm.HandleFileSelectedAsync" accept="@Vm.AcceptExtensions" class="m-file-input" />
+                    </label>
+                }
+            </div>
+        </MobileModalScreen>
+    }
+
+    @* ---------------- Collection detail modal ---------------- *@
+    @if (_activeCollection is { } col)
+    {
+        <MobileModalScreen Title="@col.Name" OnClose="CloseCollection">
+            <div style="padding:0 0 24px">
+                <div style="padding:18px;display:flex;align-items:center;gap:14px">
+                    <div style="@($"width:56px;height:56px;border-radius:16px;background:{col.Color};display:flex;align-items:center;justify-content:center")">
+                        <span class="ms filled" style="color:#fff;font-size:28px" aria-hidden="true">folder</span>
+                    </div>
+                    <div style="flex:1">
+                        <div style="font-family:var(--font-headline);font-weight:800;font-size:20px">@col.Name</div>
+                        <div style="font-size:12px;color:var(--text-3)">@col.PoiCount.ToString("N0") places · @(col.SourceType ?? "manual")</div>
+                    </div>
+                </div>
+
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;padding:0 18px">
+                    <button class="btn btn-secondary m-quick" type="button" disabled="@(Vm.EnrichingCollectionId == col.Id)"
+                            @onclick="() => Vm.HandleEnrichCollectionAsync(col.Id)">
+                        <span class="ms" style="font-size:22px;color:var(--primary)" aria-hidden="true">@(Vm.EnrichingCollectionId == col.Id ? "hourglass_empty" : "auto_fix_high")</span>Re-enrich
+                    </button>
+                    <button class="btn btn-secondary m-quick" type="button" disabled="@(Vm.ExportingId == col.Id)"
+                            @onclick="() => Vm.HandleExportToMyMapsAsync(col.Id)">
+                        <span class="ms" style="font-size:22px;color:var(--primary)" aria-hidden="true">@(Vm.ExportingId == col.Id ? "hourglass_empty" : "download")</span>Export
+                    </button>
+                </div>
+
+                <div class="section-title">Rename</div>
+                <div style="padding:0 18px;display:flex;gap:8px">
+                    <input class="field" placeholder="@col.Name" value="@_renameValue"
+                           @oninput="e => _renameValue = e.Value?.ToString() ?? string.Empty" />
+                    <button class="btn btn-primary" @onclick="() => RenameAsync(col)"
+                            disabled="@string.IsNullOrWhiteSpace(_renameValue)">@UiStrings.Save</button>
+                </div>
+                @if (!string.IsNullOrEmpty(Vm.RenameError))
+                {
+                    <div style="margin:8px 18px 0;padding:10px;border-radius:10px;background:var(--tertiary-soft);color:var(--tertiary);font-size:13px">@Vm.RenameError</div>
+                }
+
+                <div class="section-title">Color</div>
+                <div style="padding:0 18px;display:flex;gap:10px;flex-wrap:wrap">
+                    @foreach (var color in Vm.AvailableColors)
+                    {
+                        <button @onclick="() => ChangeColorAsync(col, color)" aria-label="@($"Use color {color}")"
+                                style="@($"width:32px;height:32px;border-radius:999px;border:0;cursor:pointer;background:{color};{(string.Equals(col.Color, color, StringComparison.OrdinalIgnoreCase) ? "outline:2px solid var(--primary);outline-offset:2px" : "")}")">
+                        </button>
+                    }
+                </div>
+
+                <div class="section-title">Add a POI</div>
+                <div style="padding:0 18px;display:flex;gap:8px">
+                    <input class="field" placeholder="Paste Google Maps link" value="@_addUrl"
+                           @oninput="e => _addUrl = e.Value?.ToString() ?? string.Empty" />
+                    <button class="btn btn-primary" @onclick="() => AddToCollectionAsync(col)"
+                            disabled="@(string.IsNullOrWhiteSpace(_addUrl) || Vm.AddPoiSaving)">Add</button>
+                </div>
+                @if (!string.IsNullOrEmpty(Vm.AddPoiError))
+                {
+                    <div style="margin:8px 18px 0;padding:10px;border-radius:10px;background:var(--tertiary-soft);color:var(--tertiary);font-size:13px">@Vm.AddPoiError</div>
+                }
+                @if (Vm.AddPoiSuccess)
+                {
+                    <div style="margin:8px 18px 0;padding:10px;border-radius:10px;background:var(--secondary-soft);color:var(--secondary);font-size:13px">POI added — enrichment will fill the details.</div>
+                }
+
+                <div class="section-title">Danger zone</div>
+                <div style="padding:0 18px">
+                    @if (_confirmDelete)
+                    {
+                        <div style="display:flex;gap:8px">
+                            <button class="btn btn-block" type="button" style="background:var(--tertiary);color:#fff"
+                                    @onclick="() => DeleteAsync(col)">
+                                <span class="ms" aria-hidden="true">delete</span>Confirm delete
+                            </button>
+                            <button class="btn btn-secondary" type="button" @onclick="() => _confirmDelete = false">@UiStrings.Cancel</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <button class="btn btn-block" type="button" style="background:var(--tertiary-soft);color:var(--tertiary)"
+                                @onclick="() => _confirmDelete = true">
+                            <span class="ms" aria-hidden="true">delete</span>Delete collection
+                        </button>
+                    }
+                </div>
+            </div>
+        </MobileModalScreen>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public DataSourcesPageViewModel Vm { get; set; } = null!;
+
+    private string? _activeImport;
+    private int _singleCollectionId;
+
+    private PoiCollection? _activeCollection;
+    private string _renameValue = "";
+    private string _addUrl = "";
+    private bool _confirmDelete;
+
+    private void OpenImport(string card)
+    {
+        _activeImport = card;
+        _singleCollectionId = 0;
+        Vm.AddPoiUrl = string.Empty;
+        // Sync the VM card so AcceptExtensions / titles resolve correctly.
+        if (card is "file" or "takeout" or "shared")
+        {
+            Vm.ShowUploadFor(card);
+        }
+    }
+
+    private void CloseImport()
+    {
+        _activeImport = null;
+        Vm.CloseUpload();
+    }
+
+    private string ImportTitle() => _activeImport switch
+    {
+        "takeout" => "Google Takeout",
+        "shared" => "Shared list",
+        "single" => "Add POI",
+        _ => "Upload file"
+    };
+
+    private async Task ScrapeAsync()
+    {
+        Vm.ScrapeSharedList();
+        await Task.CompletedTask;
+    }
+
+    private async Task AddSinglePoiAsync()
+    {
+        // OpenAddPoi resets AddPoiUrl, so capture what the user typed first.
+        var url = Vm.AddPoiUrl;
+        Vm.OpenAddPoi(_singleCollectionId);
+        Vm.AddPoiUrl = url;
+        await Vm.SaveNewPoiAsync();
+    }
+
+    private void OpenCollection(PoiCollection c)
+    {
+        _activeCollection = c;
+        _renameValue = "";
+        _addUrl = "";
+        _confirmDelete = false;
+        // Clear any stale modal error/success carried over from a previous
+        // collection's add-POI / rename attempts.
+        Vm.CloseAddPoi();
+        Vm.CloseRename();
+    }
+
+    private void CloseCollection() => _activeCollection = null;
+
+    private async Task RenameAsync(PoiCollection c)
+    {
+        if (string.IsNullOrWhiteSpace(_renameValue))
+        {
+            return;
+        }
+        Vm.OpenRename(c);
+        Vm.RenameValue = _renameValue;
+        await Vm.SaveCollectionRenameAsync();
+        if (Vm.RenameError is null)
+        {
+            CloseCollection();
+        }
+    }
+
+    private async Task ChangeColorAsync(PoiCollection c, string color)
+    {
+        Vm.OpenColorPicker(c);
+        Vm.ColorPickerValue = color;
+        await Vm.SaveCollectionColorAsync();
+    }
+
+    private async Task AddToCollectionAsync(PoiCollection c)
+    {
+        Vm.OpenAddPoi(c.Id);
+        Vm.AddPoiUrl = _addUrl;
+        await Vm.SaveNewPoiAsync();
+        if (Vm.AddPoiSuccess)
+        {
+            _addUrl = "";
+        }
+    }
+
+    private async Task DeleteAsync(PoiCollection c)
+    {
+        await Vm.ConfirmDeleteAsync(c.Id);
+        _confirmDelete = false;
+        CloseCollection();
+    }
+
+    private RenderFragment ColorPalette() =>@<text>
+        <label class="label" style="margin-top:14px">Color</label>
+        <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap">
+            @foreach (var color in Vm.AvailableColors)
+            {
+                <button @onclick="() => Vm.SelectedColor = color" aria-label="@($"Color {color}")"
+                        style="@($"width:32px;height:32px;border-radius:999px;border:0;cursor:pointer;background:{color};{(string.Equals(Vm.SelectedColor, color, StringComparison.OrdinalIgnoreCase) ? "outline:2px solid var(--primary);outline-offset:2px" : "")}")">
+                </button>
+            }
+        </div>
+    </text>;
+}

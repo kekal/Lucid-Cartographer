@@ -1,0 +1,226 @@
+@using LucidCartographer.Components.Pages
+@using LucidCartographer.Data.Entities
+@using LucidCartographer.Services.Operations
+
+@* Mobile Operations screen. Presentational over the shared
+   OperationsPageViewModel: stacked source pickers, a 2x2 op grid, a tolerance
+   slider, the live result list with discard/restore, and a commit modal. *@
+<div class="m-app">
+    <div class="screen scroll">
+        <div class="app-header" style="padding-top:calc(12px + var(--safe-top))">
+            <div>
+                <div class="title">@UiStrings.NavOperations</div>
+                <div class="sub">Combine and refine collections</div>
+            </div>
+        </div>
+
+        <div class="section-title">Sources</div>
+        <div style="padding:0 18px;display:flex;flex-direction:column;gap:10px">
+            <div>
+                <label class="label">Dataset A</label>
+                <select class="field" style="margin-top:6px" value="@Vm.CollectionAId"
+                        @onchange="e => Vm.CollectionAId = ParseId(e.Value)">
+                    <option value="0">Select collection</option>
+                    @foreach (var c in Vm.Collections)
+                    {
+                        <option value="@c.Id">@c.Name (@c.PoiCount pts)</option>
+                    }
+                </select>
+            </div>
+            <div style="@(Vm.IsDedupMode ? "opacity:0.5;pointer-events:none" : "")">
+                <div style="display:flex;align-items:center;justify-content:space-between">
+                    <label class="label">Dataset B</label>
+                    @if (Vm.IsDedupMode)
+                    {
+                        <span style="font-size:11px;color:var(--text-3)">Not used for Dedup</span>
+                    }
+                </div>
+                <select class="field" style="margin-top:6px" value="@Vm.CollectionBId" disabled="@Vm.IsDedupMode"
+                        @onchange="e => Vm.CollectionBId = ParseId(e.Value)">
+                    <option value="0">Select collection</option>
+                    @foreach (var c in Vm.Collections)
+                    {
+                        <option value="@c.Id">@c.Name (@c.PoiCount pts)</option>
+                    }
+                </select>
+            </div>
+            @if (Vm.SelectBHint is not null)
+            {
+                <div style="font-size:12px;color:var(--tertiary);font-weight:600">@Vm.SelectBHint</div>
+            }
+        </div>
+
+        <div class="section-title">Logical operations</div>
+        <div style="padding:0 18px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            @foreach (var o in Ops)
+            {
+                var selected = Vm.ActiveOp == o.Op;
+                <button class="card m-op-card @(selected ? "selected" : "")" type="button" aria-pressed="@(selected ? "true" : "false")" disabled="@(Vm.CollectionAId == 0)"
+                        @onclick="() => RunOpAsync(o.Op)">
+                    <span class="ms" style="@($"font-size:30px;color:{o.Color}")" aria-hidden="true">@o.Icon</span>
+                    <div style="font-family:var(--font-headline);font-weight:800;font-size:15px;margin-top:4px">@o.Label</div>
+                    <div style="font-size:11px;color:var(--text-3)">@o.Desc</div>
+                </button>
+            }
+        </div>
+
+        <div class="section-title" style="display:flex;justify-content:space-between;padding-right:18px">
+            <span>Spatial tolerance</span>
+            <span style="font-family:ui-monospace,Menlo,monospace;color:var(--primary)">@Vm.ToleranceMeters.ToString("F0")m</span>
+        </div>
+        <div style="padding:0 18px 4px">
+            <input type="range" min="10" max="500" step="10" value="@Vm.ToleranceMeters"
+                   @oninput="OnToleranceInput" style="width:100%;accent-color:var(--primary)" aria-label="Spatial tolerance" />
+            <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-3);margin-top:2px">
+                <span>10m</span><span>500m</span>
+            </div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:6px">Merges proximate markers based on spatial logic.</div>
+        </div>
+
+        <div class="section-title">Result</div>
+        @if (Vm.IsProcessing)
+        {
+            <div class="empty"><div class="spinner"></div><div class="t" style="margin-top:10px">Processing…</div></div>
+        }
+        else if (Vm.Result is null)
+        {
+            <div class="empty">
+                <span class="ms" aria-hidden="true">calculate</span>
+                <div class="t">Select an operation</div>
+                <div class="s">Pick A (and B for binary ops), then choose an operation.</div>
+            </div>
+        }
+        else
+        {
+            <div style="padding:0 18px;display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                <div>
+                    <div style="font-family:var(--font-headline);font-weight:800;font-size:16px">@Vm.GetOperationLabel()</div>
+                    <div style="font-size:12px;color:var(--text-3)">
+                        @Remaining point@(Remaining == 1 ? "" : "s")
+                        @if (Vm.DiscardedIds.Count > 0)
+                        {
+                            <text> · @Vm.DiscardedIds.Count discarded</text>
+                        }
+                    </div>
+                </div>
+                <button class="icon-btn" type="button" @onclick="Vm.ExportResultAsync" disabled="@(!Vm.ResultPois.Any())" aria-label="Export">
+                    <span class="ms" aria-hidden="true">download</span>
+                </button>
+            </div>
+
+            <div class="list" style="background:var(--bg-elev);margin:0 18px;border-radius:14px;overflow:hidden">
+                @if (Vm.ResultPois.Count == 0)
+                {
+                    <div class="empty"><span class="ms" aria-hidden="true">filter_drama</span><div class="t">Empty result</div><div class="s">Adjust the tolerance or sources.</div></div>
+                }
+                @foreach (var p in Vm.ResultPois)
+                {
+                    var disc = Vm.DiscardedIds.Contains(p.Id);
+                    @* H07: promote the row to a real <button> so keyboard users can discard/restore. *@
+                    <button class="row" type="button" @key="p.Id" style="@(disc ? "opacity:0.4;text-decoration:line-through" : "")"
+                            aria-pressed="@(disc ? "true" : "false")"
+                            aria-label="@($"{(disc ? "Restore" : "Discard")} {p.Name}")"
+                            @onclick="() => ToggleDiscard(p.Id)">
+                        <div class="avatar" style="background:var(--secondary);border-radius:50%;width:28px;height:28px">
+                            <span class="ms filled" style="font-size:14px" aria-hidden="true">location_on</span>
+                        </div>
+                        <div class="meta">
+                            <div class="name">@p.Name</div>
+                            <div class="sub" style="font-family:ui-monospace,Menlo,monospace;font-size:11px">
+                                @(p is { Latitude: not null, Longitude: not null } ? $"{p.Latitude.Value:F4}, {p.Longitude.Value:F4}" : "—")
+                            </div>
+                        </div>
+                        <div class="trailing">
+                            <span class="ms" style="@($"color:{(disc ? "var(--secondary)" : "var(--tertiary)")};font-size:18px")" aria-hidden="true">
+                                @(disc ? "restore" : "delete_outline")
+                            </span>
+                        </div>
+                    </button>
+                }
+            </div>
+
+
+            @* M03: footer only rendered inside the result branch so it doesn't
+               appear with a permanently-disabled button while the user is still
+               picking a source. H03: --bg-base / --divider weren't defined and
+               left the footer transparent — use the real tokens.
+               M02 (Wave 7): horizontal safe-area treatment so landscape on a
+               notched device doesn't tuck the commit button under the side notch.
+               L02 (Wave 7): Vm.Result is non-null inside this branch — the
+               `Vm.Result is null` half of the previous disabled expression was
+               always false. *@
+            <div style="position:sticky;bottom:0;padding:14px max(18px, var(--safe-right)) calc(14px + var(--safe-bottom)) max(18px, var(--safe-left));background:var(--bg);border-top:1px solid var(--separator)">
+                <button class="btn btn-primary btn-block" type="button" @onclick="Vm.CommitToLayer" disabled="@(Remaining == 0)">
+                    <span class="ms" aria-hidden="true">layers</span>@UiStrings.CommitToLayer
+                </button>
+            </div>
+        }
+    </div>
+
+    <MobileTabBar />
+
+    @if (Vm.ShowCommitDialog)
+    {
+        <MobileModalScreen Title="Save as collection" OnClose="Vm.HideCommitDialog">
+            <div style="padding:18px">
+                <label class="label">Name</label>
+                <input class="field" style="margin-top:6px" value="@Vm.CommitName"
+                       @oninput="e => Vm.CommitName = e.Value?.ToString() ?? string.Empty" />
+                <div style="margin-top:16px;padding:14px;border-radius:12px;background:var(--secondary-soft);display:flex;gap:10px;align-items:flex-start">
+                    <span class="ms" style="color:var(--secondary)" aria-hidden="true">check_circle</span>
+                    <div style="font-size:13px;color:var(--text-2);flex:1"><strong>@Remaining</strong> points will be saved as a new collection.</div>
+                </div>
+                @if (Vm.CommitSuccess is not null)
+                {
+                    <div style="margin-top:12px;padding:10px;border-radius:10px;background:var(--secondary-soft);color:var(--secondary);font-size:13px">@Vm.CommitSuccess</div>
+                }
+                <button class="btn btn-primary btn-block" type="button" style="margin-top:18px" @onclick="Vm.DoCommitAsync"
+                        disabled="@string.IsNullOrWhiteSpace(Vm.CommitName)">
+                    <span class="ms" aria-hidden="true">save</span>@UiStrings.Save
+                </button>
+            </div>
+        </MobileModalScreen>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public OperationsPageViewModel Vm { get; set; } = null!;
+
+    private sealed record OpDef(SetOperation Op, string Label, string Desc, string Icon, string Color);
+
+    private readonly OpDef[] Ops =
+    [
+        new(SetOperation.Subtract, "A − B", "Difference", "remove_circle", "var(--tertiary)"),
+        new(SetOperation.Intersect, "A ∩ B", "Intersection", "join_inner", "var(--secondary)"),
+        new(SetOperation.Union, "A ∪ B", "Union", "join_full", "var(--primary)"),
+        new(SetOperation.Dedup, "Dedup", "Deduplicate", "filter_alt", "#7a4cbf"),
+    ];
+
+    private int Remaining => Vm.ResultPois.Count(p => !Vm.DiscardedIds.Contains(p.Id));
+
+    private static int ParseId(object? value) => int.TryParse(value?.ToString(), out var v) ? v : 0;
+
+    private Task RunOpAsync(SetOperation op) =>
+        op == SetOperation.Dedup ? Vm.RunOperationAsync(op) : Vm.HandleBinaryOpClickAsync(op);
+
+    private void ToggleDiscard(int poiId)
+    {
+        if (Vm.DiscardedIds.Contains(poiId))
+        {
+            Vm.RestorePoi(poiId);
+        }
+        else
+        {
+            Vm.DiscardPoi(poiId);
+        }
+    }
+
+    private void OnToleranceInput(ChangeEventArgs e)
+    {
+        if (double.TryParse(e.Value?.ToString(), out var v))
+        {
+            Vm.ToleranceMeters = v;
+            Vm.OnToleranceChanged();
+        }
+    }
+}

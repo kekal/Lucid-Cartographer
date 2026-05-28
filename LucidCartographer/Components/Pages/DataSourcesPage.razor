@@ -1,10 +1,19 @@
 @page "/datasources"
 @rendermode InteractiveServer
 @inject DataSourcesPageViewModel Vm
+@inject ViewportService Viewport
 @implements IAsyncDisposable
 
 <PageTitle>@UiStrings.DataSourcesPageTitle</PageTitle>
 
+<ViewportObserver />
+
+@if (Viewport.IsMobile)
+{
+    <MobileSourcesScreen Vm="Vm" />
+}
+else
+{
 <div class="p-6 max-w-6xl mx-auto">
     @* Header *@
     <div class="mb-8">
@@ -389,19 +398,23 @@
         </div>
     </div>
 }
+}
 
 @code {
     protected override async Task OnInitializedAsync()
     {
         Vm.StateChanged += OnVmChanged;
+        Viewport.Changed += OnViewportChanged;
         await Vm.InitializeAsync();
     }
 
     private void OnVmChanged() => InvokeAsync(StateHasChanged);
+    private void OnViewportChanged() => InvokeAsync(StateHasChanged);
 
     public async ValueTask DisposeAsync()
     {
         Vm.StateChanged -= OnVmChanged;
+        Viewport.Changed -= OnViewportChanged;
         await Vm.DisposeAsync();
     }
 }

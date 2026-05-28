@@ -43,6 +43,11 @@ public class DataSourcesPageTests : BunitTestContext
         // Page-scoped ViewModel — page now @injects this instead of
         // individual services (Stage 2 ViewModel discipline).
         Services.AddTransient<DataSourcesPageViewModel>();
+
+        // The page hosts a ViewportObserver that resolves ViewportService and
+        // calls a JS helper on first render; loose JSInterop returns defaults.
+        Services.AddScoped<ViewportService>();
+        JSInterop.Mode = Bunit.JSRuntimeMode.Loose;
     }
 
     // ── Initial Render ──────────────────────────────────────────────────

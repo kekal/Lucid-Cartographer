@@ -1,0 +1,380 @@
+@using LucidCartographer.Data.Entities
+@inject IJSRuntime Js
+
+@* Full-screen POI detail for the mobile shell. Back + share buttons overlay a
+   colored hero; below it: name (inline edit), status pills, address, rating,
+   quick actions, notes, coordinates, contact, and manage actions. Reuses the
+   Map page ViewModel's commands via the callbacks. *@
+@if (Poi is not null)
+{
+    var color = string.IsNullOrWhiteSpace(CollectionColor) ? "#005bbf" : CollectionColor;
+    <div class="modal-screen m-slide-in" @ref="_root" tabindex="-1"
+         role="dialog" aria-modal="true" aria-labelledby="poi-detail-name"
+         @onkeydown="OnRootKeyDownAsync">
+        <div class="modal-body" style="padding:0">
+            @* Hero *@
+            <div class="m-hero" style="@($"--hero:{color}")">
+                <div class="m-hero-stripes" aria-hidden="true"></div>
+                <div class="m-hero-actions">
+                    <button class="m-hero-btn" @ref="_backBtn" @onclick="OnClose" aria-label="@UiStrings.Back">
+                        <span class="ms" aria-hidden="true">arrow_back_ios_new</span>
+                    </button>
+                    <button class="m-hero-btn" @onclick="ShareAsync" aria-label="Share">
+                        <span class="ms" aria-hidden="true">ios_share</span>
+                    </button>
+                </div>
+                <div class="m-hero-foot">
+                    @if (!string.IsNullOrEmpty(Poi.ImageUrl))
+                    {
+                        <img class="m-hero-img" src="/api/poi-image/@Poi.Id" alt="@Poi.Name" loading="lazy" />
+                    }
+                    else
+                    {
+                        <div class="m-hero-icon"><span class="ms filled" aria-hidden="true">location_on</span></div>
+                    }
+                    @if (CollectionNames is { Count: > 0 })
+                    {
+                        <div class="m-hero-collection">
+                            <div class="m-hero-collection-label">@UiStrings.Collection</div>
+                            <div>@string.Join(" · ", CollectionNames)</div>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div style="padding:18px 18px 32px">
+                @* Name + edit. *@
+                <div style="display:flex;gap:8px;align-items:flex-start">
+                    @if (_isEditing)
+                    {
+                        @* M03 (Wave 7): the dialog's aria-labelledby points at
+                           "poi-detail-name". The <h1 id="poi-detail-name"> would
+                           disappear when editing, leaving the dialog with a
+                           dangling labelledby ref. Keep the id pinned to the
+                           heading text in both states by routing it through the
+                           input's own id (an editable input *is* a valid label
+                           target when AT resolves aria-labelledby — the input's
+                           accessible name then doubles as the dialog's). *@
+                        @* H03 (Wave 7): without @onkeydown:stopPropagation the Escape
+                           handler here flips _isEditing false, then the keydown bubbles
+                           to the modal root which observes !_isEditing and fires OnClose.
+                           Net: Escape cancels the rename AND closes the modal. Stop the
+                           bubble so the inner handler is the only one that runs. *@
+                        <input id="poi-detail-name" class="m-name-input" value="@_nameDraft"
+                               @oninput="e => _nameDraft = e.Value?.ToString() ?? string.Empty"
+                               @onkeydown="OnNameKeyDownAsync"
+                               @onkeydown:stopPropagation="true"
+                               aria-label="Edit name" />
+                        <button class="icon-btn" style="background:var(--primary);color:#fff" @onclick="SaveNameAsync" aria-label="@UiStrings.Save">
+                            <span class="ms" aria-hidden="true">check</span>
+                        </button>
+                    }
+                    else
+                    {
+                        <h1 id="poi-detail-name" class="m-name">@Poi.Name</h1>
+                        <button class="icon-btn" style="background:transparent" @onclick="BeginEdit" aria-label="@UiStrings.Rename">
+                            <span class="ms" aria-hidden="true">edit</span>
+                        </button>
+                    }
+                </div>
+
+                @* Status pills *@
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+                    @if (Poi.Status == PoiStatus.Visited)
+                    {
+                        <span class="pill visited"><span class="ms" style="font-size:12px" aria-hidden="true">check_circle</span>Visited</span>
+                    }
+                    @if (Poi.Status == PoiStatus.WantToGo)
+                    {
+                        <span class="pill want"><span class="ms" style="font-size:12px" aria-hidden="true">bookmark</span>Want to go</span>
+                    }
+                    @if (!string.IsNullOrEmpty(Poi.Category))
+                    {
+                        <span class="pill">@Poi.Category</span>
+                    }
+                    @if (!Poi.IsEnriched)
+                    {
+                        <span class="pill warn"><span class="ms" style="font-size:12px" aria-hidden="true">hourglass_empty</span>Enriching…</span>
+                    }
+                </div>
+
+                @* Address *@
+                @if (!string.IsNullOrEmpty(Poi.Address))
+                {
+                    <div style="display:flex;align-items:flex-start;gap:8px;margin-top:14px;color:var(--text-2);font-size:14px">
+                        <span class="ms" style="color:var(--text-3)" aria-hidden="true">place</span>
+                        <span style="flex:1;min-width:0">@Poi.Address</span>
+                        <button class="icon-btn" style="background:transparent" @onclick='() => CopyAsync(Poi.Address!)' aria-label="Copy address">
+                            <span class="ms" style="font-size:18px" aria-hidden="true">content_copy</span>
+                        </button>
+                    </div>
+                }
+
+                @* Rating *@
+                @if (Poi.GoogleRating.HasValue)
+                {
+                    <div style="display:flex;align-items:center;gap:10px;margin-top:14px">
+                        <span style="font-family:var(--font-headline);font-weight:800;font-size:24px">@Poi.GoogleRating.Value.ToString("F1")</span>
+                        @RenderStars(Poi.GoogleRating.Value, 16, "#f5a524")
+                        @if (Poi.ReviewCount.HasValue)
+                        {
+                            <span style="color:var(--text-3);font-size:13px">(@Poi.ReviewCount.Value.ToString("N0"))</span>
+                        }
+                    </div>
+                }
+
+                @* Quick actions *@
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:18px">
+                    <a class="btn btn-secondary m-quick" href="@PoiUrlHelper.GetGoogleMapsUrl(Poi)" target="_blank" rel="noopener">
+                        <span class="ms" style="font-size:22px;color:var(--primary)" aria-hidden="true">directions</span>Directions
+                    </a>
+                    @if (!string.IsNullOrEmpty(Poi.Phone))
+                    {
+                        <a class="btn btn-secondary m-quick" href="tel:@Poi.Phone">
+                            <span class="ms" style="font-size:22px;color:var(--primary)" aria-hidden="true">phone</span>Call
+                        </a>
+                    }
+                    else
+                    {
+                        <button class="btn btn-secondary m-quick" disabled>
+                            <span class="ms" style="font-size:22px;color:var(--primary)" aria-hidden="true">phone</span>Call
+                        </button>
+                    }
+                    @if (!string.IsNullOrEmpty(Poi.Website))
+                    {
+                        <a class="btn btn-secondary m-quick" href="@Poi.Website" target="_blank" rel="noopener">
+                            <span class="ms" style="font-size:22px;color:var(--primary)" aria-hidden="true">language</span>Website
+                        </a>
+                    }
+                    else
+                    {
+                        <button class="btn btn-secondary m-quick" disabled>
+                            <span class="ms" style="font-size:22px;color:var(--primary)" aria-hidden="true">language</span>Website
+                        </button>
+                    }
+                    <button class="btn btn-secondary m-quick" @onclick="ShareAsync">
+                        <span class="ms" style="font-size:22px;color:var(--primary)" aria-hidden="true">ios_share</span>Share
+                    </button>
+                </div>
+
+                @* Personal rating *@
+                @if (Poi.Rating.HasValue)
+                {
+                    <div class="card" style="margin-top:18px;flex-direction:row;align-items:center;justify-content:space-between">
+                        <div>
+                            <div class="m-mini-label">Your rating</div>
+                            @RenderStars(Poi.Rating.Value, 20, "var(--primary)")
+                        </div>
+                    </div>
+                }
+
+                @* Notes *@
+                @if (!string.IsNullOrEmpty(Poi.Notes))
+                {
+                    <div class="section-title" style="padding:18px 0 6px">Notes</div>
+                    <div class="card"><div style="font-size:14px;color:var(--text-2);line-height:1.5">@Poi.Notes</div></div>
+                }
+
+                @* Coordinates *@
+                <div class="section-title" style="padding:18px 0 6px">Location</div>
+                <div class="card" style="flex-direction:row;align-items:center;justify-content:space-between">
+                    <div>
+                        <div class="m-mini-label">Coordinates</div>
+                        <div style="font-family:ui-monospace,Menlo,monospace;font-size:13px;color:var(--text);margin-top:2px">
+                            @(Poi is { Latitude: not null, Longitude: not null } ? $"{Poi.Latitude.Value:F6}, {Poi.Longitude.Value:F6}" : "—")
+                        </div>
+                    </div>
+                    @if (Poi is { Latitude: not null, Longitude: not null })
+                    {
+                        <button class="icon-btn" @onclick='() => CopyAsync($"{Poi.Latitude!.Value:F6}, {Poi.Longitude!.Value:F6}")' aria-label="Copy coordinates">
+                            <span class="ms" aria-hidden="true">content_copy</span>
+                        </button>
+                    }
+                </div>
+
+                @* Contact *@
+                @if (!string.IsNullOrEmpty(Poi.Website) || !string.IsNullOrEmpty(Poi.Phone))
+                {
+                    <div class="section-title" style="padding:18px 0 6px">Contact</div>
+                    <div class="card" style="padding:0;gap:0">
+                        @if (!string.IsNullOrEmpty(Poi.Website))
+                        {
+                            <a href="@Poi.Website" target="_blank" rel="noopener"
+                               style="display:flex;align-items:center;gap:10px;padding:14px;color:var(--primary);text-decoration:none;font-size:14px;font-weight:600">
+                                <span class="ms" aria-hidden="true">language</span>
+                                <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">@Poi.Website.Replace("https://", "").Replace("http://", "")</span>
+                                <span class="ms" style="color:var(--text-3)" aria-hidden="true">open_in_new</span>
+                            </a>
+                        }
+                        @if (!string.IsNullOrEmpty(Poi.Phone))
+                        {
+                            <a href="tel:@Poi.Phone"
+                               style="@($"display:flex;align-items:center;gap:10px;padding:14px;color:var(--text);text-decoration:none;font-size:14px;font-weight:600;{(string.IsNullOrEmpty(Poi.Website) ? "" : "border-top:1px solid var(--separator)")}")">
+                                <span class="ms" style="color:var(--text-3)" aria-hidden="true">phone</span>@Poi.Phone
+                            </a>
+                        }
+                    </div>
+                }
+
+                @* Manage *@
+                <div class="section-title" style="padding:18px 0 6px">Manage</div>
+                <div style="display:flex;flex-direction:column;gap:8px">
+                    <button class="btn btn-secondary btn-block" @onclick="EnrichAsync" disabled="@_enrichQueued">
+                        <span class="ms" aria-hidden="true">auto_fix_high</span>@(_enrichQueued ? "Queued…" : "Re-enrich details")
+                    </button>
+                    <button class="btn btn-secondary btn-block" @onclick="ManualEnrichAsync">
+                        <span class="ms" aria-hidden="true">edit_location_alt</span>@UiStrings.ManualEnrich
+                    </button>
+                    <a class="btn btn-primary btn-block" href="@PoiUrlHelper.GetGoogleMapsUrl(Poi)" target="_blank" rel="noopener">
+                        <span class="ms" aria-hidden="true">open_in_new</span>@UiStrings.OpenInGoogleMaps
+                    </a>
+                </div>
+
+                <div style="margin-top:16px;font-size:12px;color:var(--text-3);text-align:center">
+                    Added @Poi.AddedDate.ToString("MMM dd, yyyy")
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public Poi? Poi { get; set; }
+    [Parameter] public string? CollectionColor { get; set; }
+    [Parameter] public IReadOnlyList<string>? CollectionNames { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<int> OnEnrich { get; set; }
+    [Parameter] public EventCallback<int> OnManualEnrich { get; set; }
+    [Parameter] public EventCallback<(int PoiId, string NewName)> OnRename { get; set; }
+
+    private bool _isEditing;
+    private string _nameDraft = "";
+    private bool _enrichQueued;
+    private int _lastPoiId;
+    private bool _focusOnRender;
+    private ElementReference _root;
+    private ElementReference _backBtn;
+
+    protected override void OnParametersSet()
+    {
+        if (Poi is null)
+        {
+            return;
+        }
+
+        // H02: previously this also reset _isEditing whenever Poi.IsEnriched was
+        // true, which is the steady-state for any enriched POI — every parent
+        // re-render (filter chip tap, viewport flip, unrelated enrichment) would
+        // wipe the user's in-progress name edit. Decouple the two concerns:
+        // identity change resets the editor; enrichment completion only clears
+        // the user-initiated "Queued…" flag.
+        if (Poi.Id != _lastPoiId)
+        {
+            _isEditing = false;
+            _enrichQueued = false;
+            _focusOnRender = true; // H06: bring focus inside when a POI opens
+        }
+        else if (_enrichQueued && Poi.IsEnriched)
+        {
+            _enrichQueued = false;
+        }
+        _lastPoiId = Poi.Id;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusOnRender)
+        {
+            _focusOnRender = false;
+            try
+            {
+                await _backBtn.FocusAsync();
+            }
+            catch (JSException) { }
+            catch (InvalidOperationException) { }
+        }
+    }
+
+    private async Task OnRootKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape" && !_isEditing)
+        {
+            await OnClose.InvokeAsync();
+        }
+    }
+
+    private void BeginEdit()
+    {
+        _nameDraft = Poi?.Name ?? "";
+        _isEditing = true;
+    }
+
+    private async Task SaveNameAsync()
+    {
+        _isEditing = false;
+        var trimmed = _nameDraft?.Trim();
+        if (Poi is null || string.IsNullOrWhiteSpace(trimmed) || trimmed == Poi.Name)
+        {
+            return;
+        }
+        await OnRename.InvokeAsync((Poi.Id, trimmed));
+    }
+
+    private async Task OnNameKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await SaveNameAsync();
+        }
+        else if (e.Key == "Escape")
+        {
+            _isEditing = false;
+        }
+    }
+
+    private async Task EnrichAsync()
+    {
+        if (Poi is null)
+        {
+            return;
+        }
+        _enrichQueued = true;
+        await OnEnrich.InvokeAsync(Poi.Id);
+    }
+
+    private Task ManualEnrichAsync() => Poi is null ? Task.CompletedTask : OnManualEnrich.InvokeAsync(Poi.Id);
+
+    private async Task CopyAsync(string text)
+    {
+        try { await Js.InvokeVoidAsync("navigator.clipboard.writeText", text); }
+        catch (JSException) { }
+        catch (InvalidOperationException) { }
+    }
+
+    private async Task ShareAsync()
+    {
+        if (Poi is null)
+        {
+            return;
+        }
+        await CopyAsync(PoiUrlHelper.GetGoogleMapsUrl(Poi));
+    }
+
+    private RenderFragment RenderStars(double value, int size, string color) => builder =>
+    {
+        var rounded = (int)Math.Round(value);
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "style", "display:inline-flex;gap:1px");
+        builder.AddAttribute(2, "aria-hidden", "true");
+        for (var i = 1; i <= 5; i++)
+        {
+            var filled = i <= rounded;
+            builder.OpenElement(3, "span");
+            builder.AddAttribute(4, "class", "ms" + (filled ? " filled" : ""));
+            builder.AddAttribute(5, "style", $"font-size:{size}px;color:{(filled ? color : "var(--text-disabled)")}");
+            builder.AddContent(6, "star");
+            builder.CloseElement();
+        }
+        builder.CloseElement();
+    };
+}

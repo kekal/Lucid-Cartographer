@@ -1,0 +1,172 @@
+using LucidCartographer.Data.Entities;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Playwright;
+
+namespace LucidCartographer.Tests.Integration;
+
+[Collection("Integration")]
+public class MobileMapTests : MobileTestBase
+{
+    [Fact]
+    public async Task Mobile_Map_RendersSplitLayout()
+    {
+        await MobileNavigateAndWaitForAppAsync("/");
+
+        // The mobile layout uses .m-app as its root container
+        var mApp = Page.Locator(".m-app");
+        Assert.True(await mApp.IsVisibleAsync(), ".m-app should be present in mobile layout");
+
+        // Leaflet map container should be inside the mobile layout.
+        // In tests, StubMapService doesn't run the real Leaflet JS so the
+        // element has id="leaflet-map-{guid}" but no ".leaflet-container" class.
+        // We verify the container div exists using the id prefix pattern.
+        await Page.WaitForSelectorAsync("[id^='leaflet-map']", new() { Timeout = 15000 });
+        var leaflet = Page.Locator("[id^='leaflet-map']");
+        Assert.True(await leaflet.CountAsync() > 0, "Leaflet map container div should be present");
+
+        // The list region shows place rows (or empty state) below the map
+        // The mobile list uses .list or .scroll inside .m-app
+        var listRegion = Page.Locator(".m-app .screen");
+        Assert.True(await listRegion.IsVisibleAsync(), "Mobile screen container should be visible");
+    }
+
+    [Fact]
+    public async Task Mobile_Search_FiltersListClientSide()
+    {
+        await ImportTestFileAsync("sample.gpx", "GPX Places", "#005bbf");
+        await MobileNavigateAndWaitForAppAsync("/");
+
+        // Wait for the POI list to populate (the map page loads collections)
+        await Page.WaitForSelectorAsync(".m-app .list .row", new() { Timeout = 15000 });
+        var beforeCount = await Page.Locator(".m-app .list .row").CountAsync();
+        Assert.True(beforeCount > 0, "POI rows should appear after seeding GPX data");
+
+        // Type in the search input inside the mobile app header
+        var searchInput = Page.Locator(".m-app .app-header .search input");
+        await searchInput.FillAsync("wawel");
+        // M07: replace fixed-duration debounce wait with a state-based wait on
+        // the filtered row count. @oninput is synchronous but Blazor still
+        // needs to ship the render diff over SignalR before the count updates.
+        await Page.WaitForFunctionAsync(
+            "() => document.querySelectorAll('.m-app .list .row').length === 1",
+            null, new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        var afterCount = await Page.Locator(".m-app .list .row").CountAsync();
+        // "Wawel Castle" is the only match for "wawel" in sample.gpx
+        Assert.Equal(1, afterCount);
+        // M09: verify the surviving row IS Wawel Castle, not just "one row".
+        var remainingText = await Page.Locator(".m-app .list .row .name").InnerTextAsync();
+        Assert.Contains("Wawel Castle", remainingText);
+    }
+
+    [Fact]
+    public async Task Mobile_StatusChip_FiltersList()
+    {
+        await ImportTestFileAsync("sample.gpx", "GPX Places", "#005bbf");
+        // H08: GPX rows have no Visited status, so any filter that wiped every
+        // row would have passed the old < check. Seed exactly ONE Visited POI
+        // so we can assert filteredCount == 1.
+        await SeedDataAsync(async db =>
+        {
+            var firstPoi = await db.Pois.OrderBy(p => p.Id).FirstAsync();
+            firstPoi.Status = PoiStatus.Visited;
+            await db.SaveChangesAsync();
+        });
+        await MobileNavigateAndWaitForAppAsync("/");
+
+        // Wait for POIs to load
+        await Page.WaitForSelectorAsync(".m-app .list .row", new() { Timeout = 15000 });
+        var allCount = await Page.Locator(".m-app .list .row").CountAsync();
+        Assert.True(allCount > 1, "Should have multiple POI rows before filtering");
+
+        // Click the "Visited" chip
+        var visitedChip = Page.Locator(".m-app .chip-row .chip").Filter(new LocatorFilterOptions { HasText = "Visited" });
+        await visitedChip.ClickAsync();
+        // M07: state-based wait on row count rather than fixed timeout.
+        await Page.WaitForFunctionAsync(
+            "() => document.querySelectorAll('.m-app .list .row').length === 1",
+            null, new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        // H08: exactly the seeded Visited row should remain.
+        var filteredCount = await Page.Locator(".m-app .list .row").CountAsync();
+        Assert.Equal(1, filteredCount);
+    }
+
+    [Fact]
+    public async Task Mobile_CollectionsDrawer_OpensAndCloses()
+    {
+        await ImportTestFileAsync("sample.gpx", "GPX Places", "#005bbf");
+        await MobileNavigateAndWaitForAppAsync("/");
+
+        // Wait for the page to load
+        await Page.WaitForSelectorAsync(".m-app .app-header", new() { Timeout = 15000 });
+
+        // M10: address the layers button by its real aria-label (now
+        // "Collections" after M11) rather than .Last positional lookup that
+        // breaks the moment another header button is added.
+        var layersBtn = Page.Locator(".m-app .app-header button[aria-label='Collections']");
+        await layersBtn.ScrollIntoViewIfNeededAsync();
+        await layersBtn.DispatchEventAsync("click");
+
+        // Modal screen should appear containing the collections list
+        var modal = Page.Locator(".modal-screen");
+        await modal.WaitForAsync(new() { Timeout = 8000, State = WaitForSelectorState.Visible });
+        Assert.True(await modal.IsVisibleAsync(), "Collections drawer modal should appear");
+
+        // Tap the back arrow (inside the modal head) to close
+        var backBtn = Page.Locator(".modal-screen .icon-btn").First;
+        await backBtn.ClickAsync();
+        await modal.WaitForAsync(new() { Timeout = 5000, State = WaitForSelectorState.Hidden });
+        Assert.False(await modal.IsVisibleAsync(), "Modal should close after tapping back");
+    }
+
+    [Fact]
+    public async Task Mobile_TapPoiRow_OpensDetailModal()
+    {
+        await ImportTestFileAsync("sample.gpx", "GPX Places", "#005bbf");
+        await MobileNavigateAndWaitForAppAsync("/");
+
+        // Wait for POI list rows to appear
+        await Page.WaitForSelectorAsync(".m-app .list .row", new() { Timeout = 15000 });
+
+        // Capture the first row's name BEFORE tapping so we can assert the
+        // detail modal renders THAT POI (and not some other element that
+        // happens to share .modal-screen).
+        var firstRowName = await Page.Locator(".m-app .list .row .name").First.InnerTextAsync();
+
+        // Tap the first POI row
+        var firstRow = Page.Locator(".m-app .list .row").First;
+        await firstRow.ClickAsync();
+
+        // H09: previously asserted only .modal-screen visibility, which the
+        // collections drawer also matches. The POI detail uniquely renders
+        // .m-hero (and now id=poi-detail-name on its heading); key on those.
+        var hero = Page.Locator(".modal-screen .m-hero");
+        await hero.WaitForAsync(new() { Timeout = 5000, State = WaitForSelectorState.Visible });
+
+        var heading = Page.Locator(".modal-screen #poi-detail-name");
+        await heading.WaitForAsync(new() { Timeout = 5000, State = WaitForSelectorState.Visible });
+        var headingText = (await heading.InnerTextAsync()).Trim();
+        Assert.Equal(firstRowName.Trim(), headingText);
+    }
+
+    [Fact]
+    public async Task Mobile_DetailBack_ClosesModal()
+    {
+        await ImportTestFileAsync("sample.gpx", "GPX Places", "#005bbf");
+        await MobileNavigateAndWaitForAppAsync("/");
+
+        // Wait for rows and open detail
+        await Page.WaitForSelectorAsync(".m-app .list .row", new() { Timeout = 15000 });
+        await Page.Locator(".m-app .list .row").First.ClickAsync();
+
+        var modal = Page.Locator(".modal-screen");
+        await modal.WaitForAsync(new() { Timeout = 5000, State = WaitForSelectorState.Visible });
+
+        // Click back arrow — POI detail uses .m-hero-btn for the close button
+        var backBtn = Page.Locator(".modal-screen button[aria-label='Back']").First;
+        await backBtn.ClickAsync();
+        await modal.WaitForAsync(new() { Timeout = 5000, State = WaitForSelectorState.Hidden });
+        Assert.False(await modal.IsVisibleAsync(), "Detail modal should close after tapping back");
+    }
+}

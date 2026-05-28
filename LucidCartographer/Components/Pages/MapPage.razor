@@ -1,10 +1,16 @@
 @page "/"
 @rendermode InteractiveServer
+@using LucidCartographer.Data.Entities
 @inject MapPageViewModel Vm
+@inject ViewportService Viewport
 @inject IJSRuntime Js
 @implements IAsyncDisposable
 
 <PageTitle>@UiStrings.MapPageTitle</PageTitle>
+
+@* Reports viewport width so this interactive page (and its circuit-scoped
+   ViewportService) can pick the desktop or mobile layout. *@
+<ViewportObserver />
 
 @if (Vm.IsLoading)
 {
@@ -15,129 +21,328 @@
         </div>
     </div>
 }
-else
+else if (Viewport.IsMobile)
 {
-<div class="flex h-full">
-    @* Left Sidebar — Collections *@
-    <div class="w-60 flex-shrink-0 bg-surface-container-low flex flex-col">
-        <CollectionSidebar Collections="Vm.CollectionStates"
-                          SelectedCollectionId="Vm.SelectedCollectionId"
-                          OnCollectionSelected="Vm.HandleCollectionSelectedAsync"
-                          OnVisibilityToggled="Vm.HandleVisibilityToggledAsync" />
-    </div>
+    @* ===================== MOBILE: split map + list ===================== *@
+    <div class="m-app">
+        <div class="screen">
+            @* Search + collections drawer trigger *@
+            <div class="app-header" style="padding:calc(8px + var(--safe-top)) 14px 8px">
+                <div class="search" style="flex:1;margin:0">
+                    <span class="ms" style="color:var(--text-3)" aria-hidden="true">search</span>
+                    <input placeholder="Search visible places" value="@_mobileQuery"
+                           aria-label="@UiStrings.SearchPois"
+                           @oninput="e => _mobileQuery = e.Value?.ToString() ?? string.Empty" />
+                    @if (!string.IsNullOrEmpty(_mobileQuery))
+                    {
+                        @* M20: bump from 24x24 to 36x36 to match the standard icon-btn size *@
+                        <button class="icon-btn" style="background:transparent" @onclick="() => _mobileQuery = string.Empty"
+                                aria-label="Clear search">
+                            <span class="ms" style="font-size:16px" aria-hidden="true">close</span>
+                        </button>
+                    }
+                </div>
+                @* M11: the layers button opens the collections drawer, not the Data Sources page *@
+                <button class="icon-btn" @onclick="() => _drawerOpen = true" aria-label="@UiStrings.Collections">
+                    <span class="ms" aria-hidden="true">layers</span>
+                </button>
+            </div>
 
-    @* Center + Bottom *@
-    <div class="flex-1 flex flex-col min-w-0">
-        @* Active filter chips *@
-        <div class="flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-sm z-10 flex-shrink-0">
-            @foreach (var s in Vm.CollectionStates.Where(c => c.IsVisible))
-            {
-                <span @key="s.Id" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium text-white"
-                      style="background-color: @s.Color">
-                    @s.Name
-                    <button @onclick="() => Vm.HandleVisibilityToggledAsync(s.Id)" class="hover:opacity-80"
-                            aria-label="@($"Hide {s.Name}")">
-                        <span class="material-symbols-outlined text-xs" aria-hidden="true">close</span>
+            @* Map (top ~46%) *@
+            <div style="flex:0 0 46%;position:relative">
+                <LeafletMap @ref="_leafletMap" OnMarkerSelected="Vm.HandleMarkerSelectedAsync" OnBoundsChanged="Vm.HandleBoundsChanged" />
+                <div style="position:absolute;top:10px;right:10px;display:flex;flex-direction:column;gap:8px;z-index:20">
+                    <button class="fab ghost mini" @onclick="Vm.FitMapBoundsAsync" aria-label="@UiStrings.FitMapToVisible">
+                        <span class="ms" aria-hidden="true">fit_screen</span>
                     </button>
-                </span>
-            }
-            @if (Vm.PreviousSearchQuery != null)
-            {
-                <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium text-white"
-                      style="background-color: @MapPageViewModel.SearchMarkerColor">
-                    Search: @Vm.PreviousSearchQuery
-                    <button @onclick="Vm.ResetSearchAsync" class="hover:opacity-80"
-                            aria-label="Reset search">
-                        <span class="material-symbols-outlined text-xs" aria-hidden="true">close</span>
-                    </button>
-                </span>
-            }
-            @if (Vm.CollectionStates.Any(c => c.IsVisible))
-            {
-                <div class="ml-auto flex items-center gap-4">
-                    <button class="text-sm text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1.5"
-                            @onclick="Vm.FitMapBoundsAsync"
-                            aria-label="@UiStrings.FitMapToVisible">
-                        <span class="material-symbols-outlined text-base" aria-hidden="true">fit_screen</span>
-                        @UiStrings.FitAll
-                    </button>
-                    <button class="text-sm transition-colors flex items-center gap-1.5 @(Vm.ShowPoiLabels ? "text-primary" : "text-on-surface-variant hover:text-primary")"
-                            @onclick="Vm.TogglePoiLabelsAsync"
-                            aria-pressed="@Vm.ShowPoiLabels"
-                            aria-label="@UiStrings.ToggleLabels">
-                        <span class="material-symbols-outlined text-base" aria-hidden="true">@(Vm.ShowPoiLabels ? "label" : "label_off")</span>
-                        @UiStrings.Labels
+                    <button class="fab ghost mini" @onclick="Vm.TogglePoiLabelsAsync" aria-label="@UiStrings.ToggleLabels"
+                            aria-pressed="@(Vm.ShowPoiLabels ? "true" : "false")"
+                            style="@(Vm.ShowPoiLabels ? "color:var(--primary)" : "")">
+                        <span class="ms @(Vm.ShowPoiLabels ? "filled" : "")" aria-hidden="true">@(Vm.ShowPoiLabels ? "label" : "label_off")</span>
                     </button>
                 </div>
-            }
+            </div>
+
+            @* List (bottom) *@
+            <div style="flex:1;min-height:0;border-top:1px solid var(--separator);display:flex;flex-direction:column">
+                @* H04 (Wave 7): drop role="radiogroup" + role="radio" + aria-checked.
+                   WAI-ARIA APG requires radiogroup to implement Arrow-key roving
+                   tabindex; we don't. Use the toggle-button pattern instead — chips
+                   are <button>s, aria-pressed conveys selected state, and Tab moves
+                   linearly between them (which IS what currently happens). *@
+                <div class="chip-row" style="padding-top:10px" aria-label="POI status filter">
+                    <button class="chip @(_mobileFilter == "all" ? "active" : "")" type="button"
+                            aria-pressed="@(_mobileFilter == "all" ? "true" : "false")"
+                            style="@(_mobileFilter == "all" ? "background:var(--primary)" : "")"
+                            @onclick='() => _mobileFilter = "all"'>All</button>
+                    <button class="chip @(_mobileFilter == "visited" ? "active" : "")" type="button"
+                            aria-pressed="@(_mobileFilter == "visited" ? "true" : "false")"
+                            style="@(_mobileFilter == "visited" ? "background:var(--secondary)" : "")"
+                            @onclick='() => _mobileFilter = "visited"'>
+                        <span class="ms filled" aria-hidden="true">check_circle</span>Visited
+                    </button>
+                    <button class="chip @(_mobileFilter == "want" ? "active" : "")" type="button"
+                            aria-pressed="@(_mobileFilter == "want" ? "true" : "false")"
+                            style="@(_mobileFilter == "want" ? "background:var(--primary)" : "")"
+                            @onclick='() => _mobileFilter = "want"'>
+                        <span class="ms" aria-hidden="true">bookmark</span>Want to go
+                    </button>
+                </div>
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:2px 18px 6px">
+                    <span style="font-family:var(--font-headline);font-weight:800;font-size:15px">
+                        @{
+                            var list = MobilePois().ToList();
+                        }
+                        @list.Count @(list.Count == 1 ? "place" : "places")
+                    </span>
+                </div>
+                <div class="scroll" style="flex:1">
+                    <div class="list">
+                        @foreach (var p in list)
+                        {
+                            @* H07: rows with a nested <button> can't themselves be a <button>
+                               (HTML forbids interactive nesting). Use div role="button" with
+                               tabindex=0 + a keydown handler so the row is keyboard-reachable
+                               while the inner focus-on-map button stays a real button. *@
+                            <div class="row" @key="p.Id" role="button" tabindex="0"
+                                 @onclick="() => Vm.HandlePoiSelectedAsync(p.Id)"
+                                 @onkeydown="e => OnRowKeyDownAsync(e, p.Id)">
+                                <div class="avatar" style="@($"background:{CollectionColorFor(p.Id)}")">
+                                    <span class="ms filled" style="font-size:18px" aria-hidden="true">location_on</span>
+                                </div>
+                                <div class="meta">
+                                    <div class="name">@p.Name</div>
+                                    <div class="sub">@CategoryAddress(p)</div>
+                                </div>
+                                <div class="trailing">
+                                    @if (p.GoogleRating.HasValue)
+                                    {
+                                        <span style="display:inline-flex;align-items:center;gap:2px;font-size:12px;font-weight:600;color:var(--text-2)">
+                                            <span class="ms filled" style="font-size:12px;color:#f5a524" aria-hidden="true">star</span>@p.GoogleRating.Value.ToString("F1")
+                                        </span>
+                                    }
+                                    @* H02 (Wave 7): @onclick:stopPropagation only stops `click` from
+                                       bubbling. When the user tabs to this inner button and presses
+                                       Enter/Space, the browser fires `click` (handled here) AND keydown
+                                       ALSO bubbles to the row's OnRowKeyDownAsync, which then opens the
+                                       POI detail modal — a double-fire that puts the detail on top of
+                                       the focus action. Stop the keydown bubble too. *@
+                                    <button class="icon-btn" type="button" style="background:transparent;width:32px;height:32px"
+                                            @onclick="() => Vm.HandleFocusPoiAsync(p.Id)" @onclick:stopPropagation="true"
+                                            @onkeydown:stopPropagation="true"
+                                            aria-label="Focus on map">
+                                        <span class="ms" style="font-size:18px" aria-hidden="true">my_location</span>
+                                    </button>
+                                </div>
+                            </div>
+                        }
+                        @if (list.Count == 0)
+                        {
+                            <div class="empty">
+                                <span class="ms" aria-hidden="true">location_off</span>
+                                <div class="t">No matching places</div>
+                                <div class="s">Try a different filter, pan the map, or enable more collections.</div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
         </div>
 
-        @* Map *@
-        <div style="flex: 1 1 0; min-height: 120px;" class="relative min-h-0">
-            <LeafletMap @ref="_leafletMap" OnMarkerSelected="Vm.HandleMarkerSelectedAsync" OnBoundsChanged="Vm.HandleBoundsChanged" />
-        </div>
+        <MobileTabBar />
 
-        @* Drag handle *@
-        <div @ref="_splitterHandle"
-             class="flex-shrink-0 h-1.5 bg-surface-container-high hover:bg-primary/30 cursor-row-resize select-none transition-colors"></div>
+        @* Collections drawer *@
+        @if (_drawerOpen)
+        {
+            <MobileModalScreen Title="@UiStrings.Collections" OnClose="() => _drawerOpen = false">
+                <div class="list">
+                    @foreach (var s in Vm.CollectionStates)
+                    {
+                        @* H07: outer row contains a nested visibility-toggle <button>, so keep the
+                           outer as a div with role=button + keyboard handler rather than nesting
+                           interactive elements. The row itself currently has no @onclick handler,
+                           so we only need accessibility attributes for the trailing icon-btn.
+                           L03 (Wave 7): override .row { cursor: pointer; } — the drawer row isn't
+                           itself clickable (only the trailing button is) so the pointer cursor was
+                           misleading. *@
+                        <div class="row" @key="s.Id" style="cursor:default">
+                            <div class="avatar" style="@($"background:{s.Color};border-radius:50%")">
+                                <span class="ms" style="font-size:18px" aria-hidden="true">folder</span>
+                            </div>
+                            <div class="meta">
+                                <div class="name">@s.Name</div>
+                                <div class="sub">@s.PoiCount places</div>
+                            </div>
+                            <div class="trailing">
+                                @* H02 (Wave 7): defensive — the drawer row has no @onkeydown today,
+                                   but the row IS structurally a div role-button candidate. If anyone
+                                   later wires a keydown handler on the row, this stops a double-fire. *@
+                                <button class="icon-btn" type="button" style="background:transparent"
+                                        @onclick="() => Vm.HandleVisibilityToggledAsync(s.Id)"
+                                        @onkeydown:stopPropagation="true"
+                                        aria-pressed="@(s.IsVisible ? "true" : "false")"
+                                        aria-label="@($"{(s.IsVisible ? "Hide" : "Show")} {s.Name}")">
+                                    <span class="ms @(s.IsVisible ? "filled" : "")" aria-hidden="true">@(s.IsVisible ? "visibility" : "visibility_off")</span>
+                                </button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </MobileModalScreen>
+        }
 
-        @* Bottom Table *@
-        <div @ref="_tableContainer"
-             style="height: @(Vm.TableHeight)px; min-height: 80px; max-height: 70vh;"
-             class="flex-shrink-0 bg-white shadow-inner overflow-hidden flex flex-col">
-            <PoiTable Pois="Vm.FilteredPois"
-                     SelectedPoiId="Vm.SelectedPoiId"
-                     CollectionName="@Vm.SelectedCollectionName"
-                     PoiCollectionNames="Vm.PoiCollectionNames"
-                     PoiCollectionMemberships="Vm.PoiCollectionMemberships"
-                     PoiCollectionIds="Vm.PoiCollectionIds"
-                     Collections="Vm.CollectionStates"
-                     OnPoiSelected="Vm.HandlePoiSelectedAsync"
-                     OnFocusClicked="Vm.HandleFocusPoiAsync"
-                     OnDeleteClicked="Vm.HandleDeletePoiAsync"
-                     OnMoveClicked="Vm.HandleMovePoiAsync"
-                     OnMoveToNewClicked="Vm.HandleMoveToNewCollectionAsync"
-                     OnCopyClicked="Vm.HandleCopyPoiAsync"
-                     OnCopyToNewClicked="Vm.HandleCopyToNewCollectionAsync"
-                     OnBatchDeleteClicked="Vm.HandleBatchDeleteAsync"
-                     OnBatchMoveClicked="Vm.HandleBatchMoveAsync"
-                     OnBatchMoveToNewClicked="Vm.HandleBatchMoveToNewCollectionAsync"
-                     OnBatchCopyClicked="Vm.HandleBatchCopyAsync"
-                     OnBatchCopyToNewClicked="Vm.HandleBatchCopyToNewCollectionAsync" />
-        </div>
+        @* POI detail *@
+        @if (Vm.SelectedPoi is { } selected)
+        {
+            <MobilePoiDetail Poi="selected"
+                             CollectionColor="@CollectionColorFor(selected.Id)"
+                             CollectionNames="@(Vm.PoiCollectionNames.TryGetValue(selected.Id, out var cn) ? cn : null)"
+                             OnClose="Vm.CloseDetailPane"
+                             OnEnrich="Vm.HandleEnrichPoiAsync"
+                             OnManualEnrich="Vm.OpenManualEnrichAsync"
+                             OnRename="Vm.HandleRenamePoiAsync" />
+        }
     </div>
 
-    @* Right Detail Pane — parent owns the null check *@
-    @if (Vm.SelectedPoi != null)
+    @if (Vm.EnrichFallbackPoi is not null)
     {
-        <div class="w-80 flex-shrink-0 shadow-lg overflow-hidden border-l border-surface-container-high">
-            <PoiDetailPane Poi="Vm.SelectedPoi"
-                           CollectionNames="@(Vm.SelectedPoiId is { } sid && Vm.PoiCollectionNames.TryGetValue(sid, out var cn) ? cn : null)"
-                           OnClose="Vm.CloseDetailPane"
-                           OnEnrichRequested="Vm.HandleEnrichPoiAsync"
-                           OnManualEnrichRequested="Vm.OpenManualEnrichAsync"
-                           OnRenameRequested="Vm.HandleRenamePoiAsync" />
-        </div>
+        <EnrichFallbackDialog Poi="Vm.EnrichFallbackPoi"
+                              OnClose="Vm.CloseEnrichFallback"
+                              OnSubmit="Vm.SubmitEnrichFallbackAsync" />
     }
-</div>
-
-@if (Vm.EnrichFallbackPoi is not null)
-{
-    <EnrichFallbackDialog Poi="Vm.EnrichFallbackPoi"
-                          OnClose="Vm.CloseEnrichFallback"
-                          OnSubmit="Vm.SubmitEnrichFallbackAsync" />
 }
+else
+{
+    @* ===================== DESKTOP (unchanged) ===================== *@
+    <div class="flex h-full">
+        @* Left Sidebar — Collections *@
+        <div class="w-60 flex-shrink-0 bg-surface-container-low flex flex-col">
+            <CollectionSidebar Collections="Vm.CollectionStates"
+                              SelectedCollectionId="Vm.SelectedCollectionId"
+                              OnCollectionSelected="Vm.HandleCollectionSelectedAsync"
+                              OnVisibilityToggled="Vm.HandleVisibilityToggledAsync" />
+        </div>
+
+        @* Center + Bottom *@
+        <div class="flex-1 flex flex-col min-w-0">
+            @* Active filter chips *@
+            <div class="flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-sm z-10 flex-shrink-0">
+                @foreach (var s in Vm.CollectionStates.Where(c => c.IsVisible))
+                {
+                    <span @key="s.Id" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium text-white"
+                          style="background-color: @s.Color">
+                        @s.Name
+                        <button @onclick="() => Vm.HandleVisibilityToggledAsync(s.Id)" class="hover:opacity-80"
+                                aria-label="@($"Hide {s.Name}")">
+                            <span class="material-symbols-outlined text-xs" aria-hidden="true">close</span>
+                        </button>
+                    </span>
+                }
+                @if (Vm.PreviousSearchQuery != null)
+                {
+                    <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium text-white"
+                          style="background-color: @MapPageViewModel.SearchMarkerColor">
+                        Search: @Vm.PreviousSearchQuery
+                        <button @onclick="Vm.ResetSearchAsync" class="hover:opacity-80"
+                                aria-label="Reset search">
+                            <span class="material-symbols-outlined text-xs" aria-hidden="true">close</span>
+                        </button>
+                    </span>
+                }
+                @if (Vm.CollectionStates.Any(c => c.IsVisible))
+                {
+                    <div class="ml-auto flex items-center gap-4">
+                        <button class="text-sm text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1.5"
+                                @onclick="Vm.FitMapBoundsAsync"
+                                aria-label="@UiStrings.FitMapToVisible">
+                            <span class="material-symbols-outlined text-base" aria-hidden="true">fit_screen</span>
+                            @UiStrings.FitAll
+                        </button>
+                        <button class="text-sm transition-colors flex items-center gap-1.5 @(Vm.ShowPoiLabels ? "text-primary" : "text-on-surface-variant hover:text-primary")"
+                                @onclick="Vm.TogglePoiLabelsAsync"
+                                aria-pressed="@(Vm.ShowPoiLabels ? "true" : "false")"
+                                aria-label="@UiStrings.ToggleLabels">
+                            <span class="material-symbols-outlined text-base" aria-hidden="true">@(Vm.ShowPoiLabels ? "label" : "label_off")</span>
+                            @UiStrings.Labels
+                        </button>
+                    </div>
+                }
+            </div>
+
+            @* Map *@
+            <div style="flex: 1 1 0; min-height: 120px;" class="relative min-h-0">
+                <LeafletMap @ref="_leafletMap" OnMarkerSelected="Vm.HandleMarkerSelectedAsync" OnBoundsChanged="Vm.HandleBoundsChanged" />
+            </div>
+
+            @* Drag handle *@
+            <div @ref="_splitterHandle"
+                 class="flex-shrink-0 h-1.5 bg-surface-container-high hover:bg-primary/30 cursor-row-resize select-none transition-colors"></div>
+
+            @* Bottom Table *@
+            <div @ref="_tableContainer"
+                 style="height: @(Vm.TableHeight)px; min-height: 80px; max-height: 70vh;"
+                 class="flex-shrink-0 bg-white shadow-inner overflow-hidden flex flex-col">
+                <PoiTable Pois="Vm.FilteredPois"
+                         SelectedPoiId="Vm.SelectedPoiId"
+                         CollectionName="@Vm.SelectedCollectionName"
+                         PoiCollectionNames="Vm.PoiCollectionNames"
+                         PoiCollectionMemberships="Vm.PoiCollectionMemberships"
+                         PoiCollectionIds="Vm.PoiCollectionIds"
+                         Collections="Vm.CollectionStates"
+                         OnPoiSelected="Vm.HandlePoiSelectedAsync"
+                         OnFocusClicked="Vm.HandleFocusPoiAsync"
+                         OnDeleteClicked="Vm.HandleDeletePoiAsync"
+                         OnMoveClicked="Vm.HandleMovePoiAsync"
+                         OnMoveToNewClicked="Vm.HandleMoveToNewCollectionAsync"
+                         OnCopyClicked="Vm.HandleCopyPoiAsync"
+                         OnCopyToNewClicked="Vm.HandleCopyToNewCollectionAsync"
+                         OnBatchDeleteClicked="Vm.HandleBatchDeleteAsync"
+                         OnBatchMoveClicked="Vm.HandleBatchMoveAsync"
+                         OnBatchMoveToNewClicked="Vm.HandleBatchMoveToNewCollectionAsync"
+                         OnBatchCopyClicked="Vm.HandleBatchCopyAsync"
+                         OnBatchCopyToNewClicked="Vm.HandleBatchCopyToNewCollectionAsync" />
+            </div>
+        </div>
+
+        @* Right Detail Pane — parent owns the null check *@
+        @if (Vm.SelectedPoi != null)
+        {
+            <div class="w-80 flex-shrink-0 shadow-lg overflow-hidden border-l border-surface-container-high">
+                <PoiDetailPane Poi="Vm.SelectedPoi"
+                               CollectionNames="@(Vm.SelectedPoiId is { } sid && Vm.PoiCollectionNames.TryGetValue(sid, out var cn) ? cn : null)"
+                               OnClose="Vm.CloseDetailPane"
+                               OnEnrichRequested="Vm.HandleEnrichPoiAsync"
+                               OnManualEnrichRequested="Vm.OpenManualEnrichAsync"
+                               OnRenameRequested="Vm.HandleRenamePoiAsync" />
+            </div>
+        }
+
+        @if (Vm.EnrichFallbackPoi is not null)
+        {
+            <EnrichFallbackDialog Poi="Vm.EnrichFallbackPoi"
+                                  OnClose="Vm.CloseEnrichFallback"
+                                  OnSubmit="Vm.SubmitEnrichFallbackAsync" />
+        }
+    </div>
 }
 
 @code {
     private LeafletMap? _leafletMap;
+    private LeafletMap? _wiredMap;
     private ElementReference _splitterHandle;
     private ElementReference _tableContainer;
     private DotNetObjectReference<MapPageViewModel>? _selfRef;
+    private bool _splitterInited;
+
+    // Mobile-only client-side list filters + collections drawer
+    private string _mobileQuery = "";
+    private string _mobileFilter = "all";
+    private bool _drawerOpen;
 
     protected override async Task OnInitializedAsync()
     {
         Vm.StateChanged += OnVmChanged;
+        Viewport.Changed += OnViewportChanged;
         Vm.RendererDispatch = InvokeAsync;
         await Vm.InitializeAsync();
     }
@@ -146,13 +351,34 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender && _leafletMap != null)
+        // Wire whichever LeafletMap instance is currently realized. The instance
+        // changes when the layout flips between desktop and mobile, so we key
+        // off reference identity rather than firstRender.
+        if (_leafletMap is not null && !ReferenceEquals(_leafletMap, _wiredMap))
         {
-            await _leafletMap.WaitForInitAsync();
+            _wiredMap = _leafletMap;
+            try
+            {
+                await _leafletMap.WaitForInitAsync();
+            }
+            catch (OperationCanceledException)
+            {
+                // M02: the LeafletMap was disposed mid-await because the
+                // viewport flipped during init. The next render will re-wire
+                // against the new instance; bail out so we don't AttachMap a
+                // dead ref.
+                _wiredMap = null;
+                return;
+            }
             Vm.AttachMap(_leafletMap);
 
-            _selfRef = DotNetObjectReference.Create(Vm);
-            await Js.InvokeVoidAsync("leafletInterop.initSplitter", _splitterHandle, _tableContainer, _selfRef);
+            // The drag-splitter only exists in the desktop layout.
+            if (!Viewport.IsMobile && !_splitterInited)
+            {
+                _selfRef ??= DotNetObjectReference.Create(Vm);
+                await Js.InvokeVoidAsync("leafletInterop.initSplitter", _splitterHandle, _tableContainer, _selfRef);
+                _splitterInited = true;
+            }
 
             await Vm.OnMapInitializedAsync();
         }
@@ -162,11 +388,72 @@ else
         }
     }
 
+    private async Task OnRowKeyDownAsync(KeyboardEventArgs e, int poiId)
+    {
+        // H07: rows are <div role="button" tabindex="0"> because they contain a
+        // nested action button. Map Enter/Space onto the row's click handler so
+        // keyboard users can open the POI detail just like sighted tap users.
+        if (e.Key == "Enter" || e.Key == " ")
+        {
+            await Vm.HandlePoiSelectedAsync(poiId);
+        }
+    }
+
     private void OnVmChanged() => InvokeAsync(StateHasChanged);
+
+    private void OnViewportChanged()
+    {
+        // Layout flip invalidates the splitter wiring; let the next map-wire
+        // re-establish it for the desktop layout.
+        _splitterInited = false;
+        InvokeAsync(StateHasChanged);
+    }
+
+    // --- Mobile helpers ---
+
+    private IEnumerable<Poi> MobilePois()
+    {
+        IEnumerable<Poi> q = Vm.FilteredPois;
+        if (_mobileFilter == "visited")
+        {
+            q = q.Where(p => p.Status == PoiStatus.Visited);
+        }
+        else if (_mobileFilter == "want")
+        {
+            q = q.Where(p => p.Status == PoiStatus.WantToGo);
+        }
+        if (!string.IsNullOrWhiteSpace(_mobileQuery))
+        {
+            var needle = _mobileQuery.Trim();
+            q = q.Where(p => $"{p.Name} {p.Address} {p.Category}".Contains(needle, StringComparison.OrdinalIgnoreCase));
+        }
+        return q;
+    }
+
+    private string CollectionColorFor(int poiId)
+    {
+        if (Vm.PoiCollectionIds.TryGetValue(poiId, out var colId))
+        {
+            var s = Vm.CollectionStates.FirstOrDefault(c => c.Id == colId);
+            if (s is not null)
+            {
+                return s.Color;
+            }
+        }
+        return "#005bbf";
+    }
+
+    private static string CategoryAddress(Poi p)
+    {
+        var parts = new[] { p.Category, p.Address }.Where(x => !string.IsNullOrWhiteSpace(x));
+        var joined = string.Join(" · ", parts);
+        return string.IsNullOrWhiteSpace(joined) ? "—" : joined;
+    }
 
     public async ValueTask DisposeAsync()
     {
         Vm.StateChanged -= OnVmChanged;
+        Viewport.Changed -= OnViewportChanged;
         await Vm.DisposeAsync();
         _selfRef?.Dispose();
         if (_leafletMap != null)

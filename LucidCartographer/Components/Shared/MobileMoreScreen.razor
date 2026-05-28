@@ -1,0 +1,115 @@
+@inject IJSRuntime Js
+
+@* Mobile "More" tab: account summary, appearance (light/dark theme for the
+   mobile UI), about, and sign out. *@
+<div class="m-app">
+    <div class="screen scroll">
+        <div class="app-header" style="padding-top:calc(12px + var(--safe-top))">
+            <div>
+                <div class="title">@UiStrings.NavMore</div>
+                <div class="sub">Settings and account</div>
+            </div>
+        </div>
+
+        <div style="padding:8px 18px 0">
+            <div class="card" style="flex-direction:row;align-items:center;gap:14px;background:var(--primary-soft)">
+                <div style="width:48px;height:48px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;color:#fff;font-family:var(--font-headline);font-weight:800;font-size:18px">
+                    AD
+                </div>
+                <div style="flex:1">
+                    <div style="font-family:var(--font-headline);font-weight:800;font-size:16px">admin</div>
+                    <div style="font-size:12px;color:var(--text-3)">Local administrator</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-title">Appearance</div>
+        <div class="list" style="background:var(--bg-elev);margin:0 18px;border-radius:14px;overflow:hidden">
+            <div class="row" style="cursor:default">
+                <div class="avatar" style="background:var(--primary);border-radius:12px">
+                    <span class="ms" style="font-size:18px" aria-hidden="true">palette</span>
+                </div>
+                <div class="meta">
+                    <div class="name">Theme</div>
+                    <div class="sub">Mobile UI appearance</div>
+                </div>
+                <div class="trailing">
+                    @* H04 (Wave 7): drop role="radiogroup" — WAI-ARIA APG requires
+                       arrow-key roving tabindex which we don't implement. aria-pressed
+                       on a <button> is the correct semantic for these toggles; Tab
+                       cycles between them in source order. *@
+                    <div class="segmented" style="width:140px" aria-label="Theme">
+                        <button type="button" class="@(_theme == "light" ? "active" : "")"
+                                aria-pressed="@(_theme == "light" ? "true" : "false")"
+                                @onclick='() => SetThemeAsync("light")'>Light</button>
+                        <button type="button" class="@(_theme == "dark" ? "active" : "")"
+                                aria-pressed="@(_theme == "dark" ? "true" : "false")"
+                                @onclick='() => SetThemeAsync("dark")'>Dark</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-title">About</div>
+        <div class="list" style="background:var(--bg-elev);margin:0 18px;border-radius:14px;overflow:hidden">
+            <div class="row" style="cursor:default">
+                <div class="avatar" style="background:var(--bg-elev-3);color:var(--text-2);border-radius:12px">
+                    <span class="ms" style="font-size:20px" aria-hidden="true">explore</span>
+                </div>
+                <div class="meta">
+                    <div class="name">@UiStrings.AppTitle</div>
+                    <div class="sub">Self-hosted · your data stays on your server</div>
+                </div>
+            </div>
+            <div class="row" style="cursor:default">
+                <div class="avatar" style="background:var(--bg-elev-3);color:var(--text-2);border-radius:12px">
+                    <span class="ms" style="font-size:20px" aria-hidden="true">key</span>
+                </div>
+                <div class="meta">
+                    <div class="name">OAuth &amp; MCP</div>
+                    <div class="sub">Connect Claude over MCP (see docs)</div>
+                </div>
+            </div>
+        </div>
+
+        <div style="padding:18px">
+            <a class="btn btn-block" style="background:var(--tertiary-soft);color:var(--tertiary);text-decoration:none"
+               href="/logout" onclick="return confirm('Are you sure you want to log out?');">
+                <span class="ms" aria-hidden="true">logout</span>Sign out
+            </a>
+        </div>
+    </div>
+
+    <MobileTabBar />
+</div>
+
+@code {
+    private string _theme = "light";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+        try
+        {
+            var t = await Js.InvokeAsync<string>("LucidTheme.get");
+            if (t != _theme)
+            {
+                _theme = t;
+                StateHasChanged();
+            }
+        }
+        catch (JSException) { }
+        catch (InvalidOperationException) { }
+    }
+
+    private async Task SetThemeAsync(string mode)
+    {
+        _theme = mode;
+        try { await Js.InvokeVoidAsync("LucidTheme.set", mode); }
+        catch (JSException) { }
+        catch (InvalidOperationException) { }
+    }
+}

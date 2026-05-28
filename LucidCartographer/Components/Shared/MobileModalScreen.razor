@@ -1,0 +1,57 @@
+@* Full-screen modal that slides in from the right (iOS-style). The parent owns
+   the open/closed state (render this only when open). A back chevron sits in a
+   top bar; optional Trailing content goes on the right.
+
+   H05/H06: carries dialog semantics, takes focus on open, and dismisses on
+   Escape so keyboard / screen-reader users can use the modal at all. *@
+<div class="modal-screen m-slide-in" @ref="_root" tabindex="-1"
+     role="dialog" aria-modal="true" aria-labelledby="@_titleId"
+     @onkeydown="OnRootKeyDownAsync">
+    <div class="modal-head">
+        <button class="icon-btn" @ref="_backBtn" style="background:transparent" @onclick="OnClose" aria-label="@UiStrings.Back">
+            <span class="ms" aria-hidden="true">arrow_back_ios_new</span>
+        </button>
+        <div id="@_titleId" class="modal-title" style="@(Trailing is null ? "padding-right:36px" : "")">@Title</div>
+        @if (Trailing is not null)
+        {
+            @Trailing
+        }
+    </div>
+    <div class="modal-body">
+        @ChildContent
+    </div>
+</div>
+
+@code {
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public RenderFragment? Trailing { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private readonly string _titleId = $"m-modal-title-{Guid.NewGuid():N}";
+    private ElementReference _root;
+    private ElementReference _backBtn;
+    private bool _focused;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_focused)
+        {
+            _focused = true;
+            try
+            {
+                await _backBtn.FocusAsync();
+            }
+            catch (JSException) { }
+            catch (InvalidOperationException) { }
+        }
+    }
+
+    private async Task OnRootKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            await OnClose.InvokeAsync();
+        }
+    }
+}

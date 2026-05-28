@@ -145,13 +145,21 @@
         MapService.OnBoundsChanged = null;
         _initTcs.TrySetCanceled();
 
+        // M05: flip IsInitialized FIRST so any concurrent VM call checking
+        // `_map is { IsInitialized: true }` short-circuits during the gap
+        // between dispose and the next AttachMap. The async JS teardown below
+        // takes a few hundred ms and the VM is otherwise free to fire calls
+        // against a dead map ref during that window.
+        var wasInitialized = IsInitialized;
+        IsInitialized = false;
+
         // Tear down the JS-side map but DO NOT dispose the service itself.
         // LeafletMapService is registered scoped — its lifetime is owned by the
         // Blazor circuit, not this component. Disposing it here would leave the
         // circuit's next MapPage visit with a dead service: its _disposed flag
         // would be set, silently short-circuiting the next InitMapAsync call and
         // leaving a blank map until a full page refresh.
-        if (IsInitialized)
+        if (wasInitialized)
         {
             try
             {

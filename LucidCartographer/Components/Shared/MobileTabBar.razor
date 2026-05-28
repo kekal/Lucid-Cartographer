@@ -1,0 +1,39 @@
+@inject NavigationManager Nav
+
+@* Bottom tab bar for the mobile shell. Lives in the (static) MainLayout and is
+   shown only at phone widths via CSS. Plain route NavLinks, so navigation works
+   without interactivity. The active tab is colored and its icon filled. *@
+@* Uses a role="navigation" div rather than a <nav> tag so it does not collide
+   with the desktop header's <nav> in tests/selectors that target `nav a`; only
+   one of the two is ever visible (CSS media query). *@
+<div class="m-tabbar" role="navigation" aria-label="Mobile navigation">
+    @foreach (var t in Tabs)
+    {
+        var active = IsActive(t);
+        <NavLink class="@(active ? "active" : "")" href="@t.Href" Match="@t.Match" aria-current="@(active ? "page" : null)">
+            <span class="ms @(active ? "filled" : "")" aria-hidden="true">@t.Icon</span>
+            <span>@t.Label</span>
+        </NavLink>
+    }
+</div>
+
+@code {
+    private sealed record Tab(string Href, NavLinkMatch Match, string Icon, string Label);
+
+    private readonly Tab[] Tabs =
+    [
+        new("", NavLinkMatch.All, "map", UiStrings.NavMap),
+        new("datasources", NavLinkMatch.Prefix, "folder_open", UiStrings.NavSources),
+        new("operations", NavLinkMatch.Prefix, "hub", UiStrings.NavOperations),
+        new("more", NavLinkMatch.Prefix, "more_horiz", UiStrings.NavMore),
+    ];
+
+    private bool IsActive(Tab t)
+    {
+        var rel = Nav.ToBaseRelativePath(Nav.Uri);
+        var path = rel.Split('?', '#')[0].Trim('/');
+        return t.Match == NavLinkMatch.All
+            ? path.Length == 0
+            : path.StartsWith(t.Href, StringComparison.OrdinalIgnoreCase);
+    }
+}

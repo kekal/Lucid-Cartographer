@@ -1,0 +1,44 @@
+@page "/more"
+@rendermode InteractiveServer
+@inject ViewportService Viewport
+@implements IAsyncDisposable
+
+<PageTitle>@UiStrings.NavMore · @UiStrings.AppTitle</PageTitle>
+
+<ViewportObserver />
+
+@if (Viewport.IsMobile)
+{
+    <MobileMoreScreen />
+}
+else
+{
+    @* /more is a mobile-only tab; on desktop the same settings live in the
+       header. Offer a way back rather than a blank page. *@
+    <div class="flex h-full items-center justify-center text-on-surface-variant">
+        <div class="text-center">
+            <span class="material-symbols-outlined text-6xl mb-4 block" aria-hidden="true">more_horiz</span>
+            <p class="text-lg font-headline font-bold mb-2">@UiStrings.NavMore</p>
+            <p class="text-sm mb-4">This tab is part of the mobile layout.</p>
+            <a href="/" class="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:shadow-lg transition-all inline-block nav-link-no-underline">
+                @UiStrings.GoToMap
+            </a>
+        </div>
+    </div>
+}
+
+@code {
+    protected override Task OnInitializedAsync()
+    {
+        Viewport.Changed += OnViewportChanged;
+        return Task.CompletedTask;
+    }
+
+    private void OnViewportChanged() => InvokeAsync(StateHasChanged);
+
+    public ValueTask DisposeAsync()
+    {
+        Viewport.Changed -= OnViewportChanged;
+        return ValueTask.CompletedTask;
+    }
+}

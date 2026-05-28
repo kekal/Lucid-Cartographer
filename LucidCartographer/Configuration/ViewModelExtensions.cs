@@ -1,4 +1,5 @@
 using LucidCartographer.Components.Pages;
+using LucidCartographer.Services;
 
 namespace LucidCartographer.Configuration;
 
@@ -15,6 +16,11 @@ public static class ViewModelExtensions
         services.AddTransient<DataSourcesPageViewModel>();
         services.AddTransient<MapPageViewModel>();
         services.AddTransient<OperationsPageViewModel>();
+
+        // Viewport width tracker is Scoped (one per circuit) so the layout and
+        // every page agree on the current desktop/mobile breakpoint and share
+        // the same change notifications.
+        services.AddScoped<ViewportService>();
         return services;
     }
 }

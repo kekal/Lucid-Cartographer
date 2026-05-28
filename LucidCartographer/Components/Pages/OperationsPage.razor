@@ -2,9 +2,12 @@
 @rendermode InteractiveServer
 @using LucidCartographer.Services.Operations
 @inject OperationsPageViewModel Vm
+@inject ViewportService Viewport
 @implements IAsyncDisposable
 
 <PageTitle>@UiStrings.OperationsPageTitle</PageTitle>
+
+<ViewportObserver />
 
 @if (Vm.IsLoading)
 {
@@ -14,6 +17,10 @@
             <p class="text-on-surface-variant">@UiStrings.LoadingCollections</p>
         </div>
     </div>
+}
+else if (Viewport.IsMobile)
+{
+    <MobileOperationsScreen Vm="Vm" />
 }
 else
 {
@@ -280,14 +287,17 @@ else
     protected override async Task OnInitializedAsync()
     {
         Vm.StateChanged += OnVmChanged;
+        Viewport.Changed += OnViewportChanged;
         await Vm.InitializeAsync();
     }
 
     private void OnVmChanged() => InvokeAsync(StateHasChanged);
+    private void OnViewportChanged() => InvokeAsync(StateHasChanged);
 
     public async ValueTask DisposeAsync()
     {
         Vm.StateChanged -= OnVmChanged;
+        Viewport.Changed -= OnViewportChanged;
         await Vm.DisposeAsync();
     }
 }

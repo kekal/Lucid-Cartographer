@@ -17,6 +17,7 @@
     <link rel="stylesheet" href="lib/leaflet/leaflet.css" />
     <script src="lib/leaflet/leaflet.js"></script>
     <link rel="stylesheet" href="css/base.css?v=3" />
+    <link rel="stylesheet" href="css/mobile.css?v=1" />
     @* Scoped-CSS bundle (LucidCartographer.styles.css) intentionally omitted:
        no .razor.css files exist in the project, so the bundle is never generated
        and the link would 404 on every page load. Re-add if component-scoped CSS
@@ -27,6 +28,8 @@
     <Routes />
     <!-- MED-08: downloadFile moved into leafletInterop.js to eliminate inline scripts (improves CSP) -->
     <script src="js/leafletInterop.js?v=9"></script>
+    <script src="js/viewport.js?v=1"></script>
+    <script src="js/theme.js?v=1"></script>
     <script src="_framework/blazor.web.js"></script>
 </body>
 </html>

@@ -1,0 +1,631 @@
+/* ==========================================================================
+   Mobile UI — touch-optimized, native-feeling layout.
+   Adapted from the Claude Design handoff bundle. EVERY selector is scoped under
+   .m-app so none of this leaks into the desktop layout (which never renders a
+   .m-app ancestor). The mobile shell lives in MainLayout; pages render their
+   mobile markup inside it.
+   ========================================================================== */
+
+.m-app {
+    --primary: #005bbf;
+    --primary-soft: rgba(0, 91, 191, 0.08);
+    --primary-tint: rgba(0, 91, 191, 0.14);
+    --secondary: #006e2c;
+    --secondary-soft: rgba(0, 110, 44, 0.10);
+    --tertiary: #b81d17;
+    --tertiary-soft: rgba(184, 29, 23, 0.10);
+    /* M15: surfaced as a token so the dark-mode block can override it. The
+       light value preserves the previous .pill.warn rgba background.
+       M04 (Wave 7): #b45309 on the alpha-blended warn-soft over white was
+       4.42:1 — fails AA for the 11px pill text. Darken to #9a4a08, ~5.5:1
+       against the same background. */
+    --warn-soft: rgba(217, 119, 6, 0.12);
+    --warn: #9a4a08;
+
+    --bg: #ffffff;
+    --bg-elev: #f7f9ff;
+    --bg-elev-2: #f1f4fa;
+    --bg-elev-3: #e9edf4;
+    --separator: rgba(0, 0, 0, 0.07);
+    --separator-strong: rgba(0, 0, 0, 0.12);
+
+    --text: #181c20;
+    --text-2: #414754;
+    /* M17: #727785 on #f1f4fa was 4.06:1 — fails AA. Darken to ~5:1. */
+    --text-3: #5e6470;
+    --text-disabled: #c1c6d6;
+
+    --radius-sm: 8px;
+    --radius-md: 14px;
+    --radius-lg: 20px;
+    --radius-xl: 28px;
+
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    /* M18: horizontal safe-area insets for landscape notch / rounded edges. */
+    --safe-left: env(safe-area-inset-left, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+
+    --shadow-1: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.10);
+    --shadow-2: 0 4px 12px rgba(16, 24, 40, 0.08), 0 2px 4px rgba(16, 24, 40, 0.04);
+    --shadow-3: 0 12px 32px rgba(16, 24, 40, 0.18), 0 4px 8px rgba(16, 24, 40, 0.06);
+
+    --font-headline: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+
+    position: relative;
+    height: 100%;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.4;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+}
+
+html[data-theme="dark"] .m-app {
+    --bg: #0f1115;
+    --bg-elev: #161a20;
+    --bg-elev-2: #1c2128;
+    --bg-elev-3: #242a33;
+    --separator: rgba(255, 255, 255, 0.08);
+    --separator-strong: rgba(255, 255, 255, 0.14);
+    --text: #e8eaef;
+    --text-2: #b4b9c4;
+    --text-3: #98a0ad;
+    --text-disabled: #4a5060;
+    --primary: #6aa1e8;
+    --primary-soft: rgba(99, 154, 230, 0.16);
+    --primary-tint: rgba(99, 154, 230, 0.24);
+    /* M15: dark-mode soft-tone overrides. Light values produce ~2.7:1 against
+       the dark text colors used in pill.visited / pill.warn / tertiary buttons. */
+    --secondary-soft: rgba(110, 220, 150, 0.18);
+    --secondary: #6edc96;
+    --tertiary-soft: rgba(255, 120, 110, 0.18);
+    --tertiary: #ff786e;
+    --warn-soft: rgba(245, 158, 11, 0.22);
+    --warn: #f7c87a;
+    --shadow-3: 0 12px 32px rgba(0, 0, 0, 0.5), 0 4px 8px rgba(0, 0, 0, 0.4);
+}
+
+.m-app * { box-sizing: border-box; }
+
+/* --------------------------------------------------------------------------
+   Chrome (NOT scoped to .m-app): lives in the static MainLayout. The bottom
+   tab bar shows only at phone widths; the desktop header hides there. Uses
+   literal brand tokens so it needs no .m-app ancestor.
+   -------------------------------------------------------------------------- */
+.m-tabbar { display: none; }
+
+@media (max-width: 767px) {
+    .m-desktop-header { display: none !important; }
+    .m-tabbar {
+        flex-shrink: 0;
+        border-top: 1px solid rgba(0, 0, 0, 0.07);
+        background: color-mix(in srgb, #ffffff 90%, transparent);
+        backdrop-filter: saturate(180%) blur(20px);
+        -webkit-backdrop-filter: saturate(180%) blur(20px);
+        padding: 8px 4px calc(8px + env(safe-area-inset-bottom, 0px)) 4px;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        z-index: 35;
+    }
+}
+.m-tabbar a {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 0;
+    /* M16: tab labels run at 10px so 4.5:1 AA is required (large-text relief
+       doesn't apply below 18.66px / 14px+bold). #727785 was 4.47:1; #5e6470
+       hits ~5.5:1 on white. */
+    color: #5e6470;
+    font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    text-decoration: none;
+    border-radius: 12px;
+    transition: color 120ms ease;
+}
+.m-tabbar a.active { color: #005bbf; }
+
+/* H04: tab bar lives outside .m-app scope so it needs its own dark overrides. */
+html[data-theme="dark"] .m-tabbar {
+    background: color-mix(in srgb, #161a20 90%, transparent);
+    border-top-color: rgba(255, 255, 255, 0.08);
+}
+html[data-theme="dark"] .m-tabbar a { color: #a0a6b2; }
+html[data-theme="dark"] .m-tabbar a.active { color: #6aa1e8; }
+
+.m-tabbar .ms {
+    font-family: 'Material Symbols Outlined';
+    font-size: 24px;
+    line-height: 24px;
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+.m-tabbar .ms.filled { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+
+/* Material Symbols — the font is loaded globally in App.razor; this just maps
+   the design's short `.ms` class onto it so the handoff markup works verbatim. */
+.m-app .ms {
+    font-family: 'Material Symbols Outlined';
+    font-weight: normal;
+    font-style: normal;
+    line-height: 1;
+    display: inline-block;
+    text-transform: none;
+    white-space: nowrap;
+    font-feature-settings: 'liga';
+    -webkit-font-feature-settings: 'liga';
+    -webkit-font-smoothing: antialiased;
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+.m-app .ms.filled { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+
+/* Screen container */
+.m-app .screen {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+}
+.m-app .screen.scroll { overflow-y: auto; }
+
+/* App header */
+.m-app .app-header {
+    /* M18: respect horizontal safe-area insets so the header doesn't disappear
+       under landscape notches. max() preserves the design's 18px minimum. */
+    padding: calc(8px + var(--safe-top)) max(18px, var(--safe-right)) 12px max(18px, var(--safe-left));
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+    gap: 8px;
+    min-width: 0;
+}
+.m-app .app-header > * { min-width: 0; }
+.m-app .app-header .title { font-family: var(--font-headline); font-weight: 800; font-size: 28px; letter-spacing: -0.02em; }
+.m-app .app-header .sub { font-size: 13px; color: var(--text-3); }
+
+.m-app .icon-btn {
+    appearance: none;
+    background: var(--bg-elev-2);
+    border: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.m-app .icon-btn:active { background: var(--bg-elev-3); }
+.m-app .icon-btn .ms { font-size: 20px; }
+
+/* Chips */
+/* M18: same horizontal safe-area treatment as the header so chips don't run
+   under landscape notches. */
+.m-app .chip-row { display: flex; gap: 6px; padding: 4px max(14px, var(--safe-right)) 8px max(14px, var(--safe-left)); overflow-x: auto; scrollbar-width: none; }
+.m-app .chip-row::-webkit-scrollbar { display: none; }
+.m-app .chip {
+    appearance: none;
+    border: 0;
+    background: var(--bg-elev-2);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 12px;
+    font-weight: 600;
+    /* M20: pragmatic touch target — 32px min-height keeps the row scannable
+       while staying inside the touch-target floor for filter chips. */
+    min-height: 32px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.m-app .chip.active { color: #fff; }
+.m-app .chip .swatch { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.m-app .chip .ms { font-size: 14px; }
+
+/* List rows */
+.m-app .list { display: flex; flex-direction: column; }
+.m-app .row {
+    /* L04 (Wave 7): <button class="row"> needs an explicit UA reset on Safari,
+       which otherwise applies native button font-size/padding/border-radius
+       that breaks the row's visual rhythm. font: inherit ensures the row picks
+       up the body font (.m-app sets it on the host). */
+    appearance: none;
+    font: inherit;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    /* M18: horizontal safe-area for landscape notches. */
+    padding: 12px max(18px, var(--safe-right)) 12px max(18px, var(--safe-left));
+    background: transparent;
+    cursor: pointer;
+    position: relative;
+    text-align: left;
+    border: 0;
+    width: 100%;
+    font-family: var(--font-body);
+    color: var(--text);
+}
+.m-app .row + .row::before {
+    content: "";
+    position: absolute;
+    left: 60px;
+    right: 0;
+    top: 0;
+    height: 1px;
+    background: var(--separator);
+}
+.m-app .row:active { background: var(--bg-elev-2); }
+.m-app .row .avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    flex-shrink: 0;
+}
+.m-app .row .meta { flex: 1; min-width: 0; }
+.m-app .row .meta .name { font-weight: 600; font-size: 15px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-app .row .meta .sub { font-size: 12px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-app .row .trailing { color: var(--text-3); font-size: 12px; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+/* FAB */
+.m-app .fab {
+    position: absolute;
+    bottom: 24px;
+    right: 18px;
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    background: var(--primary);
+    color: #fff;
+    border: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 8px 24px rgba(0, 91, 191, 0.35);
+    cursor: pointer;
+    z-index: 30;
+}
+.m-app .fab .ms { font-size: 26px; }
+.m-app .fab.mini { width: 40px; height: 40px; border-radius: 12px; }
+.m-app .fab.mini .ms { font-size: 20px; }
+.m-app .fab.ghost { background: var(--bg); color: var(--text); box-shadow: var(--shadow-2); }
+
+/* Buttons */
+.m-app .btn {
+    appearance: none;
+    border: 0;
+    padding: 12px 16px;
+    border-radius: 14px;
+    font-family: var(--font-headline);
+    font-weight: 700;
+    font-size: 15px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: var(--text);
+}
+.m-app .btn-primary { background: var(--primary); color: #fff; }
+.m-app .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.m-app .btn-secondary { background: var(--bg-elev-2); color: var(--text); }
+.m-app .btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
+.m-app .btn-ghost { background: transparent; color: var(--primary); }
+.m-app .btn-block { width: 100%; }
+
+/* Search field */
+.m-app .search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-elev-2);
+    border-radius: 12px;
+    padding: 10px 12px;
+    margin: 0 18px 8px;
+    min-width: 0;
+}
+.m-app .search input {
+    background: transparent;
+    border: 0;
+    outline: 0;
+    flex: 1 1 0;
+    min-width: 0;
+    width: 0;
+    font-family: var(--font-body);
+    font-size: 15px;
+    color: var(--text);
+}
+.m-app .search input::placeholder { color: var(--text-3); }
+
+/* Text inputs / fields */
+.m-app .field {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid var(--separator-strong);
+    background: var(--bg-elev);
+    font-size: 14px;
+    font-family: var(--font-body);
+    color: var(--text);
+    outline: 0;
+}
+.m-app .field:focus { border-color: var(--primary); }
+.m-app .label {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    display: block;
+}
+
+/* Cards */
+.m-app .card {
+    background: var(--bg-elev);
+    border-radius: var(--radius-md);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    text-align: left;
+}
+.m-app .section-title {
+    font-family: var(--font-headline);
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
+    padding: 18px 18px 8px;
+}
+
+/* Map */
+.m-app .map-wrap { position: relative; flex: 1 1 auto; min-height: 0; }
+.m-app .map-host { position: absolute; inset: 0; }
+
+/* Modal screens (push from right) */
+.m-app .modal-screen {
+    position: absolute;
+    inset: 0;
+    background: var(--bg);
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    transition: transform 280ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.m-app .modal-screen .modal-head {
+    display: flex;
+    align-items: center;
+    padding: calc(6px + var(--safe-top)) 8px 6px;
+    gap: 4px;
+    flex-shrink: 0;
+}
+.m-app .modal-screen .modal-title {
+    flex: 1;
+    font-family: var(--font-headline);
+    font-weight: 800;
+    font-size: 17px;
+    text-align: center;
+}
+.m-app .modal-screen .modal-body { flex: 1; min-height: 0; overflow-y: auto; }
+.m-app .modal-screen.m-slide-in { animation: m-slide-in 280ms cubic-bezier(0.32, 0.72, 0, 1); }
+@keyframes m-slide-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+
+/* POI detail hero */
+.m-app .m-hero {
+    height: 220px;
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    padding: 18px;
+    background: linear-gradient(135deg, var(--hero) 0%, color-mix(in srgb, var(--hero) 70%, transparent) 100%);
+}
+.m-app .m-hero-stripes {
+    position: absolute;
+    inset: 0;
+    background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0 2px, transparent 2px 10px);
+}
+.m-app .m-hero-actions {
+    position: absolute;
+    top: calc(12px + var(--safe-top));
+    left: 12px;
+    right: 12px;
+    display: flex;
+    justify-content: space-between;
+    z-index: 2;
+}
+.m-app .m-hero-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 0;
+    cursor: pointer;
+    background: rgba(0, 0, 0, 0.32);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+.m-app .m-hero-btn .ms { font-size: 20px; }
+.m-app .m-hero-foot { position: relative; display: flex; align-items: center; gap: 10px; }
+.m-app .m-hero-icon {
+    width: 56px; height: 56px; border-radius: 16px;
+    background: rgba(255, 255, 255, 0.18);
+    display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.m-app .m-hero-icon .ms { color: #fff; font-size: 32px; }
+.m-app .m-hero-img {
+    width: 72px; height: 72px; border-radius: 16px; object-fit: cover;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.m-app .m-hero-collection { color: #fff; font-size: 13px; font-weight: 600; }
+.m-app .m-hero-collection-label { opacity: 0.75; text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; }
+
+.m-app .m-name { flex: 1; min-width: 0; margin: 0; font-family: var(--font-headline); font-size: 26px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; overflow-wrap: anywhere; }
+.m-app .m-name-input {
+    flex: 1; min-width: 0; border: 0; border-bottom: 2px solid var(--primary);
+    background: transparent; font-family: var(--font-headline); font-size: 24px; font-weight: 800;
+    padding: 4px 0; color: var(--text); outline: 0;
+}
+.m-app .m-mini-label { font-size: 11px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.08em; }
+.m-app .m-quick { flex-direction: column; padding: 12px 4px; gap: 4px; font-size: 11px; font-weight: 700; text-decoration: none; }
+
+/* Import cards (Sources screen) */
+.m-app .m-import-card { align-items: flex-start; cursor: pointer; border: 0; }
+.m-app .m-import-icon {
+    width: 44px; height: 44px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center; margin-bottom: 4px;
+}
+.m-app .m-import-icon .ms { font-size: 24px; }
+.m-app .m-import-title { font-family: var(--font-headline); font-weight: 800; font-size: 15px; }
+.m-app .m-import-desc { font-size: 12px; color: var(--text-3); line-height: 1.4; }
+
+/* File drop zone with hidden native input overlay */
+.m-app .m-dropzone {
+    display: block;
+    position: relative;
+    padding: 32px 18px;
+    border-radius: 14px;
+    border: 2px dashed var(--separator-strong);
+    background: var(--bg-elev-2);
+    text-align: center;
+    cursor: pointer;
+}
+.m-app .m-file-input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+/* Operation cards */
+.m-app .m-op-card { align-items: center; text-align: center; padding: 16px 10px; cursor: pointer; border: 0; }
+.m-app .m-op-card.selected { box-shadow: 0 0 0 2px var(--primary); background: var(--primary-soft); }
+.m-app .m-op-card:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Segmented control */
+.m-app .segmented {
+    display: flex;
+    background: var(--bg-elev-2);
+    border-radius: 10px;
+    padding: 3px;
+    gap: 2px;
+}
+.m-app .segmented button {
+    flex: 1;
+    border: 0;
+    background: transparent;
+    font-family: var(--font-body);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-2);
+    padding: 7px 0;
+    border-radius: 8px;
+    cursor: pointer;
+}
+.m-app .segmented button.active {
+    background: var(--bg);
+    color: var(--text);
+    box-shadow: var(--shadow-1);
+}
+
+/* Status pills */
+.m-app .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: var(--bg-elev-2);
+    color: var(--text-2);
+}
+.m-app .pill.visited { background: var(--secondary-soft); color: var(--secondary); }
+.m-app .pill.want { background: var(--primary-soft); color: var(--primary); }
+/* M15: route warn pill through tokens so dark mode can override it. */
+.m-app .pill.warn { background: var(--warn-soft); color: var(--warn); }
+
+/* Misc */
+.m-app .scroll { overflow-y: auto; }
+.m-app .divider { height: 1px; background: var(--separator); margin: 8px 18px; }
+
+.m-app .empty {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 48px 28px; text-align: center; gap: 8px; color: var(--text-3);
+}
+.m-app .empty .ms { font-size: 48px; color: var(--text-3); }
+.m-app .empty .t { font-family: var(--font-headline); font-weight: 700; color: var(--text); font-size: 16px; }
+.m-app .empty .s { font-size: 13px; }
+
+.m-app button { -webkit-tap-highlight-color: transparent; }
+.m-app input { -webkit-tap-highlight-color: transparent; }
+
+/* M21: keyboard users navigating the mobile UI need a visible focus ring.
+   .m-app input had outline:0 (above) and no rule replaced it, so focus was
+   invisible everywhere. One scoped rule covers buttons, anchors, inputs,
+   rows-promoted-to-buttons (H07), and role=button widgets. */
+.m-app :focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+    border-radius: inherit;
+}
+
+/* M19: respect users who prefer reduced motion. Zero out the iOS-style modal
+   transitions, the slide-in animation, and the row tap transition.
+   L01 (Wave 7): the .m-app .m-tabbar a selector was dead code — .m-tabbar
+   lives OUTSIDE the .m-app subtree (it's part of the MainLayout chrome). The
+   bare .m-tabbar a selector is the one that matches. */
+@media (prefers-reduced-motion: reduce) {
+    .m-app .modal-screen,
+    .m-app .modal-screen.m-slide-in {
+        transition: none;
+        animation: none;
+    }
+    .m-app .spinner {
+        animation: none;
+    }
+    .m-tabbar a {
+        transition: none;
+    }
+}
+
+/* Spinner */
+.m-app .spinner {
+    width: 28px; height: 28px;
+    border: 3px solid var(--primary);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: m-spin 0.8s linear infinite;
+}
+@keyframes m-spin { to { transform: rotate(360deg); } }
+
+/* Leaflet marker styling inside the mobile map (mirrors desktop pin look) */
+.m-app .leaflet-control-attribution { font-size: 9px !important; }
