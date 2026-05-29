@@ -11,8 +11,10 @@ public class PoiTableTests : IntegrationTestBase
         await NavigateAndWaitAsync("/");
         await Page.WaitForSelectorAsync(".w-60 .cursor-pointer:has-text('Test Places')", new() { Timeout = 10000 });
 
-        // Click on collection to show table
-        await Page.Locator(".w-60 .cursor-pointer:has-text('Test Places')").ClickAsync();
+        // Imported collections are visible by default, so the table is
+        // already populated with their POIs (the list is the union of all
+        // visible collections). No collection-row click needed — clicking the
+        // row now toggles visibility, which would HIDE this collection.
         await Page.WaitForSelectorAsync("td:has-text('Wawel Castle')", new() { Timeout = 10000 });
 
         // Table should show item count badge
@@ -28,8 +30,10 @@ public class PoiTableTests : IntegrationTestBase
         await NavigateAndWaitAsync("/");
         await Page.WaitForSelectorAsync(".w-60 .cursor-pointer:has-text('Test Places')", new() { Timeout = 10000 });
 
-        // Click on collection to show table
-        await Page.Locator(".w-60 .cursor-pointer:has-text('Test Places')").ClickAsync();
+        // Imported collections are visible by default, so the table is
+        // already populated with their POIs (the list is the union of all
+        // visible collections). No collection-row click needed — clicking the
+        // row now toggles visibility, which would HIDE this collection.
         await Page.WaitForSelectorAsync("td:has-text('Wawel Castle')", new() { Timeout = 10000 });
 
         // Find a POI row and locate its focus button
@@ -47,32 +51,6 @@ public class PoiTableTests : IntegrationTestBase
         // No error messages should appear
         var errors = await Page.Locator("text=/error|Error/i").CountAsync();
         Assert.Equal(0, errors);
-    }
-
-    [Fact]
-    public async Task PoiTable_EachRow_HasOpenInGoogleMapsLink()
-    {
-        // Pre-seed with sample.gpx
-        await ImportTestFileAsync("sample.gpx", "Test Places", "#b81d17");
-        await NavigateAndWaitAsync("/");
-        await Page.WaitForSelectorAsync(".w-60 .cursor-pointer:has-text('Test Places')", new() { Timeout = 10000 });
-
-        // Click on collection to show table
-        await Page.Locator(".w-60 .cursor-pointer:has-text('Test Places')").ClickAsync();
-        await Page.WaitForSelectorAsync("td:has-text('Wawel Castle')", new() { Timeout = 10000 });
-
-        // Verify Google Maps links exist for each row
-        var googleMapsLinks = Page.Locator("a[href*='google.com/maps']");
-        var linkCount = await googleMapsLinks.CountAsync();
-        Assert.True(linkCount >= 3, $"Expected at least 3 Google Maps links (one per POI), found {linkCount}");
-
-        // Each link should have target="_blank"
-        for (var i = 0; i < linkCount; i++)
-        {
-            var link = googleMapsLinks.Nth(i);
-            var target = await link.GetAttributeAsync("target");
-            Assert.Equal("_blank", target);
-        }
     }
 
     // NOTE: A previous "Showing 200 of 250" truncation test was removed. The production

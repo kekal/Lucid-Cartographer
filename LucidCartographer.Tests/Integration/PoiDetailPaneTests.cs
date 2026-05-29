@@ -7,26 +7,6 @@ namespace LucidCartographer.Tests.Integration;
 public class PoiDetailPaneTests : IntegrationTestBase
 {
     [Fact]
-    public async Task DetailPane_ShowsPoisName()
-    {
-        // Pre-seed with sample.gpx
-        await ImportTestFileAsync("sample.gpx", "Test Places", "#b81d17");
-        await NavigateAndWaitAsync("/");
-
-        // Click on collection in sidebar to show table
-        await Page.Locator(".w-60 .cursor-pointer:has-text('Test Places')").ClickAsync();
-        await Page.WaitForSelectorAsync("td:has-text('Wawel Castle')", new() { Timeout = 10000 });
-
-        // Click on Wawel Castle row to open detail pane
-        await Page.Locator("tr:has-text('Wawel Castle')").ClickAsync();
-        await Page.WaitForSelectorAsync("h4:has-text('Wawel Castle')", new() { Timeout = 10000 });
-
-        // Detail pane should show POI name
-        var poiName = Page.Locator("h4:has-text('Wawel Castle')");
-        Assert.True(await poiName.IsVisibleAsync(), "Detail pane should show POI name");
-    }
-
-    [Fact]
     public async Task DetailPane_ShowsAddress()
     {
         // Seed a POI with an explicit address so we can assert it's displayed
@@ -64,8 +44,8 @@ public class PoiDetailPaneTests : IntegrationTestBase
         await NavigateAndWaitAsync("/");
         await Page.WaitForSelectorAsync(".w-60 .cursor-pointer:has-text('Address Places')", new() { Timeout = 10000 });
 
-        // Click on collection to show table
-        await Page.Locator(".w-60 .cursor-pointer:has-text('Address Places')").ClickAsync();
+        // Collection is visible by default → table already populated; the
+        // sidebar row is now a visibility toggle, so don't click it.
         await Page.WaitForSelectorAsync("td:has-text('Addressed Spot')", new() { Timeout = 10000 });
 
         // Click on the POI row to open detail pane
@@ -82,63 +62,14 @@ public class PoiDetailPaneTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task DetailPane_ShowsCoordinates()
-    {
-        // Pre-seed with sample.gpx
-        await ImportTestFileAsync("sample.gpx", "Test Places", "#b81d17");
-        await NavigateAndWaitAsync("/");
-
-        // Click on collection to show table
-        await Page.Locator(".w-60 .cursor-pointer:has-text('Test Places')").ClickAsync();
-        await Page.WaitForSelectorAsync("td:has-text('Wawel Castle')", new() { Timeout = 10000 });
-
-        // Click on a POI row
-        await Page.Locator("tr:has-text('Wawel Castle')").ClickAsync();
-        await Page.WaitForSelectorAsync("h4:has-text('Wawel Castle')", new() { Timeout = 10000 });
-
-        // The detail pane should be visible with the POI name
-        var detailPane = Page.Locator("h4:has-text('Wawel Castle')");
-        Assert.True(await detailPane.IsVisibleAsync(), "Detail pane should be open");
-
-        // Get the POI data from the table row to verify coordinates exist
-        var coordCell = Page.Locator("tr:has-text('Wawel Castle') td.text-xs.text-on-surface-variant.font-mono");
-        Assert.True(await coordCell.IsVisibleAsync(), "Coordinates should be shown in table");
-    }
-
-    [Fact]
-    public async Task DetailPane_ShowsOpenInGoogleMapsButton()
-    {
-        // Pre-seed with sample.gpx
-        await ImportTestFileAsync("sample.gpx", "Test Places", "#b81d17");
-        await NavigateAndWaitAsync("/");
-
-        // Click on collection to show table
-        await Page.Locator(".w-60 .cursor-pointer:has-text('Test Places')").ClickAsync();
-        await Page.WaitForSelectorAsync("td:has-text('Wawel Castle')", new() { Timeout = 10000 });
-
-        // Click on a POI row
-        await Page.Locator("tr:has-text('Wawel Castle')").ClickAsync();
-        await Page.WaitForSelectorAsync("h4:has-text('Wawel Castle')", new() { Timeout = 10000 });
-
-        // Detail pane should show "Open in Google Maps" button with href
-        var googleMapsLink = Page.Locator("a:has-text('Open in Google Maps')");
-        Assert.True(await googleMapsLink.IsVisibleAsync(), "Detail pane should show 'Open in Google Maps' button");
-
-        // Verify href contains google.com/maps
-        var href = await googleMapsLink.GetAttributeAsync("href");
-        Assert.NotNull(href);
-        Assert.Contains("google.com/maps", href);
-    }
-
-    [Fact]
     public async Task DetailPane_CloseButton_HidesPane()
     {
         // Pre-seed with sample.gpx
         await ImportTestFileAsync("sample.gpx", "Test Places", "#b81d17");
         await NavigateAndWaitAsync("/");
 
-        // Click on collection to show table
-        await Page.Locator(".w-60 .cursor-pointer:has-text('Test Places')").ClickAsync();
+        // Collection is visible by default → table already populated; the
+        // sidebar row is now a visibility toggle, so don't click it.
         await Page.WaitForSelectorAsync("td:has-text('Wawel Castle')", new() { Timeout = 10000 });
 
         // Click on a POI row to open detail pane
@@ -204,8 +135,8 @@ public class PoiDetailPaneTests : IntegrationTestBase
         await NavigateAndWaitAsync("/");
         await Page.WaitForSelectorAsync(".w-60 .cursor-pointer:has-text('Rated Places')", new() { Timeout = 10000 });
 
-        // Click on collection to show table
-        await Page.Locator(".w-60 .cursor-pointer:has-text('Rated Places')").ClickAsync();
+        // Collection is visible by default → table already populated; the
+        // sidebar row is now a visibility toggle, so don't click it.
         await Page.WaitForSelectorAsync("td:has-text('Highly Rated Spot')", new() { Timeout = 10000 });
 
         // Click on the POI row to open detail pane

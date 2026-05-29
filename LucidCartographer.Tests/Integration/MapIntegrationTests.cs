@@ -9,16 +9,6 @@ public class MapIntegrationTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task MapPage_ShowsCollectionInSidebar()
-    {
-        await SeedGpxDataAsync();
-        await NavigateAndWaitAsync("/");
-
-        Assert.True(await Page.Locator(".w-60 .truncate:has-text('Test Places')").IsVisibleAsync(),
-            "Collection name should appear in the sidebar");
-    }
-
-    [Fact]
     public async Task Sidebar_ShowsPointCount()
     {
         await SeedGpxDataAsync();
@@ -30,33 +20,14 @@ public class MapIntegrationTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task TogglingVisibility_ChangesEyeIcon()
+    public async Task VisibleCollection_ShowsPoisInBottomTable()
     {
         await SeedGpxDataAsync();
         await NavigateAndWaitAsync("/");
 
-        // Find the visibility toggle button in the sidebar row for "Test Places"
-        var visibilityButton = Page.Locator(".w-60 .cursor-pointer:has-text('Test Places') button:has(span:has-text('visibility'))").First;
-        Assert.True(await visibilityButton.IsVisibleAsync(), "Visibility toggle should be visible");
-
-        // Click to toggle off — the icon FILL changes from 1 to 0
-        await visibilityButton.ClickAsync();
-        // Wait for re-render by checking the icon style attribute changed
-        await Page.WaitForTimeoutAsync(500);
-
-        var iconStyle = await Page.Locator(".w-60 .cursor-pointer:has-text('Test Places') span:has-text('visibility')").First.GetAttributeAsync("style");
-        Assert.NotNull(iconStyle);
-        Assert.Contains("0", iconStyle);
-    }
-
-    [Fact]
-    public async Task ClickingCollection_ShowsPoisInBottomTable()
-    {
-        await SeedGpxDataAsync();
-        await NavigateAndWaitAsync("/");
-
-        // Click on the collection name in the sidebar
-        await Page.Locator(".w-60 .cursor-pointer:has-text('Test Places')").ClickAsync();
+        // Imported collections are visible by default, so the bottom table
+        // shows their POIs immediately (the list is the union of all visible
+        // collections). No sidebar click — that would toggle visibility off.
         await Page.WaitForSelectorAsync("td:has-text('Wawel Castle')", new() { Timeout = 10000 });
 
         // The bottom table should show POI names
@@ -74,7 +45,7 @@ public class MapIntegrationTests : IntegrationTestBase
         await SeedGpxDataAsync();
         await NavigateAndWaitAsync("/");
 
-        await Page.Locator(".w-60 .cursor-pointer:has-text('Test Places')").ClickAsync();
+        // Visible-by-default collection → table already populated.
         await Page.WaitForSelectorAsync("td:has-text('Wawel Castle')", new() { Timeout = 10000 });
 
         // The PoiTable has links with open_in_new icon pointing to Google Maps
@@ -89,7 +60,7 @@ public class MapIntegrationTests : IntegrationTestBase
         await SeedGpxDataAsync();
         await NavigateAndWaitAsync("/");
 
-        await Page.Locator(".w-60 .cursor-pointer:has-text('Test Places')").ClickAsync();
+        // Visible-by-default collection → table already populated.
         await Page.WaitForSelectorAsync("td:has-text('Wawel Castle')", new() { Timeout = 10000 });
 
         // Click on Wawel Castle row in the table

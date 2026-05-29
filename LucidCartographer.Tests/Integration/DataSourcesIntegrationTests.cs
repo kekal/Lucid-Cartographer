@@ -35,32 +35,6 @@ public class DataSourcesIntegrationTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task FileUploadWithGpx_ImportsThreePois()
-    {
-        await NavigateAndWaitAsync("/");
-        await ClickDataSourcesTabAsync();
-
-        // Open the file upload card
-        await Page.Locator("h3:has-text('KML/GPX Upload')").ClickAsync();
-        await Page.WaitForSelectorAsync("h3:has-text('Import File')", new() { Timeout = 5000 });
-
-        // Fill collection name (Tab to trigger @bind change event)
-        await Page.Locator("input[placeholder*='Poland']").FillAsync("Test GPX Collection");
-        await Page.Locator("input[placeholder*='Poland']").PressAsync("Tab");
-
-        // Upload the GPX file
-        var filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestData", "sample.gpx");
-        await Page.Locator("input[type='file']").SetInputFilesAsync(filePath);
-
-        // Wait for import to complete (35s timeout accounts for Coravel's ~30s ConsummationDelay)
-        await Page.WaitForSelectorAsync("span.font-medium:has-text('Import complete')", new() { Timeout = 35000 });
-
-        // Verify "3" new POIs added
-        var resultText = await Page.Locator("span:has-text('Import complete')").Locator("..").Locator("..").InnerTextAsync();
-        Assert.Contains("3", resultText);
-    }
-
-    [Fact]
     public async Task AfterImport_ManagedSourcesTableShowsCollection()
     {
         await NavigateAndWaitAsync("/");

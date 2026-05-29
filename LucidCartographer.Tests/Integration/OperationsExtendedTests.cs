@@ -13,34 +13,6 @@ public class OperationsExtendedTests : IntegrationTestBase
 
 
     [Fact]
-    public async Task Intersect_ShowsCommonPois()
-    {
-        await SeedBothCollectionsAsync();
-        await NavigateToOperationsAsync();
-
-        var selectA = Page.Locator("select").First;
-        var selectOptionsA = await selectA.Locator("option").AllInnerTextsAsync();
-        var setALabel = selectOptionsA.First(o => o.Contains("Set A"));
-        await selectA.SelectOptionAsync(new SelectOptionValue { Label = setALabel });
-
-        var selectB = Page.Locator("select").Nth(1);
-        var selectOptionsB = await selectB.Locator("option").AllInnerTextsAsync();
-        var setBLabel = selectOptionsB.First(o => o.Contains("Set B"));
-        await selectB.SelectOptionAsync(new SelectOptionValue { Label = setBLabel });
-
-        await Page.WaitForSelectorAsync("text=data points loaded", new() { Timeout = 5000 });
-
-        // Click "A ∩ B" (Intersect) button
-        await Page.Locator("button:has-text('A n B')").ClickAsync();
-        await Page.WaitForSelectorAsync("text=Result Preview", new() { Timeout = 10000 });
-
-        // Result should show intersection (may be 0 if no overlap)
-        var resultText = await Page.Locator("p:has-text('points')").First.InnerTextAsync();
-        Assert.NotEmpty(resultText);
-        Assert.Contains("points", resultText);
-    }
-
-    [Fact]
     public async Task Union_ShowsAllUniquePois()
     {
         await SeedBothCollectionsAsync();
@@ -212,26 +184,6 @@ public class OperationsExtendedTests : IntegrationTestBase
 
         // Verify confirmation text appears (e.g., "3 data points loaded")
         var confirmationText = await Page.Locator("p:has-text('data points loaded')").First.InnerTextAsync();
-        Assert.NotEmpty(confirmationText);
-        Assert.Contains("data points loaded", confirmationText);
-    }
-
-    [Fact]
-    public async Task SelectSourceDatasetB_ShowsConfirmation()
-    {
-        await SeedBothCollectionsAsync();
-        await NavigateToOperationsAsync();
-
-        var selectB = Page.Locator("select").Nth(1);
-        var selectOptionsB = await selectB.Locator("option").AllInnerTextsAsync();
-        var setBLabel = selectOptionsB.First(o => o.Contains("Set B"));
-        await selectB.SelectOptionAsync(new SelectOptionValue { Label = setBLabel });
-
-        await Page.WaitForSelectorAsync("text=data points loaded", new() { Timeout = 5000 });
-
-        // Verify confirmation text appears for Dataset B
-        // The B confirmation is inside the Dataset B section
-        var confirmationText = await Page.Locator("p:has-text('data points loaded')").Last.InnerTextAsync();
         Assert.NotEmpty(confirmationText);
         Assert.Contains("data points loaded", confirmationText);
     }

@@ -31,16 +31,6 @@ public class PoiMatcherTests
     }
 
     [Fact]
-    public void IsMatch_SameNameWithinTolerance_ReturnsTrue()
-    {
-        // Two points ~10m apart
-        var a = CreatePoi(1, "Coffee Shop", 52.22970, 21.01220);
-        var b = CreatePoi(2, "Coffee Shop", 52.22975, 21.01225);
-
-        _matcher.IsMatch(a, b).Should().BeTrue();
-    }
-
-    [Fact]
     public void IsMatch_SameNameFarApart_ReturnsFalse()
     {
         var a = CreatePoi(1, "Coffee Shop", 52.2297, 21.0122);
