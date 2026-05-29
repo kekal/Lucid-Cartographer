@@ -19,7 +19,10 @@ public static class ViewModelExtensions
 
         // Viewport width tracker is Scoped (one per circuit) so the layout and
         // every page agree on the current desktop/mobile breakpoint and share
-        // the same change notifications.
+        // the same change notifications. AddHttpContextAccessor lets the
+        // service seed itself from the `lucid_viewport` cookie during the
+        // initial SSR pass, eliminating the desktop→mobile flash on phones.
+        services.AddHttpContextAccessor();
         services.AddScoped<ViewportService>();
         return services;
     }

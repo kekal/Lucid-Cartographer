@@ -1,14 +1,23 @@
+using Microsoft.AspNetCore.Http;
+
 namespace LucidCartographer.Services;
 
 /// <summary>
 /// Circuit-scoped holder for the client viewport width, used to decide whether
 /// to render the desktop layout or the touch-optimized mobile layout.
 ///
-/// The width is reported from the browser by <c>ViewportObserver</c> via JS
-/// interop (a debounced resize listener). Components inject this service,
-/// subscribe to <see cref="Changed"/>, and read <see cref="IsMobile"/> to pick
-/// their render path. Registered Scoped so every component on a circuit shares
-/// the same instance and agrees on the current breakpoint.
+/// Two inputs feed it:
+/// 1. The <c>lucid_viewport</c> cookie set by <c>viewport.js</c> on first JS
+///    run. Read in the constructor from the active HttpContext so SSR and the
+///    first interactive render pick the correct layout immediately. The cookie
+///    is the page-jerk fix — without it, every navigation re-renders desktop
+///    first, then flips to mobile after JS interop reports a width.
+/// 2. Live updates from <c>ViewportObserver</c> via JS interop (debounced
+///    resize listener) which call <see cref="SetWidth"/>. This corrects the
+///    cookie's coarse value to the real pixel width and handles in-session
+///    resize / orientation changes.
+/// Registered Scoped so every component on a circuit shares the same instance
+/// and agrees on the current breakpoint.
 /// </summary>
 public sealed class ViewportService
 {
@@ -20,19 +29,53 @@ public sealed class ViewportService
     /// </summary>
     public const int MobileBreakpointPx = 768;
 
+    /// <summary>
+    /// Cookie name written by viewport.js and read here. Value is either
+    /// "mobile" or "desktop"; anything else is treated as missing.
+    /// </summary>
+    private const string CookieName = "lucid_viewport";
+
+    /// <summary>
+    /// Synthetic widths used when only the cookie is available (i.e. before JS
+    /// interop has reported the real pixel count). They just have to sit on
+    /// the correct side of MobileBreakpointPx; the live ViewportObserver call
+    /// replaces them with the actual width within ~50ms.
+    /// </summary>
+    private const int CookieMobileWidth = 390;
+    private const int CookieDesktopWidth = 1280;
+
     /// <summary>Last width reported by the browser, in CSS pixels.</summary>
     public int Width { get; private set; }
 
     /// <summary>
-    /// True once the browser has reported a width. Before that the app renders
-    /// the desktop layout (matches server prerender), then flips on first
-    /// report if the viewport is actually narrow.
+    /// True once either the cookie has been read OR the browser has reported a
+    /// width via JS interop. Components can use this to gate "loading" states,
+    /// but with the cookie seed Initialized is true from the very first render
+    /// on any browser that has visited the site before.
     /// </summary>
     public bool Initialized { get; private set; }
 
     public bool IsMobile => Initialized && Width > 0 && Width < MobileBreakpointPx;
 
     public event Action? Changed;
+
+    public ViewportService(IHttpContextAccessor httpContextAccessor)
+    {
+        // Cookie seed: read once at construction. HttpContext is null when the
+        // service is resolved outside a request (e.g. bUnit tests), in which
+        // case Initialized stays false and the JS interop path populates it.
+        var cookie = httpContextAccessor.HttpContext?.Request?.Cookies[CookieName];
+        if (cookie == "mobile")
+        {
+            Width = CookieMobileWidth;
+            Initialized = true;
+        }
+        else if (cookie == "desktop")
+        {
+            Width = CookieDesktopWidth;
+            Initialized = true;
+        }
+    }
 
     /// <summary>
     /// Called by <c>ViewportObserver</c> when the browser reports its width.

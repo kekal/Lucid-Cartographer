@@ -3,7 +3,17 @@
 // per circuit; resize events are debounced to avoid flooding the SignalR
 // connection. Mirrors the IIFE style of leafletInterop.js (no globals leaked
 // beyond window.LucidViewport).
+//
+// On script load (synchronously, before Blazor mounts) this also writes the
+// `lucid_viewport` cookie so the NEXT server render — whether full page reload
+// or Blazor enhanced navigation — can pick the correct desktop/mobile layout
+// during SSR and avoid the desktop→mobile flash. ViewportService reads the
+// cookie in its constructor; constants here must match its CookieName /
+// MobileBreakpointPx.
 (function () {
+    const VIEWPORT_COOKIE = 'lucid_viewport';
+    const BREAKPOINT_PX = 768;
+
     let dotnetRef = null;
     let debounceTimer = null;
     // M01 (Wave 7): integer token identifies which registration call owns the
@@ -19,7 +29,34 @@
         return window.innerWidth || document.documentElement.clientWidth || 0;
     }
 
+    function viewportLabel(width) {
+        return width > 0 && width < BREAKPOINT_PX ? 'mobile' : 'desktop';
+    }
+
+    function writeViewportCookie(label) {
+        // 1 year, root path, SameSite=Lax. No Secure flag so localhost dev
+        // works; the cookie carries only the layout choice, no secret.
+        document.cookie = VIEWPORT_COOKIE + '=' + label +
+            '; Path=/; Max-Age=31536000; SameSite=Lax';
+    }
+
+    let lastCookieLabel = null;
+    function syncViewportCookie() {
+        const label = viewportLabel(currentWidth());
+        if (label !== lastCookieLabel) {
+            writeViewportCookie(label);
+            lastCookieLabel = label;
+        }
+    }
+
+    // Write the cookie immediately so reloads / enhanced-nav requests after
+    // this point hit the server with the correct layout hint.
+    syncViewportCookie();
+
     function report() {
+        // Keep the cookie in sync on every resize tick — cheap, idempotent,
+        // covers orientation changes and window-edge drags across 768px.
+        syncViewportCookie();
         if (!dotnetRef) return;
         try {
             dotnetRef.invokeMethodAsync('OnViewportChanged', currentWidth());
@@ -48,6 +85,9 @@
             window.removeEventListener('orientationchange', onResize);
             window.addEventListener('resize', onResize, { passive: true });
             window.addEventListener('orientationchange', onResize, { passive: true });
+            // Refresh the cookie once more in case JS load timing left a stale
+            // value (e.g. preload / bfcache restore).
+            syncViewportCookie();
             return { width: currentWidth(), token: token };
         },
         // M01 (Wave 7): match by integer token so we don't tear down a listener

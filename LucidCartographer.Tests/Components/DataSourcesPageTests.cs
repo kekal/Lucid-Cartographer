@@ -46,6 +46,10 @@ public class DataSourcesPageTests : BunitTestContext
 
         // The page hosts a ViewportObserver that resolves ViewportService and
         // calls a JS helper on first render; loose JSInterop returns defaults.
+        // ViewportService now reads the lucid_viewport cookie via
+        // IHttpContextAccessor on construction (HttpContext is null in bUnit,
+        // so it stays Initialized=false until the JS interop call).
+        Services.AddHttpContextAccessor();
         Services.AddScoped<ViewportService>();
         JSInterop.Mode = Bunit.JSRuntimeMode.Loose;
     }

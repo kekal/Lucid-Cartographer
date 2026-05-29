@@ -66,23 +66,28 @@ public class MobileMapTests : MobileTestBase
         // Wait for the page to load
         await Page.WaitForSelectorAsync(".m-app .app-header", new() { Timeout = 15000 });
 
-        // M10: address the layers button by its real aria-label (now
-        // "Collections" after M11) rather than .Last positional lookup that
-        // breaks the moment another header button is added.
-        var layersBtn = Page.Locator(".m-app .app-header button[aria-label='Collections']");
+        // Layers button now lives next to the "N places" header in the bottom
+        // panel (moved out of .app-header so the search bar takes the full
+        // header width). Located by aria-label rather than position so further
+        // panel-header additions don't break the lookup.
+        var layersBtn = Page.Locator(".m-app button[aria-label='Collections']");
         await layersBtn.ScrollIntoViewIfNeededAsync();
         await layersBtn.DispatchEventAsync("click");
 
-        // Modal screen should appear containing the collections list
-        var modal = Page.Locator(".modal-screen");
-        await modal.WaitForAsync(new() { Timeout = 8000, State = WaitForSelectorState.Visible });
-        Assert.True(await modal.IsVisibleAsync(), "Collections drawer modal should appear");
+        // The drawer is now inline content in the bottom panel (no modal-screen).
+        // It replaces the "N places" header with a back arrow + "Collections"
+        // title, and the body shows the collection rows. Wait for the title.
+        var collectionsTitle = Page.Locator(".m-app span", new() { HasTextString = "Collections" });
+        await collectionsTitle.First.WaitForAsync(new() { Timeout = 8000, State = WaitForSelectorState.Visible });
 
-        // Tap the back arrow (inside the modal head) to close
-        var backBtn = Page.Locator(".modal-screen .icon-btn").First;
+        // The back arrow is the first icon-btn in the drawer header.
+        var backBtn = Page.Locator(".m-app button[aria-label='Back']").First;
         await backBtn.ClickAsync();
-        await modal.WaitForAsync(new() { Timeout = 5000, State = WaitForSelectorState.Hidden });
-        Assert.False(await modal.IsVisibleAsync(), "Modal should close after tapping back");
+
+        // After closing, the "N places" header is back and the layers button
+        // is clickable again.
+        await Page.Locator(".m-app button[aria-label='Collections']")
+            .WaitForAsync(new() { Timeout = 5000, State = WaitForSelectorState.Visible });
     }
 
     [Fact]

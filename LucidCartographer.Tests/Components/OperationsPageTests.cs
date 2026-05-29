@@ -56,6 +56,8 @@ public class OperationsPageTests : BunitTestContext
         Services.AddSingleton<IFileExporter>(sp => sp.GetRequiredService<KmlExporter>());
         Services.AddSingleton(new Mock<IJSRuntime>().Object);
         // The page hosts a ViewportObserver that resolves ViewportService.
+        // The service injects IHttpContextAccessor for cookie-based SSR seed.
+        Services.AddHttpContextAccessor();
         Services.AddScoped<ViewportService>();
 
         // Page-scoped ViewModel — Stage 2 ViewModel discipline.
