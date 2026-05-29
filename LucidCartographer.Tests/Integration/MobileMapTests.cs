@@ -91,7 +91,7 @@ public class MobileMapTests : MobileTestBase
     }
 
     [Fact]
-    public async Task Mobile_TapPoiRow_OpensDetailModal()
+    public async Task Mobile_TapPoiRow_OpensDetailInPanel()
     {
         await ImportTestFileAsync("sample.gpx", "GPX Places", "#005bbf");
         await MobileNavigateAndWaitForAppAsync("/");
@@ -100,7 +100,7 @@ public class MobileMapTests : MobileTestBase
         await Page.WaitForSelectorAsync(".m-app .list .row", new() { Timeout = 15000 });
 
         // Capture the first row's name BEFORE tapping so we can assert the
-        // detail modal renders THAT POI (and not some other element that
+        // detail panel renders THAT POI (and not some other element that
         // happens to share .modal-screen).
         var firstRowName = await Page.Locator(".m-app .list .row .name").First.InnerTextAsync();
 
@@ -108,20 +108,27 @@ public class MobileMapTests : MobileTestBase
         var firstRow = Page.Locator(".m-app .list .row").First;
         await firstRow.ClickAsync();
 
-        // H09: previously asserted only .modal-screen visibility, which the
-        // collections drawer also matches. The POI detail uniquely renders
-        // .m-hero (and now id=poi-detail-name on its heading); key on those.
-        var hero = Page.Locator(".modal-screen .m-hero");
+        // The POI detail uniquely renders .m-hero (and id=poi-detail-name on
+        // its heading). The detail now lives inside the bottom panel (not as
+        // a full-bleed overlay), so the map's .leaflet-container must STILL
+        // be visible.
+        var hero = Page.Locator(".m-app .m-bottom-panel .modal-screen .m-hero");
         await hero.WaitForAsync(new() { Timeout = 5000, State = WaitForSelectorState.Visible });
 
-        var heading = Page.Locator(".modal-screen #poi-detail-name");
+        var heading = Page.Locator(".m-app .m-bottom-panel .modal-screen #poi-detail-name");
         await heading.WaitForAsync(new() { Timeout = 5000, State = WaitForSelectorState.Visible });
         var headingText = (await heading.InnerTextAsync()).Trim();
         Assert.Equal(firstRowName.Trim(), headingText);
+
+        // Structural assertion: the detail lives inside the bottom panel (not
+        // as a full-bleed .modal-screen sibling of .screen). The locator path
+        // `.m-app .m-bottom-panel .modal-screen` above already proves this —
+        // if MobilePoiDetail were rendered as a sibling of .screen it would
+        // never match that path.
     }
 
     [Fact]
-    public async Task Mobile_DetailBack_ClosesModal()
+    public async Task Mobile_DetailBack_ReturnsToList()
     {
         await ImportTestFileAsync("sample.gpx", "GPX Places", "#005bbf");
         await MobileNavigateAndWaitForAppAsync("/");
@@ -130,13 +137,42 @@ public class MobileMapTests : MobileTestBase
         await Page.WaitForSelectorAsync(".m-app .list .row", new() { Timeout = 15000 });
         await Page.Locator(".m-app .list .row").First.ClickAsync();
 
-        var modal = Page.Locator(".modal-screen");
+        var modal = Page.Locator(".m-app .m-bottom-panel .modal-screen");
         await modal.WaitForAsync(new() { Timeout = 5000, State = WaitForSelectorState.Visible });
 
-        // Click back arrow — POI detail uses .m-hero-btn for the close button
-        var backBtn = Page.Locator(".modal-screen button[aria-label='Back']").First;
+        // Click back arrow
+        var backBtn = Page.Locator(".m-app .m-bottom-panel .modal-screen button[aria-label='Back']").First;
         await backBtn.ClickAsync();
+
+        // Detail unmounts and the list rows are back in the DOM
         await modal.WaitForAsync(new() { Timeout = 5000, State = WaitForSelectorState.Hidden });
-        Assert.False(await modal.IsVisibleAsync(), "Detail modal should close after tapping back");
+        await Page.WaitForSelectorAsync(".m-app .list .row", new() { Timeout = 5000 });
+        Assert.True(await Page.Locator(".m-app .list .row").First.IsVisibleAsync(),
+            "POI list rows should return after closing the detail");
+    }
+
+    [Fact]
+    public async Task Mobile_TapPoiRow_DoesNotOpenLeafletPopup()
+    {
+        // Indirect proof that bindPopup was suppressed on mobile: after
+        // selecting a POI (any path — row tap reaches the same code path via
+        // HandlePoiSelectedAsync, which on desktop opens the marker popup via
+        // highlightMarker → marker.openPopup), no .leaflet-popup must be in
+        // the DOM. The direct test (synthetically click a marker) is
+        // flake-prone in CI because markers can lag the .m-tabbar landmark
+        // by tens of seconds and may not be in the visible map bounds.
+        await ImportTestFileAsync("sample.gpx", "GPX Places", "#005bbf");
+        await MobileNavigateAndWaitForAppAsync("/");
+
+        await Page.WaitForSelectorAsync(".m-app .list .row", new() { Timeout = 15000 });
+        await Page.Locator(".m-app .list .row").First.ClickAsync();
+
+        // Wait for the detail panel to confirm selection went through.
+        await Page.Locator(".m-app .m-bottom-panel .modal-screen .m-hero")
+            .WaitForAsync(new() { Timeout = 5000, State = WaitForSelectorState.Visible });
+
+        // No Leaflet bubble popup anywhere — the desktop code path would
+        // openPopup on highlightMarker; the mobile bindPopup skip prevents that.
+        Assert.Equal(0, await Page.Locator(".leaflet-popup").CountAsync());
     }
 }

@@ -8,7 +8,13 @@
         layerGroups: {},
         markers: {},
         dotnetRef: null,
-        labelsVisible: false
+        labelsVisible: false,
+        // When true, marker.bindPopup is skipped and the tooltip click does not
+        // openPopup either. The mobile layout shows a POI detail panel below
+        // the map that replaces what the popup would say, so the popup is
+        // pure visual noise on the phone. MapPage pushes this flag via
+        // leafletInterop.setMobileMode after each viewport flip.
+        mobileMode: false
     };
 
     function escapeHtml(text) {
@@ -35,7 +41,9 @@
         var tooltip = marker.getTooltip();
         if (tooltip) {
             tooltip.on('click', function () {
-                marker.openPopup();
+                if (!state.mobileMode) {
+                    marker.openPopup();
+                }
                 if (state.dotnetRef && marker._poiId != null) {
                     state.dotnetRef.invokeMethodAsync('OnMarkerClickedJs', marker._poiId);
                 }
@@ -139,14 +147,16 @@
 
                 var marker = L.marker([poi.latitude, poi.longitude], { icon: icon });
 
-                marker.bindPopup(
-                    '<div style="font-family:Inter,sans-serif;min-width:180px;">' +
-                    '<strong style="font-family:Manrope,sans-serif;font-size:14px;">' + escapeHtml(poi.name) + '</strong>' +
-                    (poi.address ? '<br><span style="color:#414754;font-size:12px;">' + escapeHtml(poi.address) + '</span>' : '') +
-                    '<br><a href="' + (poi.googleMapsUrl || 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(poi.name)) +
-                    '" target="_blank" rel="noopener" style="color:#005bbf;font-size:12px;text-decoration:none;">Open in Google Maps &#8599;</a>' +
-                    '</div>'
-                );
+                if (!state.mobileMode) {
+                    marker.bindPopup(
+                        '<div style="font-family:Inter,sans-serif;min-width:180px;">' +
+                        '<strong style="font-family:Manrope,sans-serif;font-size:14px;">' + escapeHtml(poi.name) + '</strong>' +
+                        (poi.address ? '<br><span style="color:#414754;font-size:12px;">' + escapeHtml(poi.address) + '</span>' : '') +
+                        '<br><a href="' + (poi.googleMapsUrl || 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(poi.name)) +
+                        '" target="_blank" rel="noopener" style="color:#005bbf;font-size:12px;text-decoration:none;">Open in Google Maps &#8599;</a>' +
+                        '</div>'
+                    );
+                }
 
                 marker.on('click', function () {
                     if (state.dotnetRef) {
@@ -255,6 +265,39 @@
             state.map.on('moveend', state._boundsHandler);
             // Fire immediately so the initial viewport is known
             state._boundsHandler();
+        },
+
+        // Pushed by MapPage when the viewport flips between desktop and
+        // mobile. On mobile, the POI detail panel below the map replaces what
+        // Leaflet's built-in popup would say, so we skip bindPopup entirely
+        // and close any popup that may still be open from a prior desktop
+        // session. Existing markers added in the other mode keep their state
+        // until the next addCollectionMarkers re-bind — that's fine: a closed
+        // popup never appears, and an unbound popup is just a no-op when
+        // highlightMarker tries to open it.
+        setMobileMode: function (on) {
+            state.mobileMode = !!on;
+            if (state.mobileMode && state.map) {
+                state.map.closePopup();
+            }
+        },
+
+        // Scroll the mobile POI list so the row for `poiId` is in view. Used
+        // by MapPage when the user closes the detail panel: the list is back
+        // in the DOM and we want it positioned on the POI they were just
+        // viewing. The mobile list is non-virtualized (.flex column), so a
+        // plain querySelector + scrollIntoView is enough — no need to share
+        // the desktop's index/itemSize logic with the virtualized PoiTable.
+        scrollMobileRowIntoView: function (poiId) {
+            var el = document.querySelector('.m-app .row[data-poi-id="' + poiId + '"]');
+            if (el && el.scrollIntoView) {
+                // block:'center' centres the row in the panel, which is the
+                // most ergonomic landing for a phone — the user can see the
+                // POIs above and below for context. behavior:'auto' (instant)
+                // is correct here: the user just dismissed the detail and is
+                // visually re-orienting, a smooth animation feels laggy.
+                el.scrollIntoView({ block: 'center', behavior: 'auto' });
+            }
         }
     };
 

@@ -66,10 +66,23 @@ else if (Viewport.IsMobile)
             </div>
 
             @* Bottom panel — POI list by default, swapped to Collections
-               list when the layers button is pressed. The map above stays
-               put; only this lower half changes content. *@
-            <div style="flex:1;min-height:0;border-top:1px solid var(--separator);display:flex;flex-direction:column">
-                @if (_drawerOpen)
+               list when the layers button is pressed, or to the POI detail
+               when a marker / row is selected. The map above stays put;
+               only this lower half changes content. position:relative is
+               required so MobilePoiDetail's .modal-screen (inset:0)
+               positions to the panel, not the whole .m-app. *@
+            <div class="m-bottom-panel" style="flex:1;min-height:0;border-top:1px solid var(--separator);display:flex;flex-direction:column;position:relative">
+                @if (Vm.SelectedPoi is { } selected)
+                {
+                    <MobilePoiDetail Poi="selected"
+                                     CollectionColor="@CollectionColorFor(selected.Id)"
+                                     CollectionNames="@(Vm.PoiCollectionNames.TryGetValue(selected.Id, out var cn) ? cn : null)"
+                                     OnClose="CloseMobileDetail"
+                                     OnEnrich="Vm.HandleEnrichPoiAsync"
+                                     OnManualEnrich="Vm.OpenManualEnrichAsync"
+                                     OnRename="Vm.HandleRenamePoiAsync" />
+                }
+                else if (_drawerOpen)
                 {
                     <div style="display:flex;align-items:center;gap:6px;padding:6px 8px 6px">
                         <button class="icon-btn" type="button" style="background:transparent"
@@ -129,7 +142,10 @@ else if (Viewport.IsMobile)
                                (HTML forbids interactive nesting). Use div role="button" with
                                tabindex=0 + a keydown handler so the row is keyboard-reachable
                                while the inner focus-on-map button stays a real button. *@
-                            <div class="row" @key="p.Id" role="button" tabindex="0"
+                            @* data-poi-id lets leafletInterop.scrollMobileRowIntoView
+                               locate the row when the user closes the detail panel
+                               (we restore the list scrolled to the just-shown POI). *@
+                            <div class="row" @key="p.Id" data-poi-id="@p.Id" role="button" tabindex="0"
                                  @onclick="() => Vm.HandlePoiSelectedAsync(p.Id)"
                                  @onkeydown="e => OnRowKeyDownAsync(e, p.Id)">
                                 <div class="avatar" style="@($"background:{CollectionColorFor(p.Id)}")">
@@ -176,18 +192,6 @@ else if (Viewport.IsMobile)
         </div>
 
         <MobileTabBar />
-
-        @* POI detail *@
-        @if (Vm.SelectedPoi is { } selected)
-        {
-            <MobilePoiDetail Poi="selected"
-                             CollectionColor="@CollectionColorFor(selected.Id)"
-                             CollectionNames="@(Vm.PoiCollectionNames.TryGetValue(selected.Id, out var cn) ? cn : null)"
-                             OnClose="Vm.CloseDetailPane"
-                             OnEnrich="Vm.HandleEnrichPoiAsync"
-                             OnManualEnrich="Vm.OpenManualEnrichAsync"
-                             OnRename="Vm.HandleRenamePoiAsync" />
-        }
     </div>
 
     @if (Vm.EnrichFallbackPoi is not null)
@@ -324,6 +328,15 @@ else
     private string _mobileQuery = "";
     private bool _drawerOpen;
 
+    // Set by CloseMobileDetail right before clearing SelectedPoi, so the next
+    // OnAfterRenderAsync (which sees the list back in the DOM) can call the JS
+    // scroll helper and put the user's eye where the detail just closed.
+    private int? _pendingScrollPoiId;
+
+    // Tracks the last value pushed to leafletInterop.setMobileMode so we only
+    // re-call on actual flips, not on every render.
+    private bool? _jsMobileMode;
+
     protected override async Task OnInitializedAsync()
     {
         Vm.StateChanged += OnVmChanged;
@@ -357,6 +370,19 @@ else
             }
             Vm.AttachMap(_leafletMap);
 
+            // Push mobile-mode to the Leaflet interop BEFORE the VM seeds
+            // markers (OnMapInitializedAsync triggers addCollectionMarkers).
+            // On mobile this makes addCollectionMarkers skip bindPopup so the
+            // built-in popup never appears; on desktop the popup binds as
+            // before. Re-pushed on every viewport flip via _jsMobileMode.
+            if (_jsMobileMode != Viewport.IsMobile)
+            {
+                _jsMobileMode = Viewport.IsMobile;
+                try { await Js.InvokeVoidAsync("leafletInterop.setMobileMode", Viewport.IsMobile); }
+                catch (JSDisconnectedException) { }
+                catch (InvalidOperationException) { }
+            }
+
             // The drag-splitter only exists in the desktop layout.
             if (!Viewport.IsMobile && !_splitterInited)
             {
@@ -370,6 +396,20 @@ else
         else if (Vm.PendingSearchMapUpdate && _leafletMap is { IsInitialized: true })
         {
             await Vm.ResolvePendingSearchMapUpdateAsync();
+        }
+
+        // When the detail just closed (SelectedPoiId went to null while we
+        // had _lastDetailPoiId set), the list is back in the DOM. Scroll the
+        // row we were just viewing into view so the user lands on it. We
+        // gate on SelectedPoi being null and IsMobile to avoid scrolling
+        // during interim renders or on desktop.
+        if (_pendingScrollPoiId.HasValue && Viewport.IsMobile && Vm.SelectedPoi is null)
+        {
+            var scrollTo = _pendingScrollPoiId.Value;
+            _pendingScrollPoiId = null;
+            try { await Js.InvokeVoidAsync("leafletInterop.scrollMobileRowIntoView", scrollTo); }
+            catch (JSDisconnectedException) { }
+            catch (InvalidOperationException) { }
         }
     }
 
@@ -386,11 +426,29 @@ else
 
     private void OnVmChanged() => InvokeAsync(StateHasChanged);
 
+    // Wraps Vm.CloseDetailPane so we capture the POI id BEFORE the VM clears
+    // SelectedPoiId. The same callback handles both UI back chevron and the
+    // system Back button (LucidHistory routes both through OnClose). Because
+    // CloseDetailPane doesn't raise Vm.StateChanged, we can't rely on
+    // OnVmChanged here — but Blazor still re-renders this component because
+    // it owns the EventCallback, so OnAfterRenderAsync runs and the scroll
+    // fires there.
+    private void CloseMobileDetail()
+    {
+        if (Vm.SelectedPoiId is { } id)
+        {
+            _pendingScrollPoiId = id;
+        }
+        Vm.CloseDetailPane();
+    }
+
     private void OnViewportChanged()
     {
         // Layout flip invalidates the splitter wiring; let the next map-wire
-        // re-establish it for the desktop layout.
+        // re-establish it for the desktop layout. Also clear the cached JS
+        // mobile-mode so OnAfterRender re-pushes it.
         _splitterInited = false;
+        _jsMobileMode = null;
         InvokeAsync(StateHasChanged);
     }
 
