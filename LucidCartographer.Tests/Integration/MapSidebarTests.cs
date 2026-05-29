@@ -35,10 +35,11 @@ public class MapSidebarTests : IntegrationTestBase
         var chip = Page.Locator("span:has-text('Test Places')").First;
         Assert.True(await chip.IsVisibleAsync(), "Collection chip should be visible initially");
 
-        // Find the visibility toggle button in the sidebar and click it to turn OFF
-        var visibilityButton = Page.Locator(".w-60 .cursor-pointer:has-text('Test Places') button:has(span:has-text('visibility'))").First;
-        Assert.True(await visibilityButton.IsVisibleAsync(), "Visibility toggle should be visible");
-        await visibilityButton.ClickAsync();
+        // The whole sidebar row is the visibility toggle now — click it to
+        // turn the collection OFF.
+        var toggleRow = Page.Locator(".w-60 .cursor-pointer:has-text('Test Places')").First;
+        Assert.True(await toggleRow.IsVisibleAsync(), "Collection row should be visible");
+        await toggleRow.ClickAsync();
         await Page.WaitForTimeoutAsync(500);
 
         // Eye icon should show FILL 0
@@ -66,17 +67,17 @@ public class MapSidebarTests : IntegrationTestBase
         await NavigateAndWaitAsync("/");
         await Page.WaitForSelectorAsync("span:has-text('Test Places')", new() { Timeout = 10000 });
 
-        // Find visibility toggle and click it OFF first
-        var visibilityButton = Page.Locator(".w-60 .cursor-pointer:has-text('Test Places') button:has(span:has-text('visibility'))").First;
-        await visibilityButton.ClickAsync();
+        // The whole sidebar row is the visibility toggle — click it OFF first.
+        var toggleRow = Page.Locator(".w-60 .cursor-pointer:has-text('Test Places')").First;
+        await toggleRow.ClickAsync();
         await Page.WaitForTimeoutAsync(500);
 
         // Verify eye icon shows FILL 0
         var iconStyle = await Page.Locator(".w-60 .cursor-pointer:has-text('Test Places') span:has-text('visibility')").First.GetAttributeAsync("style");
         Assert.Contains("'FILL' 0", iconStyle);
 
-        // Click the toggle again to turn it back ON
-        await visibilityButton.ClickAsync();
+        // Click the row again to turn it back ON
+        await toggleRow.ClickAsync();
         await Page.WaitForTimeoutAsync(500);
 
         // Eye icon should change back to FILL 1
@@ -142,11 +143,13 @@ public class MapSidebarTests : IntegrationTestBase
         Assert.Contains("b81d17", gpsColor);
         Assert.Contains("005bbf", kmlColor);
 
-        // Both should have visibility toggles
-        var gpsVis = gpsCollection.Locator("button:has(span:has-text('visibility'))");
-        var kmlVis = kmlCollection.Locator("button:has(span:has-text('visibility'))");
+        // Both rows should show the visibility (eye) indicator. The eye is now
+        // a <span> indicator on the row, not a nested <button> — the row
+        // itself is the toggle.
+        var gpsVis = gpsCollection.Locator("span:has-text('visibility')");
+        var kmlVis = kmlCollection.Locator("span:has-text('visibility')");
 
-        Assert.True(await gpsVis.IsVisibleAsync(), "GPS collection should have visibility toggle");
-        Assert.True(await kmlVis.IsVisibleAsync(), "KML collection should have visibility toggle");
+        Assert.True(await gpsVis.First.IsVisibleAsync(), "GPS collection should show a visibility indicator");
+        Assert.True(await kmlVis.First.IsVisibleAsync(), "KML collection should show a visibility indicator");
     }
 }

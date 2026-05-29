@@ -44,8 +44,8 @@ public class CrossPageFlowTests : IntegrationTestBase
         Assert.True(await sidebarCollection.IsVisibleAsync(),
             "Collection should appear in the sidebar");
 
-        // Click collection in sidebar to load POIs in table
-        await sidebarCollection.ClickAsync();
+        // The collection is visible by default, so its POIs already populate
+        // the table. Don't click the row — that now toggles visibility off.
         await Page.WaitForSelectorAsync("td:has-text('Wawel Castle')", new() { Timeout = 10000 });
 
         // Verify POIs appear in the table
