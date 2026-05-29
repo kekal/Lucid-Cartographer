@@ -418,6 +418,21 @@ html[data-theme="dark"] .m-tabbar a.active { color: #6aa1e8; }
 .m-app .map-wrap { position: relative; flex: 1 1 auto; min-height: 0; }
 .m-app .map-host { position: absolute; inset: 0; }
 
+/* Bottom panel that hosts the POI list / Collections drawer / in-panel POI
+   detail. `isolation:isolate` gives it its OWN stacking context so the POI
+   detail's .modal-screen (z-index:1000, meant to clear Leaflet's panes when
+   it's a full-screen sibling of the map) stays scoped to this panel instead
+   of competing in .m-app's context. Without isolation the modal's animated
+   transform forces the browser to re-composite the sibling map layer above
+   it, which reads as the map "animating" even though it never moves in the
+   DOM. `overflow:hidden` clips the slide-in (translateX 100%) so it never
+   paints outside the panel; `contain:paint` confines repaints to the panel. */
+.m-app .m-bottom-panel {
+    isolation: isolate;
+    overflow: hidden;
+    contain: paint;
+}
+
 /* Modal screens (push from right) */
 .m-app .modal-screen {
     position: absolute;
