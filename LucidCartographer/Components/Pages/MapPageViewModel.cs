@@ -626,9 +626,18 @@ public sealed class MapPageViewModel(
         PoiCollectionMemberships = memberships
             .ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<int>)kvp.Value);
 
+        // A POI can belong to several collections. The list row is shown under —
+        // and its marker drawn with the colour of — the *visible* collection it
+        // appears in (see LoadVisibleCollectionsAsync). So when resolving the
+        // single "owning" collection for icon colour and single-collection
+        // delete, prefer a currently-visible membership; only fall back to the
+        // first membership when none of the POI's collections are visible.
+        var visibleIds = CollectionStates.Where(c => c.IsVisible).Select(c => c.Id).ToHashSet();
         PoiCollectionIds = memberships
             .Where(kvp => kvp.Value.Count > 0)
-            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value[0]);
+            .ToDictionary(
+                kvp => kvp.Key,
+                kvp => kvp.Value.FirstOrDefault(visibleIds.Contains, kvp.Value[0]));
     }
 
     private async Task RefreshAfterMutationAsync()
