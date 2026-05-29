@@ -3,7 +3,13 @@
         <h3 class="text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">@UiStrings.Collections</h3>
     </div>
 
-    <div class="flex-1 overflow-y-auto px-2" role="listbox" aria-label="Collection list">
+    @* Each collection row is a visibility TOGGLE — clicking anywhere on the
+       row shows/hides that collection. The POI list and the map are driven
+       purely by which collections are visible (the union of all visible
+       ones), so there is no separate "select collection" action that would
+       swap the list to a single, possibly-hidden collection. The eye icon is
+       a pure indicator of the row's pressed state. *@
+    <div class="flex-1 overflow-y-auto px-2" role="group" aria-label="Collection visibility">
         @if (Collections == null || !Collections.Any())
         {
             <div class="px-2 py-4 text-center text-sm text-on-surface-variant">
@@ -13,41 +19,29 @@
         }
         else
         {
-            @for (var i = 0; i < Collections.Count; i++)
+            @foreach (var vm in Collections)
             {
-                var index = i;
-                var vm = Collections[index];
+                var collectionId = vm.Id;
                 <div @key="vm.Id"
                      class="flex items-center gap-2 px-2 py-2 rounded-lg cursor-pointer transition-colors
-                            @(SelectedCollectionId == vm.Id ? "bg-surface-container-high" : "hover:bg-surface-container-low")"
-                     role="option"
-                     aria-selected="@(SelectedCollectionId == vm.Id)"
+                            @(vm.IsVisible ? "bg-surface-container-high" : "hover:bg-surface-container-low")"
+                     role="button"
+                     aria-pressed="@(vm.IsVisible ? "true" : "false")"
+                     aria-label="@($"Toggle visibility for {vm.Name}")"
                      tabindex="0"
-                     @onclick="() => HandleCollectionClick(vm.Id)"
-                     @onkeydown="e => HandleKeyDown(e, vm.Id, index)">
+                     @onclick="() => HandleToggle(collectionId)"
+                     @onkeydown="e => HandleKeyDown(e, collectionId)">
                     <div class="w-3 h-3 rounded-full flex-shrink-0" style="background-color: @vm.Color"
                          aria-hidden="true"></div>
                     <div class="flex-1 min-w-0">
-                        <div class="text-sm font-medium truncate">@vm.Name</div>
+                        <div class="text-sm font-medium truncate @(vm.IsVisible ? "" : "text-on-surface-variant")">@vm.Name</div>
                     </div>
                     <span class="text-xs text-on-surface-variant flex-shrink-0">@vm.PoiCount</span>
-                    @* `relative` makes this button the containing block for the
-                       sr-only span below. Without a positioned ancestor the
-                       absolutely-positioned span resolves against <html>, escapes
-                       the sidebar's overflow-y-auto clipping, and (for collections
-                       below the fold) stretches the document height — making the
-                       whole app scroll. Containing it here keeps the page fixed. *@
-                    <button class="relative p-0.5 rounded hover:bg-surface-container-highest transition-colors flex-shrink-0"
-                            aria-label="@($"Toggle visibility for {vm.Name}")"
-                            @onclick:stopPropagation="true"
-                            @onclick="() => HandleVisibilityClick(vm.Id)">
-                        <span class="material-symbols-outlined text-base text-on-surface-variant"
-                              style="font-variation-settings: 'FILL' @(vm.IsVisible ? 1 : 0)"
-                              aria-hidden="true">
-                            visibility
-                        </span>
-                        <span class="sr-only">@(vm.IsVisible ? "Visible" : "Hidden")</span>
-                    </button>
+                    <span class="material-symbols-outlined text-base text-on-surface-variant flex-shrink-0"
+                          style="font-variation-settings: 'FILL' @(vm.IsVisible ? 1 : 0)"
+                          aria-hidden="true">
+                        @(vm.IsVisible ? "visibility" : "visibility_off")
+                    </span>
                 </div>
             }
         }
@@ -56,23 +50,9 @@
 
 @code {
     [Parameter, EditorRequired] public IReadOnlyList<CollectionDisplayState> Collections { get; set; } = [];
-    [Parameter] public int? SelectedCollectionId { get; set; }
-    [Parameter] public EventCallback<int> OnCollectionSelected { get; set; }
     [Parameter] public EventCallback<int> OnVisibilityToggled { get; set; }
 
-    private async Task HandleCollectionClick(int collectionId)
-    {
-        try
-        {
-            await OnCollectionSelected.InvokeAsync(collectionId);
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Error selecting collection {collectionId}: {ex.Message}");
-        }
-    }
-
-    private async Task HandleVisibilityClick(int collectionId)
+    private async Task HandleToggle(int collectionId)
     {
         try
         {
@@ -84,20 +64,15 @@
         }
     }
 
-    // LOW-12: Arrow key navigation between collection list items (WAI-ARIA listbox pattern)
-    private async Task HandleKeyDown(KeyboardEventArgs e, int collectionId, int index)
+    // Keyboard: the row is a toggle button, so Enter/Space activates it.
+    // Tab moves between rows natively (each row is tabindex=0) — no custom
+    // arrow-key navigation needed now that the list isn't a single-select
+    // listbox.
+    private async Task HandleKeyDown(KeyboardEventArgs e, int collectionId)
     {
-        switch (e.Key)
+        if (e.Key is "Enter" or " ")
         {
-            case "Enter" or " ":
-                await HandleCollectionClick(collectionId);
-                break;
-            case "ArrowDown" when index < Collections.Count - 1:
-                await HandleCollectionClick(Collections[index + 1].Id);
-                break;
-            case "ArrowUp" when index > 0:
-                await HandleCollectionClick(Collections[index - 1].Id);
-                break;
+            await HandleToggle(collectionId);
         }
     }
 }

@@ -57,53 +57,58 @@ public class CollectionSidebarTests : BunitTestContext
     }
 
     [Fact]
-    public void ClickingCollection_Fires_OnCollectionSelected_WithCorrectId()
+    public void ClickingRow_Fires_OnVisibilityToggled_WithCorrectId()
     {
-        int? selectedId = null;
-        List<CollectionDisplayState> vms = [MakeVm(7, "Cafes", "#aabbcc", 2)];
-
-        var cut = RenderComponent<CollectionSidebar>(parameters => parameters
-            .Add(p => p.Collections, vms)
-            .Add(p => p.OnCollectionSelected,
-                EventCallback.Factory.Create<int>(this, id => selectedId = id)));
-
-        cut.Find("div.cursor-pointer").Click();
-
-        selectedId.Should().Be(7);
-    }
-
-    [Fact]
-    public void ClickingVisibilityIcon_Fires_OnVisibilityToggled_WithCorrectId()
-    {
+        // The whole row is a visibility toggle now — clicking it (not just the
+        // eye icon) shows/hides that collection. There is no separate
+        // "select collection" action.
         int? toggledId = null;
-        List<CollectionDisplayState> vms = [MakeVm(3, "Museums", "#112233", 1, true)];
+        List<CollectionDisplayState> vms = [MakeVm(7, "Cafes", "#aabbcc", 2)];
 
         var cut = RenderComponent<CollectionSidebar>(parameters => parameters
             .Add(p => p.Collections, vms)
             .Add(p => p.OnVisibilityToggled,
                 EventCallback.Factory.Create<int>(this, id => toggledId = id)));
 
-        cut.Find("button").Click();
+        cut.Find("div.cursor-pointer").Click();
 
-        toggledId.Should().Be(3);
+        toggledId.Should().Be(7);
     }
 
     [Fact]
-    public void Highlights_SelectedCollection_WithBgClass()
+    public void Highlights_VisibleCollections_WithBgClass()
     {
+        // Visible rows get the "active" background; hidden rows don't.
         List<CollectionDisplayState> vms =
         [
-            MakeVm(1, "Selected", "#000000"),
-            MakeVm(2, "Other", "#ffffff")
+            MakeVm(1, "Shown", "#000000", isVisible: true),
+            MakeVm(2, "Hidden", "#ffffff", isVisible: false)
         ];
 
         var cut = RenderComponent<CollectionSidebar>(parameters => parameters
-            .Add(p => p.Collections, vms)
-            .Add(p => p.SelectedCollectionId, 1));
+            .Add(p => p.Collections, vms));
 
         var rows = cut.FindAll("div.cursor-pointer");
         rows[0].ClassList.Should().Contain("bg-surface-container-high");
         rows[1].ClassList.Should().NotContain("bg-surface-container-high");
+    }
+
+    [Fact]
+    public void Row_HasToggleSemantics_AriaPressedReflectsVisibility()
+    {
+        List<CollectionDisplayState> vms =
+        [
+            MakeVm(1, "Shown", "#000000", isVisible: true),
+            MakeVm(2, "Hidden", "#ffffff", isVisible: false)
+        ];
+
+        var cut = RenderComponent<CollectionSidebar>(parameters => parameters
+            .Add(p => p.Collections, vms));
+
+        var rows = cut.FindAll("div.cursor-pointer");
+        rows[0].GetAttribute("role").Should().Be("button");
+        rows[0].GetAttribute("aria-pressed").Should().Be("true");
+        rows[1].GetAttribute("aria-pressed").Should().Be("false");
     }
 
     [Fact]

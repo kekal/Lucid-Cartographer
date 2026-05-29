@@ -51,8 +51,10 @@ public sealed class MapPageViewModel(
     public Dictionary<int, IReadOnlyList<string>> PoiCollectionNames { get; private set; } = new();
     public Dictionary<int, IReadOnlyList<int>> PoiCollectionMemberships { get; private set; } = new();
     public Dictionary<int, int> PoiCollectionIds { get; private set; } = new();
-    public int? SelectedCollectionId { get; private set; }
     public int? SelectedPoiId { get; private set; }
+    // Only set while a search is active ("Search: <query>"); shown as a chip
+    // override in PoiTable. Collection visibility no longer sets it — the list
+    // is the union of all visible collections, never a single selected one.
     public string? SelectedCollectionName { get; private set; }
     public Poi? SelectedPoi { get; private set; }
     public bool IsLoading { get; private set; } = true;
@@ -339,16 +341,6 @@ public sealed class MapPageViewModel(
         await poiService.ToggleVisibilityAsync(collectionId);
         s.IsVisible = !s.IsVisible;
         await LoadVisibleCollectionsAsync();
-    }
-
-    public async Task HandleCollectionSelectedAsync(int collectionId)
-    {
-        SelectedCollectionId = collectionId;
-        var s = CollectionStates.FirstOrDefault(c => c.Id == collectionId);
-        SelectedCollectionName = s?.Name;
-        VisiblePois = await poiService.GetPoisByCollectionAsync(collectionId);
-        await RefreshPoiCollectionMapsAsync(VisiblePois);
-        ApplyViewportFilter();
     }
 
     public Task HandleMarkerSelectedAsync(int poiId) => SelectPoiAsync(poiId);
