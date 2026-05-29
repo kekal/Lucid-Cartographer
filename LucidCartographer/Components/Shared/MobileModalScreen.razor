@@ -1,9 +1,18 @@
+@inject IJSRuntime Js
+@implements IAsyncDisposable
+
 @* Full-screen modal that slides in from the right (iOS-style). The parent owns
    the open/closed state (render this only when open). A back chevron sits in a
    top bar; optional Trailing content goes on the right.
 
    H05/H06: carries dialog semantics, takes focus on open, and dismisses on
-   Escape so keyboard / screen-reader users can use the modal at all. *@
+   Escape so keyboard / screen-reader users can use the modal at all.
+
+   Mobile back-button: on open we push a sentinel history entry via
+   LucidHistory.push and register this component as the popstate callback.
+   The system / browser Back button closes the modal (top of the stack)
+   instead of navigating away from the app. UI-driven close paths (back
+   chevron, Escape, parent unrender) consume the sentinel via pop(). *@
 <div class="modal-screen m-slide-in" @ref="_root" tabindex="-1"
      role="dialog" aria-modal="true" aria-labelledby="@_titleId"
      @onkeydown="OnRootKeyDownAsync">
@@ -33,6 +42,10 @@
     private ElementReference _backBtn;
     private bool _focused;
 
+    private DotNetObjectReference<MobileModalScreen>? _selfRef;
+    private int _historyToken;
+    private bool _historyRegistered;
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender && !_focused)
@@ -45,6 +58,19 @@
             catch (JSException) { }
             catch (InvalidOperationException) { }
         }
+
+        if (firstRender && !_historyRegistered)
+        {
+            _historyRegistered = true;
+            _selfRef = DotNetObjectReference.Create(this);
+            try
+            {
+                _historyToken = await Js.InvokeAsync<int>("LucidHistory.push", _selfRef);
+            }
+            catch (JSDisconnectedException) { }
+            catch (InvalidOperationException) { }
+            catch (JSException) { }
+        }
     }
 
     private async Task OnRootKeyDownAsync(KeyboardEventArgs e)
@@ -52,6 +78,34 @@
         if (e.Key == "Escape")
         {
             await OnClose.InvokeAsync();
+        }
+    }
+
+    [JSInvokable]
+    public Task OnBackPopped()
+    {
+        // The browser Back button already removed our history entry. Just
+        // close the modal — do NOT call pop() here, the stack entry was
+        // already taken off in the JS popstate handler.
+        _historyRegistered = false;
+        return OnClose.InvokeAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_historyRegistered)
+            {
+                await Js.InvokeVoidAsync("LucidHistory.pop", _historyToken);
+            }
+        }
+        catch (JSDisconnectedException) { }
+        catch (InvalidOperationException) { }
+        catch (JSException) { }
+        finally
+        {
+            _selfRef?.Dispose();
         }
     }
 }

@@ -1,5 +1,6 @@
 @using LucidCartographer.Data.Entities
 @inject IJSRuntime Js
+@implements IAsyncDisposable
 
 @* Full-screen POI detail for the mobile shell. Back + share buttons overlay a
    colored hero; below it: name (inline edit), status pills, address, rating,
@@ -253,6 +254,13 @@
     private ElementReference _root;
     private ElementReference _backBtn;
 
+    // Mobile Back-button bridge: push a sentinel history entry when this
+    // modal opens so the system Back closes the panel instead of leaving
+    // the map page (or jumping to the previous tab in the tab bar).
+    private DotNetObjectReference<MobilePoiDetail>? _selfRef;
+    private int _historyToken;
+    private bool _historyRegistered;
+
     protected override void OnParametersSet()
     {
         if (Poi is null)
@@ -290,6 +298,45 @@
             }
             catch (JSException) { }
             catch (InvalidOperationException) { }
+        }
+
+        if (firstRender && !_historyRegistered && Poi is not null)
+        {
+            _historyRegistered = true;
+            _selfRef = DotNetObjectReference.Create(this);
+            try
+            {
+                _historyToken = await Js.InvokeAsync<int>("LucidHistory.push", _selfRef);
+            }
+            catch (JSDisconnectedException) { }
+            catch (InvalidOperationException) { }
+            catch (JSException) { }
+        }
+    }
+
+    [JSInvokable]
+    public Task OnBackPopped()
+    {
+        // Browser Back already removed our sentinel; just close the panel.
+        _historyRegistered = false;
+        return OnClose.InvokeAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_historyRegistered)
+            {
+                await Js.InvokeVoidAsync("LucidHistory.pop", _historyToken);
+            }
+        }
+        catch (JSDisconnectedException) { }
+        catch (InvalidOperationException) { }
+        catch (JSException) { }
+        finally
+        {
+            _selfRef?.Dispose();
         }
     }
 
