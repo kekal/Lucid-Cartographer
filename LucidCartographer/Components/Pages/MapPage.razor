@@ -101,7 +101,18 @@ else if (Viewport.IsMobile)
                         <div class="list">
                             @foreach (var s in Vm.CollectionStates)
                             {
-                                <div class="row" @key="s.Id" style="cursor:default">
+                                @* The whole row is the visibility toggle (matches the
+                                   desktop CollectionSidebar). Click/Enter/Space toggles
+                                   IsVisible; the eye is now a plain <span> indicator, not
+                                   a nested button. The list of POIs is always the union of
+                                   all visible collections — there is no single "selected"
+                                   collection. *@
+                                <div class="row" @key="s.Id" role="button" tabindex="0"
+                                     style="cursor:pointer"
+                                     aria-pressed="@(s.IsVisible ? "true" : "false")"
+                                     aria-label="@($"{(s.IsVisible ? "Hide" : "Show")} {s.Name}")"
+                                     @onclick="() => Vm.HandleVisibilityToggledAsync(s.Id)"
+                                     @onkeydown="e => OnCollectionRowKeyDownAsync(e, s.Id)">
                                     <div class="avatar" style="@($"background:{s.Color};border-radius:50%")">
                                         <span class="ms" style="font-size:18px" aria-hidden="true">folder</span>
                                     </div>
@@ -110,13 +121,7 @@ else if (Viewport.IsMobile)
                                         <div class="sub">@s.PoiCount @(s.PoiCount == 1 ? "place" : "places")</div>
                                     </div>
                                     <div class="trailing">
-                                        <button class="icon-btn" type="button" style="background:transparent"
-                                                @onclick="() => Vm.HandleVisibilityToggledAsync(s.Id)"
-                                                @onkeydown:stopPropagation="true"
-                                                aria-pressed="@(s.IsVisible ? "true" : "false")"
-                                                aria-label="@($"{(s.IsVisible ? "Hide" : "Show")} {s.Name}")">
-                                            <span class="ms @(s.IsVisible ? "filled" : "")" aria-hidden="true">@(s.IsVisible ? "visibility" : "visibility_off")</span>
-                                        </button>
+                                        <span class="ms @(s.IsVisible ? "filled" : "")" aria-hidden="true">@(s.IsVisible ? "visibility" : "visibility_off")</span>
                                     </div>
                                 </div>
                             }
@@ -435,6 +440,17 @@ else
         if (e.Key == "Enter" || e.Key == " ")
         {
             await Vm.HandlePoiSelectedAsync(poiId);
+        }
+    }
+
+    // Collections drawer rows are <div role="button" tabindex="0"> toggles.
+    // Map Enter/Space onto the visibility toggle so keyboard users get the
+    // same behaviour as tapping the row.
+    private async Task OnCollectionRowKeyDownAsync(KeyboardEventArgs e, int collectionId)
+    {
+        if (e.Key == "Enter" || e.Key == " ")
+        {
+            await Vm.HandleVisibilityToggledAsync(collectionId);
         }
     }
 

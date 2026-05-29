@@ -175,4 +175,41 @@ public class MobileMapTests : MobileTestBase
         // openPopup on highlightMarker; the mobile bindPopup skip prevents that.
         Assert.Equal(0, await Page.Locator(".leaflet-popup").CountAsync());
     }
+
+    [Fact]
+    public async Task Mobile_TappingCollectionRow_TogglesVisibility()
+    {
+        // Mirrors the desktop CollectionSidebar behaviour: the whole drawer row
+        // is the visibility toggle (role="button" aria-pressed), not just a
+        // nested eye button. Tapping anywhere on the row flips IsVisible.
+        await ImportTestFileAsync("sample.gpx", "GPX Places", "#005bbf");
+        await MobileNavigateAndWaitForAppAsync("/");
+        await Page.WaitForSelectorAsync(".m-app .app-header", new() { Timeout = 15000 });
+
+        // Open the Collections drawer.
+        var layersBtn = Page.Locator(".m-app button[aria-label='Collections']");
+        await layersBtn.ScrollIntoViewIfNeededAsync();
+        await layersBtn.DispatchEventAsync("click");
+
+        // The collection row is a role="button" toggle, visible by default.
+        var row = Page.Locator(".m-app .list .row[role='button']").First;
+        await row.WaitForAsync(new() { Timeout = 8000, State = WaitForSelectorState.Visible });
+        Assert.Equal("true", await row.GetAttributeAsync("aria-pressed"));
+
+        // Tapping the row body (not a nested button — there is none now) hides it.
+        await row.ClickAsync();
+        await Page.WaitForFunctionAsync(
+            "() => document.querySelector('.m-app .list .row[role=\"button\"]')?.getAttribute('aria-pressed') === 'false'",
+            null, new() { Timeout = 5000 });
+
+        // The eye indicator flips to visibility_off.
+        var eyeText = (await row.Locator("span.ms").Last.InnerTextAsync()).Trim();
+        Assert.Equal("visibility_off", eyeText);
+
+        // Tapping again turns it back on.
+        await row.ClickAsync();
+        await Page.WaitForFunctionAsync(
+            "() => document.querySelector('.m-app .list .row[role=\"button\"]')?.getAttribute('aria-pressed') === 'true'",
+            null, new() { Timeout = 5000 });
+    }
 }
