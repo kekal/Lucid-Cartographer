@@ -674,3 +674,40 @@ html[data-theme="dark"] .m-tabbar a.active { color: #6aa1e8; }
 
 /* Leaflet marker styling inside the mobile map (mirrors desktop pin look) */
 .m-app .leaflet-control-attribution { font-size: 9px !important; }
+
+/* GPS "you are here" star (mobile). Not scoped to .m-app: Leaflet stamps the
+   class onto the marker element it owns, but the marker is only ever created
+   by leafletInterop.locateUser, which MapPage calls on mobile only — so these
+   rules never apply on desktop. The star is gold with a white halo so it
+   stays legible over any tile, and a soft pulse ring draws the eye to it. */
+.user-location-marker { background: transparent; border: 0; }
+.user-loc-star {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    line-height: 1;
+    color: #f5a524;
+    text-shadow: 0 0 2px #fff, 0 0 3px #fff, 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+.user-loc-pulse {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 14px;
+    height: 14px;
+    margin: -7px 0 0 -7px;
+    border-radius: 50%;
+    background: rgba(245, 165, 36, 0.45);
+    animation: user-loc-pulse 1.8s ease-out infinite;
+}
+@keyframes user-loc-pulse {
+    0%   { transform: scale(1);   opacity: 0.7; }
+    70%  { transform: scale(2.6); opacity: 0; }
+    100% { transform: scale(2.6); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .user-loc-pulse { animation: none; }
+}

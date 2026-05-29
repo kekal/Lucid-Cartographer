@@ -14,8 +14,51 @@
         // the map that replaces what the popup would say, so the popup is
         // pure visual noise on the phone. MapPage pushes this flag via
         // leafletInterop.setMobileMode after each viewport flip.
-        mobileMode: false
+        mobileMode: false,
+        // GPS "you are here" star (mobile only). userMarker is the Leaflet
+        // marker; locating guards against starting more than one geolocation
+        // watch; recenterOnNextFix tells the locationfound handler to pan the
+        // map to the device on the next fix (set by the locate FAB).
+        userMarker: null,
+        locating: false,
+        recenterOnNextFix: false
     };
+
+    function onUserLocationFound(e) {
+        var ll = e.latlng;
+        if (state.userMarker) {
+            state.userMarker.setLatLng(ll);
+        } else {
+            var icon = L.divIcon({
+                className: 'user-location-marker',
+                html: '<div class="user-loc-pulse"></div><div class="user-loc-star">&#9733;</div>',
+                iconSize: [28, 28],
+                iconAnchor: [14, 14]
+            });
+            // interactive:false so the star never steals clicks from POI
+            // markers underneath; zIndexOffset keeps it above the POI dots.
+            state.userMarker = L.marker(ll, {
+                icon: icon,
+                interactive: false,
+                keyboard: false,
+                zIndexOffset: 2000
+            }).addTo(state.map);
+        }
+        if (state.recenterOnNextFix) {
+            state.recenterOnNextFix = false;
+            state.map.setView(ll, Math.max(state.map.getZoom(), 14));
+        }
+    }
+
+    function onUserLocationError(e) {
+        state.recenterOnNextFix = false;
+        // Common causes: permission denied, or an insecure context (plain http
+        // over a LAN IP — browsers only expose geolocation on https/localhost).
+        // Nothing actionable beyond a diagnostic; no star is drawn.
+        if (window.console) {
+            window.console.warn('Geolocation unavailable:', e && e.code, e && e.message);
+        }
+    }
 
     function escapeHtml(text) {
         if (!text) return '';
@@ -84,6 +127,12 @@
             // Reset on (re)init so the JS state matches the freshly-constructed,
             // transient MapPageViewModel (whose ShowPoiLabels defaults to false).
             state.labelsVisible = false;
+            // The previous map (if any) was removed above, taking its geolocation
+            // watch and user marker with it. Reset so locateUser starts cleanly
+            // against the new map (e.g. after a desktop<->mobile viewport flip).
+            state.userMarker = null;
+            state.locating = false;
+            state.recenterOnNextFix = false;
 
             // On SPA navigation (e.g. from /datasources back to /), Leaflet may
             // initialise before the flex layout has finalised the container's
@@ -118,6 +167,7 @@
                 state.resizeObserver = null;
             }
             if (state.map) {
+                try { state.map.stopLocate(); } catch (_) { }
                 state.map.remove();
                 state.map = null;
             }
@@ -127,6 +177,9 @@
             }
             state.layerGroups = {};
             state.markers = {};
+            state.userMarker = null;
+            state.locating = false;
+            state.recenterOnNextFix = false;
             state._boundsHandler = null;
         },
 
@@ -280,6 +333,46 @@
             if (state.mobileMode && state.map) {
                 state.map.closePopup();
             }
+        },
+
+        // Request the device's location and drop a star marker on it (mobile).
+        // Leaflet's map.locate() calls navigator.geolocation under the hood —
+        // the FIRST call triggers the browser's permission prompt. watch:true
+        // keeps the star following the user as they move. setView:false: we
+        // never auto-pan on a passive fix (that would yank the map away from
+        // the POIs the user is looking at). Passing recenter=true (the locate
+        // FAB) pans to the device on the next fix instead.
+        //
+        // Note: geolocation is only exposed in a secure context — https or
+        // localhost. Over plain http to a LAN IP the browser fires
+        // locationerror and no star appears; that's a transport limitation,
+        // not a bug here.
+        locateUser: function (recenter) {
+            if (!state.map) return;
+
+            if (recenter) {
+                if (state.userMarker) {
+                    // Already have a fix — jump there immediately for snappy
+                    // feedback; the ongoing watch keeps it fresh.
+                    state.map.setView(state.userMarker.getLatLng(), Math.max(state.map.getZoom(), 14));
+                } else {
+                    state.recenterOnNextFix = true;
+                }
+            }
+
+            // Only one watch at a time. A second map.locate({watch:true}) would
+            // start a second navigator.geolocation.watchPosition and leak it.
+            if (state.locating) return;
+            state.locating = true;
+            state.map.on('locationfound', onUserLocationFound);
+            state.map.on('locationerror', onUserLocationError);
+            state.map.locate({
+                watch: true,
+                enableHighAccuracy: true,
+                setView: false,
+                maximumAge: 10000,
+                timeout: 20000
+            });
         },
 
         // Scroll the mobile POI list so the row for `poiId` is in view. Used

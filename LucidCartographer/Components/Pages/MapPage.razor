@@ -54,6 +54,9 @@ else if (Viewport.IsMobile)
                    are siblings of our FAB stack, so a low value lets the map
                    tiles paint over us even though we're DOM-on-top. *@
                 <div style="position:absolute;bottom:10px;right:10px;display:flex;flex-direction:column;gap:8px;z-index:1000">
+                    <button class="fab ghost mini" @onclick="LocateMeAsync" aria-label="@UiStrings.ShowMyLocation">
+                        <span class="ms" aria-hidden="true">my_location</span>
+                    </button>
                     <button class="fab ghost mini" @onclick="Vm.FitMapBoundsAsync" aria-label="@UiStrings.FitMapToVisible">
                         <span class="ms" aria-hidden="true">fit_screen</span>
                     </button>
@@ -392,6 +395,19 @@ else
             }
 
             await Vm.OnMapInitializedAsync();
+
+            // Mobile: ask for GPS access and drop a "you are here" star. This
+            // runs once per map instance (the block is gated on a fresh
+            // _wiredMap ref). recenter:false — we request the location and mark
+            // it without panning away from the POIs; the locate FAB recenters
+            // on demand. No-op on desktop. Geolocation needs a secure context
+            // (https/localhost); over plain http LAN the browser denies it.
+            if (Viewport.IsMobile)
+            {
+                try { await Js.InvokeVoidAsync("leafletInterop.locateUser", false); }
+                catch (JSDisconnectedException) { }
+                catch (InvalidOperationException) { }
+            }
         }
         else if (Vm.PendingSearchMapUpdate && _leafletMap is { IsInitialized: true })
         {
@@ -440,6 +456,17 @@ else
             _pendingScrollPoiId = id;
         }
         Vm.CloseDetailPane();
+    }
+
+    // Locate FAB: request a fresh GPS fix and recenter the map on the device.
+    // recenter:true pans to the user as soon as a fix arrives (or immediately
+    // if we already have one). Shares the single geolocation watch started at
+    // map init, so tapping repeatedly is cheap.
+    private async Task LocateMeAsync()
+    {
+        try { await Js.InvokeVoidAsync("leafletInterop.locateUser", true); }
+        catch (JSDisconnectedException) { }
+        catch (InvalidOperationException) { }
     }
 
     private void OnViewportChanged()
