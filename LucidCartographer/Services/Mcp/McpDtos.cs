@@ -24,6 +24,14 @@ public record CollectionDto(
 }
 
 /// <summary>Compact POI shape for list/search results.</summary>
+/// <remarks>
+/// <see cref="HasPlaceUrl"/> reports whether the POI carries a canonical Google
+/// Maps <c>/maps/place/</c> URL — the trustworthy signal that enrichment
+/// actually resolved a place. Together with <see cref="IsEnriched"/> and
+/// <see cref="EnrichmentNeedsManualUrl"/> this lets callers spot
+/// "enriched but without a real Google link" rows (IsEnriched &amp;&amp;
+/// !HasPlaceUrl) straight from a list, without fetching each POI's detail.
+/// </remarks>
 public record PoiSummaryDto(
     int Id,
     string Name,
@@ -31,10 +39,14 @@ public record PoiSummaryDto(
     double? Longitude,
     string? Category,
     string? Address,
-    bool IsEnriched)
+    bool IsEnriched,
+    bool HasPlaceUrl,
+    bool EnrichmentNeedsManualUrl)
 {
     public static PoiSummaryDto From(Poi p) => new(
-        p.Id, p.Name, p.Latitude, p.Longitude, p.Category, p.Address, p.IsEnriched);
+        p.Id, p.Name, p.Latitude, p.Longitude, p.Category, p.Address, p.IsEnriched,
+        p.GoogleMapsUrl is not null && p.GoogleMapsUrl.Contains("/maps/place/"),
+        p.EnrichmentNeedsManualUrl);
 }
 
 /// <summary>
