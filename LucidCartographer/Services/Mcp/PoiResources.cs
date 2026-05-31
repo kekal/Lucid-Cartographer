@@ -34,6 +34,23 @@ public static class PoiResources
            resolved automatically, supply the correct link with `set_poi_google_maps_url`.
            Poll `get_enrichment_status` until `remaining` reaches 0.
 
+        ## Searching & deduplicating
+        - `search_pois` matches the query as a **single string** (phrase/substring) across
+          name/address/notes/tags — every word must occur in the *same* POI. Pass **one** place
+          name per call; a query with several different names (e.g.
+          `"Energylandia Suntago Mandoria"`) returns `[]` even when each exists separately.
+        - An empty result means "this single name was not found", **not** "search is broken".
+          If you batched several names and got `[]`, retry one name at a time.
+        - Before `create_poi`, search the name to avoid duplicates. On a hit, call `get_poi(id)`
+          and read its `collections` to see where it already lives; a POI can belong to several
+          collections, so prefer `copy_poi`/`move_poi` over re-creating it.
+
+          ```
+          for name in candidates:
+              if not search_pois(name):   # single name; empty ⇒ genuinely absent
+                  create_poi(...)
+          ```
+
         ## Notes
         - Enrichment scrapes address, website, phone and a photo from the POI's Google Maps URL,
           or — when there is no URL — from a Google Maps search of the POI name (biased by its

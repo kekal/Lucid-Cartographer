@@ -38,10 +38,33 @@ public static class PoiReadTools
     }
 
     [McpServerTool(Name = "search_pois")]
-    [Description("Search POIs by name, address, notes or tag. Returns up to 100 matches.")]
+    [Description(
+        "Search POIs by ONE distinctive term. The query is matched as a SINGLE string against a " +
+        "POI's name, address, notes and tags: every word in the query must occur together in the " +
+        "SAME POI (phrase/substring match, NOT OR across words). Returns up to 100 matches.\n" +
+        "Do NOT put several different place names in one query: a query like " +
+        "\"Energylandia Suntago Mandoria\" returns [] even when all three exist, because no single " +
+        "POI contains all those words. To look up multiple places, call this tool once per place.\n" +
+        "An empty result means \"this single name was not found\" — NOT \"search is broken\"; if you " +
+        "got [] from a multi-name query, retry with one name at a time. Prefer the shortest " +
+        "distinctive proper name over a long descriptive phrase. Matching also hits the address " +
+        "field, so results may include nearby POIs that share a street/venue name.\n" +
+        "A POI can belong to several collections; on a hit call get_poi(id) to read its " +
+        "`collections` before deciding whether to create a duplicate. IDs are not persistent " +
+        "across imports — resolve collections by name via list_collections.\n" +
+        "Examples:\n" +
+        "  search_pois(\"Hevelianum\")   -> finds the POI (one proper name)\n" +
+        "  search_pois(\"Energylandia\") -> finds it (+ neighbors by address)\n" +
+        "  search_pois(\"Energylandia Suntago Mandoria Inwald Twinpigs\")\n" +
+        "                              -> [] (five distinct names never co-occur in one POI)\n" +
+        "Dedup before create — one call per candidate:\n" +
+        "  for name in candidates: if not search_pois(name): create_poi(...)")]
     public static async Task<IReadOnlyList<PoiSummaryDto>> SearchPois(
         IPoiService poiService,
-        [Description("Free-text query.")] string query,
+        [Description(
+            "ONE distinctive term (usually a single proper name). Matched as a single substring "
+            + "across name/address/notes/tags — never pass multiple different place names at once.")]
+            string query,
         CancellationToken ct)
     {
         var pois = await poiService.SearchAsync(query, ct);

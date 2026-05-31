@@ -24,6 +24,14 @@ public static class McpServerExtensions
            correct link with set_poi_google_maps_url. Track progress with
            get_enrichment_status (remaining reaches 0 when the queue drains).
 
+        Avoiding duplicates:
+        - search_pois matches the query as ONE string (phrase/substring), so pass only ONE
+          place name per call. A query with several different names returns [] even when each
+          exists separately.
+        - An empty result means "this single name was not found", NOT "search is broken".
+        - Before create_poi, search the name; on a hit, get_poi to inspect its `collections`.
+          A POI can live in several collections — prefer copy_poi/move_poi over re-creating one.
+
         Allowed category values: restaurant, cafe, bar, hotel, attraction, shopping,
         nature, other.
         Coordinate ranges: latitude [-90, 90], longitude [-180, 180].

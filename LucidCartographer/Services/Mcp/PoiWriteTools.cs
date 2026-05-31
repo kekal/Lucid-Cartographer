@@ -38,7 +38,9 @@ public static class PoiWriteTools
         "Create a new POI in a collection. The POI is always created unenriched and is automatically " +
         "queued for background enrichment (scrapes address/photo/website/phone from its Google Maps URL " +
         "or name). Category must be one of: restaurant, cafe, bar, hotel, attraction, shopping, nature, " +
-        "other (or omitted).")]
+        "other (or omitted). Before creating, search_pois the name (one name per call) to avoid " +
+        "duplicates; a POI can live in several collections, so prefer copy_poi/move_poi over " +
+        "re-creating an existing one.")]
     public static async Task<PoiSummaryDto> CreatePoi(
         IPoiService poiService,
         EnrichmentTrigger enrichmentTrigger,
