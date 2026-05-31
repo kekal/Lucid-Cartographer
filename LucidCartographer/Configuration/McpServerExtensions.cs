@@ -15,9 +15,10 @@ public static class McpServerExtensions
         Typical workflow:
         1. Discover: list_collections, then list_pois_in_collection or search_pois.
         2. Inspect: get_poi for every field; get_poi_image for the stored photo.
-        3. Organize: create_collection; create_poi (a new POI is always created
-           unenriched and queued for background enrichment); move_poi / copy_poi /
-           delete_poi between collections.
+        3. Organize: create_collection; create_poi (stores fields as-is and does NOT
+           enrich — call enrich_poi afterwards for a real Google place; ideal for
+           events / custom points); move_poi / copy_poi / delete_poi between
+           collections.
         4. Enrich: enrich_poi re-runs enrichment for a POI and is idempotent —
            calling it again discards the current Google Maps link and runs a fresh
            name search. If a place still cannot be resolved automatically, supply the

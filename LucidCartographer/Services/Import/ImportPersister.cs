@@ -43,6 +43,13 @@ internal sealed class ImportPersister(
     private int _added;
     private int _skipped;
 
+    /// <summary>
+    /// Ids of the POIs created by this import pass, populated after
+    /// <see cref="SaveNewPoisAsync"/>. The orchestrator uses these to
+    /// explicitly request enrichment (creation no longer auto-enqueues).
+    /// </summary>
+    public IReadOnlyList<int> AddedPoiIds => _newPois.Select(e => e.Poi.Id).ToList();
+
     public async Task<ImportResult> RunAsync()
     {
         await CreateCollectionAsync();
@@ -390,10 +397,13 @@ internal sealed class ImportPersister(
             // store-generated principal key fails if we set it here
             // ("PoiImage.PoiId unknown" on save).
             AddedDate = DateTime.UtcNow,
-            // Every imported row goes through enrichment. The BG service
-            // fills only empty fields (preserves whatever the file gave us)
-            // and adds the place photo + canonical /maps/place URL.
-            IsEnriched = false
+            // Pure data state: not yet enriched, and NOT yet enqueued.
+            // Creation is decoupled from enrichment — the orchestrator (the
+            // process driving the import) explicitly requests enrichment for
+            // these rows after they are saved (see AddedPoiIds + the
+            // RequestEnrichmentAsync handoff in ImportOrchestrator).
+            IsEnriched = false,
+            EnrichmentRequested = false
         };
     }
 

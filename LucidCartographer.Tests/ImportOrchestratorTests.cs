@@ -207,6 +207,14 @@ public class ImportOrchestratorTests
         // would not need this timeout, but the test completes in <100ms.
         var signaled = await trigger.WaitAsync(TimeSpan.FromMilliseconds(200), CancellationToken.None);
         signaled.Should().BeTrue("EnrichmentTrigger.Signal() should be fired after a successful import that added rows");
+
+        // Decoupling: import is a pipeline, so it explicitly flags its new rows
+        // for the worker (creation alone no longer enqueues).
+        await using var db = await factory.CreateDbContextAsync();
+        var added = await db.Pois.ToListAsync();
+        added.Should().NotBeEmpty();
+        added.Should().OnlyContain(p => p.EnrichmentRequested,
+            "every imported row should be explicitly requested for enrichment");
     }
 
     [Fact]
@@ -273,6 +281,47 @@ public class ImportOrchestratorTests
         var image = await check.PoiImages.FirstOrDefaultAsync(i => i.PoiId == existingPoiId);
         image.Should().NotBeNull();
         image!.Data.Should().Equal(new byte[] { 1, 2, 3, 4 });
+    }
+
+    [Fact]
+    public async Task ImportFromScrapedAsync_DedupLinkedExistingRow_IsNotRequestedForEnrichment()
+    {
+        // Decoupling: only newly-added rows are enqueued. A pre-existing row the
+        // import dedups against must NOT have its EnrichmentRequested flipped.
+        var factory = TestDbHelper.CreateFactory();
+        int existingId;
+        await using (var seed = await factory.CreateDbContextAsync())
+        {
+            var existing = new Poi
+            {
+                Name = "Alpaki Fajne Sprawy Habdzin",
+                Latitude = 50.0,
+                Longitude = 20.0,
+                IsEnriched = true,
+                EnrichmentRequested = false,
+                AddedDate = DateTime.UtcNow
+            };
+            seed.Pois.Add(existing);
+            await seed.SaveChangesAsync();
+            existingId = existing.Id;
+        }
+
+        var orchestrator = CreateOrchestrator(factory);
+        List<ImportedPoi> scraped =
+        [
+            new(Name: "Alpaki Fajne Sprawy Habdzin", Latitude: 50.0, Longitude: 20.0,
+                GoogleMapsUrl: "https://www.google.com/maps/place/Alpaki"),
+            new(Name: "Brand New Place", Latitude: 51.0, Longitude: 21.0,
+                GoogleMapsUrl: "https://www.google.com/maps/place/New"),
+        ];
+
+        var result = await orchestrator.ImportFromScrapedAsync(scraped, "Reimport");
+        result.AddedCount.Should().Be(1);
+
+        await using var check = await factory.CreateDbContextAsync();
+        (await check.Pois.FindAsync(existingId))!.EnrichmentRequested.Should().BeFalse("deduped existing row must not be re-enqueued");
+        var newRow = await check.Pois.FirstAsync(p => p.Name == "Brand New Place");
+        newRow.EnrichmentRequested.Should().BeTrue("the newly-added row is enqueued");
     }
 
     [Fact]

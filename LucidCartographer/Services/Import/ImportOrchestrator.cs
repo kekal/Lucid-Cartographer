@@ -92,6 +92,7 @@ public class ImportOrchestrator(
         ImportResult? lastResult = null;
         var totalAdded = 0;
         var totalSkipped = 0;
+        var addedPoiIds = new List<int>();
 
         foreach (var group in groups)
         {
@@ -103,15 +104,25 @@ public class ImportOrchestrator(
             anyAdded |= persister.AddedAny;
             totalAdded += groupResult.AddedCount;
             totalSkipped += groupResult.SkippedCount;
+            addedPoiIds.AddRange(persister.AddedPoiIds);
             lastResult = groupResult;
         }
 
-        // Wake the background enrichment service immediately instead of
-        // making the user wait for its next poll tick. New rows land with
-        // IsEnriched=false, so the BG loop picks them up as soon as it
-        // observes the signal.
-        if (anyAdded)
+        // Decoupling: creation does not auto-enqueue. Import is a higher-level
+        // pipeline, so it explicitly requests enrichment for the rows it added
+        // (only newly-created POIs — dedup-linked existing rows are left alone),
+        // then wakes the worker instead of making the user wait for the next
+        // poll tick. The rows are tracked on this same context.
+        if (addedPoiIds.Count > 0)
         {
+            var newRows = await db.Pois
+                .Where(p => addedPoiIds.Contains(p.Id))
+                .ToListAsync(cancellationToken);
+            foreach (var row in newRows)
+            {
+                row.EnrichmentRequested = true;
+            }
+            await db.SaveChangesAsync(cancellationToken);
             enrichmentTrigger.Signal();
         }
 

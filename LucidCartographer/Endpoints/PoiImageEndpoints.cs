@@ -38,11 +38,18 @@ public static class PoiImageEndpoints
             var tag = '"' + Convert.ToHexString(SHA256.HashData(image.Data)) + '"';
             var etag = new EntityTagHeaderValue(tag);
 
+            // Defence-in-depth: the bytes are already validated as a raster image
+            // (content-type allowlist + magic-byte sniff on ingest), but tell the
+            // browser never to MIME-sniff this response into something executable,
+            // and render it inline as a file rather than as a document.
+            http.Response.Headers["X-Content-Type-Options"] = "nosniff";
+
             // Force revalidation rather than heuristic caching, so a swapped
             // photo shows immediately instead of lingering as a stale cache hit.
             var responseHeaders = new ResponseHeaders(http.Response.Headers)
             {
-                CacheControl = new CacheControlHeaderValue { NoCache = true }
+                CacheControl = new CacheControlHeaderValue { NoCache = true },
+                ContentDisposition = new ContentDispositionHeaderValue("inline")
             };
 
             var requestEtags = http.Request.GetTypedHeaders().IfNoneMatch;

@@ -35,10 +35,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasIndex(e => e.GoogleMapsUrl);
             entity.HasIndex(e => new { e.Latitude, e.Longitude });
             entity.HasIndex(e => e.Name);
-            // Used by PoiEnrichmentBackgroundService to page through
-            // the queue of un-enriched Pois cheaply.
+            // IsEnriched is a pure data state now, still queried by
+            // startup revive and the failed-enrichment count.
             entity.HasIndex(e => e.IsEnriched);
-            entity.HasIndex(e => new { e.IsEnriched, e.EnrichmentFailureCount, e.LastEnrichmentAttemptAt });
+            // The enrichment queue: PoiEnrichmentBackgroundService pages
+            // through rows that explicitly requested enrichment.
+            entity.HasIndex(e => new { e.EnrichmentRequested, e.EnrichmentFailureCount, e.LastEnrichmentAttemptAt });
 
             // Check constraints for data integrity
             entity.ToTable(t =>

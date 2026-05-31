@@ -99,63 +99,14 @@ public sealed class StartupCleanupService(
             var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
             await using var db = await factory.CreateDbContextAsync(cancellationToken);
 
-            // Two cohorts to revive:
-            //  (a) failure cap reached but coords are valid — the row is
-            //      visible now but enrichment has given up.
-            //  (b) marked enriched yet never resolved a canonical /maps/place/
-            //      URL — under the corrected success criterion (a photo alone
-            //      no longer counts) such a row was a false positive: it may
-            //      carry an imported address and/or a stray SERP photo that
-            //      belongs to another place (POI #604 / "PUB 320"). Flip back
-            //      to unenriched so the BG service retries with the fixed
-            //      logic — landing on a real place or flagging NeedsManualUrl.
-            var stuck = await db.Pois
-                .Where(p => p.Latitude != null && p.Longitude != null
-                            && !p.EnrichmentNeedsManualUrl
-                            && (
-                                (!p.IsEnriched && p.EnrichmentFailureCount > 0)
-                                || (p.IsEnriched
-                                    && (p.GoogleMapsUrl == null || !p.GoogleMapsUrl.Contains("/maps/place/")))
-                            ))
-                .ToListAsync(cancellationToken);
+            var (revived, clearedImages) = await ReviveStuckImportedPoisCoreAsync(db, cancellationToken);
 
-            if (stuck.Count == 0)
+            if (revived > 0)
             {
-                return;
+                logger.LogWarning(
+                    "Revived {Count} stuck POIs (failed enrichment or pseudo-enriched) for re-enrichment; cleared {ImageCount} untrustworthy photo(s)",
+                    revived, clearedImages);
             }
-
-            // Photos on rows without a canonical place URL can only have come
-            // from the buggy SERP grab, so they are untrustworthy. Drop the
-            // stored image + ImageUrl for those rows (rows WITH a /maps/place/
-            // URL are never in this cohort, so good photos are untouched).
-            var poisedIds = stuck
-                .Where(p => p.GoogleMapsUrl == null || !p.GoogleMapsUrl.Contains("/maps/place/"))
-                .Select(p => p.Id)
-                .ToList();
-            var imagesToDrop = await db.PoiImages
-                .Where(img => poisedIds.Contains(img.PoiId))
-                .ToListAsync(cancellationToken);
-            if (imagesToDrop.Count > 0)
-            {
-                db.PoiImages.RemoveRange(imagesToDrop);
-            }
-
-            foreach (var poi in stuck)
-            {
-                poi.IsEnriched = false;
-                poi.EnrichmentFailureCount = 0;
-                poi.LastEnrichmentAttemptAt = null;
-                poi.EnrichmentNeedsManualUrl = false;
-                if (poi.GoogleMapsUrl == null || !poi.GoogleMapsUrl.Contains("/maps/place/"))
-                {
-                    poi.ImageUrl = null;
-                }
-            }
-
-            await db.SaveChangesAsync(cancellationToken);
-            logger.LogWarning(
-                "Revived {Count} stuck POIs (failed enrichment or pseudo-enriched) for re-enrichment; cleared {ImageCount} untrustworthy photo(s)",
-                stuck.Count, imagesToDrop.Count);
             // Successful run resets the consecutive-failure counter.
             Interlocked.Exchange(ref s_consecutiveReviveFailures, 0);
         }
@@ -173,6 +124,68 @@ public sealed class StartupCleanupService(
                 "ReviveStuckImportedPois failed (attempt {FailureCount}); continuing startup, will escalate on next failure",
                 failures);
         }
+    }
+
+    /// <summary>
+    /// Pure revive logic, extracted for testability. Revives two cohorts and
+    /// re-enqueues them under the explicit-request model:
+    ///  (a) failure-capped rows with valid coords (enrichment gave up); and
+    ///  (b) rows marked enriched that never resolved a canonical /maps/place/ URL
+    ///      (false positives that may carry a stray SERP photo — POI #604).
+    /// For revived rows lacking a place URL the untrustworthy photo is dropped.
+    /// Dormant manually-created POIs (EnrichmentRequested=false, IsEnriched=false,
+    /// FailureCount=0) match NEITHER cohort, so creation stays decoupled from
+    /// enrichment. Returns (revived count, cleared-image count).
+    /// </summary>
+    internal static async Task<(int Revived, int ClearedImages)> ReviveStuckImportedPoisCoreAsync(
+        AppDbContext db, CancellationToken cancellationToken)
+    {
+        var stuck = await db.Pois
+            .Where(p => p.Latitude != null && p.Longitude != null
+                        && !p.EnrichmentNeedsManualUrl
+                        && (
+                            (!p.IsEnriched && p.EnrichmentFailureCount > 0)
+                            || (p.IsEnriched
+                                && (p.GoogleMapsUrl == null || !p.GoogleMapsUrl.Contains("/maps/place/")))
+                        ))
+            .ToListAsync(cancellationToken);
+
+        if (stuck.Count == 0)
+        {
+            return (0, 0);
+        }
+
+        // Photos on rows without a canonical place URL can only have come from the
+        // buggy SERP grab, so they are untrustworthy — drop them (rows WITH a
+        // /maps/place/ URL are never in this cohort, so good photos are untouched).
+        var poisedIds = stuck
+            .Where(p => p.GoogleMapsUrl == null || !p.GoogleMapsUrl.Contains("/maps/place/"))
+            .Select(p => p.Id)
+            .ToList();
+        var imagesToDrop = await db.PoiImages
+            .Where(img => poisedIds.Contains(img.PoiId))
+            .ToListAsync(cancellationToken);
+        if (imagesToDrop.Count > 0)
+        {
+            db.PoiImages.RemoveRange(imagesToDrop);
+        }
+
+        foreach (var poi in stuck)
+        {
+            poi.IsEnriched = false;
+            poi.EnrichmentFailureCount = 0;
+            poi.LastEnrichmentAttemptAt = null;
+            poi.EnrichmentNeedsManualUrl = false;
+            // Re-enqueue explicitly — the worker keys off EnrichmentRequested now.
+            poi.EnrichmentRequested = true;
+            if (poi.GoogleMapsUrl == null || !poi.GoogleMapsUrl.Contains("/maps/place/"))
+            {
+                poi.ImageUrl = null;
+            }
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        return (stuck.Count, imagesToDrop.Count);
     }
 
     /// <summary>

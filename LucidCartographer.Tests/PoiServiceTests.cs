@@ -426,4 +426,68 @@ public class PoiServiceTests
         (await db.PoiImages.FindAsync(1)).Should().NotBeNull();
         (await db.PoiImages.FindAsync(2)).Should().NotBeNull();
     }
+
+    [Fact]
+    public async Task CreatePoiAsync_DoesNotRequestEnrichment()
+    {
+        // Decoupling: creating a POI must not enqueue it for the BG worker.
+        var (service, factory) = await CreateServiceAsync(db =>
+            db.PoiCollections.Add(new PoiCollection { Id = 1, Name = "Col", Color = "#005bbf", CreatedDate = DateTime.UtcNow }));
+
+        var created = await service.CreatePoiAsync(
+            new Poi { Name = "Event", Latitude = 53.0, Longitude = 20.0, AddedDate = DateTime.UtcNow },
+            collectionId: 1);
+
+        await using var db = await factory.CreateDbContextAsync();
+        var poi = await db.Pois.FindAsync(created.Id);
+        poi!.EnrichmentRequested.Should().BeFalse();
+        poi.IsEnriched.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task MarkPoiForReEnrichmentAsync_RequestsEnrichment()
+    {
+        var (service, factory) = await CreateServiceAsync(db =>
+            db.Pois.Add(new Poi { Id = 1, Name = "A", Latitude = 52.0, Longitude = 21.0, IsEnriched = true, AddedDate = DateTime.UtcNow }));
+
+        await service.MarkPoiForReEnrichmentAsync(1);
+
+        await using var db = await factory.CreateDbContextAsync();
+        (await db.Pois.FindAsync(1))!.EnrichmentRequested.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ResetFailedEnrichmentAsync_ResetsCounterAndRequeues()
+    {
+        var (service, factory) = await CreateServiceAsync(db =>
+            db.Pois.Add(new Poi { Id = 1, Name = "Failed", Latitude = 52.0, Longitude = 21.0, IsEnriched = false, EnrichmentFailureCount = 3, EnrichmentRequested = false, AddedDate = DateTime.UtcNow }));
+
+        var count = await service.ResetFailedEnrichmentAsync();
+
+        count.Should().Be(1);
+        await using var db = await factory.CreateDbContextAsync();
+        var poi = await db.Pois.FindAsync(1);
+        poi!.EnrichmentFailureCount.Should().Be(0);
+        poi.EnrichmentRequested.Should().BeTrue("reset must re-enqueue or the worker ignores it");
+    }
+
+    [Fact]
+    public async Task RequestEnrichmentAsync_FlagsOnlyGivenIds_WithoutResettingState()
+    {
+        var (service, factory) = await CreateServiceAsync(db =>
+            db.Pois.AddRange(
+                new Poi { Id = 1, Name = "A", Latitude = 52.0, Longitude = 21.0, IsEnriched = true, GoogleMapsUrl = "https://www.google.com/maps/place/A/@52,21,17z", AddedDate = DateTime.UtcNow },
+                new Poi { Id = 2, Name = "B", Latitude = 50.0, Longitude = 19.0, IsEnriched = true, AddedDate = DateTime.UtcNow }));
+
+        var count = await service.RequestEnrichmentAsync([1]);
+
+        count.Should().Be(1);
+        await using var db = await factory.CreateDbContextAsync();
+        var a = await db.Pois.FindAsync(1);
+        a!.EnrichmentRequested.Should().BeTrue();
+        // Unlike MarkPoiForReEnrichment, no other state is reset.
+        a.IsEnriched.Should().BeTrue();
+        a.GoogleMapsUrl.Should().Contain("/maps/place/A");
+        (await db.Pois.FindAsync(2))!.EnrichmentRequested.Should().BeFalse();
+    }
 }

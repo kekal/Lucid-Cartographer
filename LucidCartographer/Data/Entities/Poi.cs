@@ -49,17 +49,27 @@ public class Poi
     public DateTime AddedDate { get; set; }
 
     /// <summary>
-    /// False means the background enrichment service should fetch
-    /// detail-page data (address / website / phone) for this POI.
-    /// File imports (KML/GPX/CSV/GeoJSON) set this to true because
-    /// the source file already carries whatever metadata exists.
-    /// Google-scraped rows start as false — the scraper captures only
-    /// what the list card exposes and the background service fills
-    /// the rest by opening each place URL in a headless tab. If
-    /// enrichment fails, the row is left as-is and will be retried
-    /// on the next poll cycle (no retry cap, per design).
+    /// Pure data state: true once the background enrichment service has
+    /// run detail-page extraction to completion for this POI (either it
+    /// found place data, or it ran cleanly but found none — see
+    /// <see cref="EnrichmentNeedsManualUrl"/>). This is NOT a queue
+    /// signal — whether the worker should process a row is governed
+    /// solely by <see cref="EnrichmentRequested"/>. A freshly created
+    /// or imported POI starts false; it only becomes true when an
+    /// enrichment attempt completes.
     /// </summary>
     public bool IsEnriched { get; set; }
+
+    /// <summary>
+    /// Explicit enrichment-queue signal. True means the background
+    /// enrichment service should process this row. Set by the import
+    /// pipeline, the MCP enrich tools, the re-enrich service methods,
+    /// and startup revive. Cleared by the worker on every terminal
+    /// outcome (success, soft-fail/needs-manual-url, or reaching the
+    /// retry cap); kept true across a retryable failure. Creating a POI
+    /// does NOT set this — creation is decoupled from enrichment.
+    /// </summary>
+    public bool EnrichmentRequested { get; set; }
 
     /// <summary>
     /// Consecutive enrichment failures. Incremented by the background

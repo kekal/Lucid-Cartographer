@@ -12,20 +12,24 @@ using Polly.Registry;
 namespace LucidCartographer.Services.Enrichment;
 
 /// <summary>
-/// Polls the Poi table for rows with IsEnriched=false and fills in
+/// Polls the Poi table for rows that explicitly requested enrichment
+/// (<see cref="Poi.EnrichmentRequested"/> == true) and fills in
 /// address / website / phone by opening each place URL in a headless
-/// Playwright tab. Enrichment runs <see cref="EnrichmentOptions.Concurrency"/>
-/// POIs in parallel via <see cref="Parallel.ForEachAsync{T}"/>; all
+/// Playwright tab. Creating a POI does NOT enqueue it — enrichment is
+/// requested by the import pipeline, the MCP enrich tools, the re-enrich
+/// service methods, and startup revive. Enrichment runs
+/// <see cref="EnrichmentOptions.Concurrency"/> POIs in parallel; all
 /// workers share a single <see cref="IBrowserContext"/> so cookies /
 /// consent state are reused across tabs and iterations. Each worker
 /// gets its own <see cref="AppDbContext"/> from the factory — EF Core
 /// contexts are not thread-safe, but SQLite handles concurrent readers
 /// and serializes writers for us.
 ///
-/// Failures are not retried with a counter — the row stays
-/// IsEnriched=false and the next poll cycle picks it up again. This
-/// keeps the data model simple (one bool, no retry state) and matches
-/// the user's directive: "if something was pending — we just refetch".
+/// A hard failure is retried with exponential backoff up to
+/// <see cref="EnrichmentOptions.MaxRetries"/>; the row keeps
+/// EnrichmentRequested=true between attempts. On every terminal outcome
+/// — success, soft-fail (needs manual URL), or reaching the retry cap —
+/// the worker clears EnrichmentRequested so the row leaves the queue.
 /// </summary>
 public class PoiEnrichmentBackgroundService : BackgroundService
 {
@@ -153,7 +157,7 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         await using (var db = await _factory.CreateDbContextAsync(ct))
         {
             remaining = await db.Pois.CountAsync(
-                p => !p.IsEnriched && p.EnrichmentFailureCount < _options.MaxRetries,
+                EnrichmentStateMachine.QueuePredicate(_options.MaxRetries),
                 ct);
         }
         _progress.Set(remaining);
@@ -178,7 +182,7 @@ public class PoiEnrichmentBackgroundService : BackgroundService
             {
                 var now = DateTime.UtcNow;
                 var candidates = await loadDb.Pois
-                    .Where(p => !p.IsEnriched && p.EnrichmentFailureCount < _options.MaxRetries)
+                    .Where(EnrichmentStateMachine.QueuePredicate(_options.MaxRetries))
                     .OrderBy(p => p.Id)
                     .Take(_options.BatchSize * 4)
                     .Select(p => new { p.Id, p.EnrichmentFailureCount, p.LastEnrichmentAttemptAt })
@@ -249,7 +253,7 @@ public class PoiEnrichmentBackgroundService : BackgroundService
             await using (var progressDb = await _factory.CreateDbContextAsync(ct))
             {
                 var newRemaining = await progressDb.Pois.CountAsync(
-                    p => !p.IsEnriched && p.EnrichmentFailureCount < _options.MaxRetries,
+                    p => p.EnrichmentRequested && p.EnrichmentFailureCount < _options.MaxRetries,
                     ct);
                 _progress.Set(newRemaining);
             }
@@ -344,7 +348,7 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         await using (var db = await _factory.CreateDbContextAsync(ct))
         {
             var poi = await db.Pois.AsNoTracking().FirstOrDefaultAsync(p => p.Id == poiId, ct);
-            if (poi == null || poi.IsEnriched || poi.EnrichmentFailureCount >= _options.MaxRetries)
+            if (poi == null || !poi.EnrichmentRequested || poi.EnrichmentFailureCount >= _options.MaxRetries)
             {
                 return Task.CompletedTask;
             }
@@ -446,20 +450,12 @@ public class PoiEnrichmentBackgroundService : BackgroundService
             // manual-URL fallback.
             var hasUsefulData = details.ResolvedPlace;
             poi.LastEnrichmentAttemptAt = DateTime.UtcNow;
-            if (hasUsefulData)
-            {
-                poi.IsEnriched = true;
-                poi.EnrichmentFailureCount = 0;
-                poi.EnrichmentNeedsManualUrl = false;
-            }
-            else
-            {
-                // Soft failure: page loaded fine, no place data. No retries —
-                // flip the manual-URL flag so the UI prompts the user.
-                poi.IsEnriched = true;
-                poi.EnrichmentNeedsManualUrl = true;
-                poi.EnrichmentFailureCount = 0;
-            }
+            // Terminal outcome — clears EnrichmentRequested either way. Soft failure
+            // (no place data) flips NeedsManualUrl so the UI prompts for a URL.
+            EnrichmentStateMachine.ApplyOutcome(
+                poi,
+                hasUsefulData ? EnrichmentOutcome.Resolved : EnrichmentOutcome.SoftFailure,
+                _options.MaxRetries);
 
             _logger.LogInformation(
                 "Enriched Poi {Id} '{Name}' (addr={Addr} web={Web} phone={Phone}{ManualHint})",
@@ -480,7 +476,7 @@ public class PoiEnrichmentBackgroundService : BackgroundService
             }
 
             var newRemaining = await db.Pois.CountAsync(
-                p => !p.IsEnriched && p.EnrichmentFailureCount < _options.MaxRetries,
+                EnrichmentStateMachine.QueuePredicate(_options.MaxRetries),
                 ct);
             _progress.Set(newRemaining);
         }
@@ -503,8 +499,10 @@ public class PoiEnrichmentBackgroundService : BackgroundService
                 return;
             }
 
-            poi.EnrichmentFailureCount++;
             poi.LastEnrichmentAttemptAt = DateTime.UtcNow;
+            // Retryable: increments the counter and only clears EnrichmentRequested
+            // once the cap is reached (row stays IsEnriched=false either way).
+            EnrichmentStateMachine.ApplyOutcome(poi, EnrichmentOutcome.HardFailure, _options.MaxRetries);
             var retryDelay = GetRetryDelay(poi.EnrichmentFailureCount);
             await SaveChangesWithWriteLockAsync(db, ct);
 

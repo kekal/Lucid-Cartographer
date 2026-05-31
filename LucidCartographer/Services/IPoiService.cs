@@ -49,4 +49,10 @@ public interface IPoiService
     /// </summary>
     Task<int> MarkCollectionForReEnrichmentAsync(int collectionId, CancellationToken cancellationToken = default);
     Task ReplacePoiGoogleMapsUrlAsync(int poiId, string googleMapsUrl, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Flags the given POIs as explicitly requesting background enrichment
+    /// without resetting any other state. Used by pipelines (e.g. import) that
+    /// add rows and then hand them off to the enrichment worker.
+    /// </summary>
+    Task<int> RequestEnrichmentAsync(IReadOnlyCollection<int> poiIds, CancellationToken cancellationToken = default);
 }

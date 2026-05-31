@@ -467,7 +467,13 @@ public sealed class DataSourcesPageViewModel(
                 IsEnriched = false  // enrichment service will fill details
             };
 
-            await poiService.CreatePoiAsync(poi, AddPoiCollectionId!.Value);
+            var created = await poiService.CreatePoiAsync(poi, AddPoiCollectionId!.Value);
+
+            // Creation is decoupled from enrichment: it does not enqueue. This
+            // "add from URL" flow is a higher-level pipeline whose whole purpose
+            // is to enrich the pasted place, so explicitly request enrichment for
+            // the new row (otherwise it would sit forever as "Pending enrichment").
+            await poiService.RequestEnrichmentAsync([created.Id], _cts.Token);
 
             // Wake the enrichment service so it picks up the new POI immediately
             enrichmentTrigger.Signal();

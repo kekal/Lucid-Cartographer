@@ -75,6 +75,7 @@ public record PoiDetailDto(
     string? ImageEndpoint,
     DateTime AddedDate,
     bool IsEnriched,
+    bool EnrichmentRequested,
     bool EnrichmentNeedsManualUrl,
     int EnrichmentFailureCount,
     IReadOnlyList<string> Collections)
@@ -100,6 +101,7 @@ public record PoiDetailDto(
         hasStoredImage ? $"/api/poi-image/{p.Id}" : null,
         p.AddedDate,
         p.IsEnriched,
+        p.EnrichmentRequested,
         p.EnrichmentNeedsManualUrl,
         p.EnrichmentFailureCount,
         collections);

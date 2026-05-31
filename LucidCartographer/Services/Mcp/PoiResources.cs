@@ -24,10 +24,13 @@ public static class PoiResources
         1. **Discover** — `list_collections`, then `list_pois_in_collection` or `search_pois`.
         2. **Inspect** — `get_poi` returns every field; `get_poi_image` returns the stored photo
            as viewable image content (or the external image URL as text if no bytes are stored).
-        3. **Organize** — `create_collection`; `create_poi` (a new POI is always created
-           *unenriched* and queued for background enrichment); `move_poi`, `copy_poi` and
-           `delete_poi` move POIs between collections. `delete_poi` only unlinks from one
-           collection; a POI left in no collection is removed entirely.
+        3. **Organize** — `create_collection`; `create_poi` stores the fields you pass
+           *as-is* and does **not** enrich (no Google lookup, no fuzzy-merge into a nearby
+           place) — ideal for events / custom waypoints. To fill address/photo/website/phone
+           for a real place, call `enrich_poi` on the new id afterwards. Optionally pass
+           `imageUrl` (http/https) to `create_poi`/`edit_poi` to download and store a photo.
+           `move_poi`, `copy_poi` and `delete_poi` move POIs between collections. `delete_poi`
+           only unlinks from one collection; a POI left in no collection is removed entirely.
         4. **Enrich** — `enrich_poi` re-runs enrichment for one POI and is **idempotent**:
            calling it again discards the current Google Maps link and runs a fresh name search.
            `enrich_collection` queues every POI in a collection. If a place still cannot be
@@ -75,7 +78,8 @@ public static class PoiResources
         - `country`, `region` (nullable strings)
         - `imageUrl` (external), `hasStoredImage` (bool), `imageEndpoint` (path for get_poi_image)
         - `addedDate`
-        - `isEnriched`, `enrichmentNeedsManualUrl`, `enrichmentFailureCount`
+        - `isEnriched` (enrichment has run to completion), `enrichmentRequested` (queued for
+          the background worker), `enrichmentNeedsManualUrl`, `enrichmentFailureCount`
         - `collections` (names this POI belongs to)
 
         ## Allowed `category` values

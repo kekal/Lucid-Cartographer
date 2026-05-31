@@ -470,10 +470,39 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
         {
             poi.EnrichmentFailureCount = 0;
             poi.LastEnrichmentAttemptAt = null;
+            poi.EnrichmentRequested = true; // re-enqueue so the worker retries them
         }
 
         await db.SaveChangesAsync(cancellationToken);
         return failed.Count;
+    }
+
+    /// <summary>
+    /// Marks the given POIs as explicitly requesting background enrichment,
+    /// WITHOUT resetting any other state (unlike <see cref="MarkPoiForReEnrichmentAsync"/>).
+    /// Used by the import pipeline to enqueue freshly-created rows: it must not
+    /// null the GoogleMapsUrl or reset counters, only flip the queue flag.
+    /// Returns the number of rows flagged.
+    /// </summary>
+    public async Task<int> RequestEnrichmentAsync(IReadOnlyCollection<int> poiIds, CancellationToken cancellationToken = default)
+    {
+        if (poiIds.Count == 0)
+        {
+            return 0;
+        }
+
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var pois = await db.Pois
+            .Where(p => poiIds.Contains(p.Id))
+            .ToListAsync(cancellationToken);
+
+        foreach (var poi in pois)
+        {
+            poi.EnrichmentRequested = true;
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        return pois.Count;
     }
 
     public async Task ReplacePoiGoogleMapsUrlAsync(int poiId, string googleMapsUrl, CancellationToken cancellationToken = default)
@@ -500,6 +529,7 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
         poi.EnrichmentFailureCount = 0;
         poi.LastEnrichmentAttemptAt = null;
         poi.EnrichmentNeedsManualUrl = false;
+        poi.EnrichmentRequested = true; // explicitly enqueue for the BG worker
         // Keep the current photo until enrichment from the new URL succeeds —
         // BackfillImageAsync replaces it in place once it has the new bytes.
         await db.SaveChangesAsync(cancellationToken);
@@ -524,6 +554,7 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
             poi.IsEnriched = false;
             poi.EnrichmentFailureCount = 0;
             poi.LastEnrichmentAttemptAt = null;
+            poi.EnrichmentRequested = true; // explicitly enqueue for the BG worker
             // Keep existing photos; BackfillImageAsync replaces each in place
             // only when a fresh photo is fetched, so a failed re-enrichment
             // doesn't strip the whole collection's images.
@@ -547,6 +578,7 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
         poi.EnrichmentFailureCount = 0;
         poi.LastEnrichmentAttemptAt = null;
         poi.EnrichmentNeedsManualUrl = false;
+        poi.EnrichmentRequested = true; // explicitly enqueue for the BG worker
         // Re-enrichment is idempotent: pressing enrich again means the current
         // link/result is unsatisfactory, so discard the stored Google Maps URL
         // and let the BG service run a fresh name search. Coordinates are kept
