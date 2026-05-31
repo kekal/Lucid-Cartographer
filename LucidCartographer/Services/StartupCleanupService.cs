@@ -102,18 +102,19 @@ public sealed class StartupCleanupService(
             // Two cohorts to revive:
             //  (a) failure cap reached but coords are valid — the row is
             //      visible now but enrichment has given up.
-            //  (b) marked enriched yet has no address / website / phone /
-            //      canonical place URL — symptom of the old coords-only
-            //      success check; flip back to unenriched so BG retries.
+            //  (b) marked enriched yet never resolved a canonical /maps/place/
+            //      URL — under the corrected success criterion (a photo alone
+            //      no longer counts) such a row was a false positive: it may
+            //      carry an imported address and/or a stray SERP photo that
+            //      belongs to another place (POI #604 / "PUB 320"). Flip back
+            //      to unenriched so the BG service retries with the fixed
+            //      logic — landing on a real place or flagging NeedsManualUrl.
             var stuck = await db.Pois
                 .Where(p => p.Latitude != null && p.Longitude != null
                             && !p.EnrichmentNeedsManualUrl
                             && (
                                 (!p.IsEnriched && p.EnrichmentFailureCount > 0)
                                 || (p.IsEnriched
-                                    && (p.Address == null || p.Address == "")
-                                    && (p.Website == null || p.Website == "")
-                                    && (p.Phone == null || p.Phone == "")
                                     && (p.GoogleMapsUrl == null || !p.GoogleMapsUrl.Contains("/maps/place/")))
                             ))
                 .ToListAsync(cancellationToken);
@@ -123,16 +124,38 @@ public sealed class StartupCleanupService(
                 return;
             }
 
+            // Photos on rows without a canonical place URL can only have come
+            // from the buggy SERP grab, so they are untrustworthy. Drop the
+            // stored image + ImageUrl for those rows (rows WITH a /maps/place/
+            // URL are never in this cohort, so good photos are untouched).
+            var poisedIds = stuck
+                .Where(p => p.GoogleMapsUrl == null || !p.GoogleMapsUrl.Contains("/maps/place/"))
+                .Select(p => p.Id)
+                .ToList();
+            var imagesToDrop = await db.PoiImages
+                .Where(img => poisedIds.Contains(img.PoiId))
+                .ToListAsync(cancellationToken);
+            if (imagesToDrop.Count > 0)
+            {
+                db.PoiImages.RemoveRange(imagesToDrop);
+            }
+
             foreach (var poi in stuck)
             {
                 poi.IsEnriched = false;
                 poi.EnrichmentFailureCount = 0;
                 poi.LastEnrichmentAttemptAt = null;
                 poi.EnrichmentNeedsManualUrl = false;
+                if (poi.GoogleMapsUrl == null || !poi.GoogleMapsUrl.Contains("/maps/place/"))
+                {
+                    poi.ImageUrl = null;
+                }
             }
 
             await db.SaveChangesAsync(cancellationToken);
-            logger.LogWarning("Revived {Count} stuck POIs (failed enrichment or pseudo-enriched) for re-enrichment", stuck.Count);
+            logger.LogWarning(
+                "Revived {Count} stuck POIs (failed enrichment or pseudo-enriched) for re-enrichment; cleared {ImageCount} untrustworthy photo(s)",
+                stuck.Count, imagesToDrop.Count);
             // Successful run resets the consecutive-failure counter.
             Interlocked.Exchange(ref s_consecutiveReviveFailures, 0);
         }

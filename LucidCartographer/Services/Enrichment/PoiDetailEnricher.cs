@@ -12,22 +12,20 @@ public record EnrichedDetails(
     string? ImageUrl)
 {
     /// <summary>
-    /// True when THIS enrichment pass actually resolved a Google place — i.e.
-    /// the scraper read at least one real detail (address / website / phone),
-    /// a photo, or landed on a canonical /maps/place/ URL.
+    /// True only when THIS enrichment pass landed on a canonical Google
+    /// <c>/maps/place/</c> URL — the single trustworthy signal that we actually
+    /// resolved the place. <see cref="GoogleMapsUrl"/> is populated (in
+    /// <see cref="PoiDetailEnricher"/>) exactly when the final URL contains
+    /// <c>/maps/place/</c>, so it is the authoritative gate.
     ///
-    /// Deliberately evaluated on the freshly-scraped <see cref="EnrichedDetails"/>
-    /// and NOT on the merged POI: a row created via MCP/import may already carry
-    /// an address, and counting that as success would mask a failed lookup and
-    /// suppress the manual-URL fallback (the row would show "Enriched" with no
-    /// photo and no canonical URL — exactly the bug this guards against).
+    /// Address / website / phone come from selectors that only exist on the
+    /// place panel, so they cannot be present without a place URL anyway — and
+    /// a photo MUST NOT count on its own: a search-results (SERP) page exposes
+    /// stray <c>googleusercontent.com</c> thumbnails that belong to other
+    /// places (the POI #604 / "PUB 320" bug). Counting a photo alone marked
+    /// such rows "Enriched" with a wrong image and no canonical URL.
     /// </summary>
-    public bool ResolvedPlace =>
-        !string.IsNullOrWhiteSpace(Address)
-        || !string.IsNullOrWhiteSpace(Website)
-        || !string.IsNullOrWhiteSpace(Phone)
-        || !string.IsNullOrWhiteSpace(ImageUrl)
-        || !string.IsNullOrWhiteSpace(GoogleMapsUrl);
+    public bool ResolvedPlace => !string.IsNullOrWhiteSpace(GoogleMapsUrl);
 }
 
 /// <summary>
@@ -228,7 +226,13 @@ public static class PoiDetailEnricher
             EnrichmentMetrics.RecordSelectorMiss();
         }
 
-        var imageUrl = await TryExtractImageUrlAsync(page, logger);
+        // Only trust a photo when we actually landed on a place page. On a
+        // results (SERP) page the img[src*='googleusercontent.com'] selector
+        // matches a stray thumbnail belonging to some other listing — storing
+        // it gave POI #604 the wrong "PUB 320" menu image.
+        var imageUrl = finalUrl.Contains("/maps/place/")
+            ? await TryExtractImageUrlAsync(page, logger)
+            : null;
 
         return new EnrichedDetails(
             Address: address,
