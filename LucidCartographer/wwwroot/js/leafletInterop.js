@@ -104,7 +104,19 @@
         // dead end — but only for a user-initiated tap; the passive auto-locate
         // on load fails silently so we don't nag on every mobile page open.
         if (state.locateUserInitiated) {
-            showMapToast(state.locateErrorMessage);
+            // Append a code-specific hint so the user can diagnose on the device
+            // itself (no desktop devtools needed). PositionError codes:
+            //   1 PERMISSION_DENIED   — blocked for this site / browser / OS
+            //   2 POSITION_UNAVAILABLE — GPS or OS location services are off
+            //   3 TIMEOUT             — no fix in time
+            var code = e && typeof e.code !== 'undefined' ? e.code : null;
+            var hint = code === 1 ? ' — permission blocked (allow location for this site)'
+                : code === 2 ? ' — location unavailable (turn on GPS / Location services)'
+                : code === 3 ? ' — timed out (try again, ideally outdoors)'
+                : '';
+            var msg = (state.locateErrorMessage || 'Location error')
+                + hint + (code !== null ? ' [code ' + code + ']' : '');
+            showMapToast(msg);
         }
         if (window.console) {
             window.console.warn('Geolocation unavailable:', e && e.code, e && e.message);
