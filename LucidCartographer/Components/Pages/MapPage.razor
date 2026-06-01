@@ -407,7 +407,7 @@ else
             // (https/localhost); over plain http LAN the browser denies it.
             if (Viewport.IsMobile)
             {
-                try { await Js.InvokeVoidAsync("leafletInterop.locateUser", false); }
+                try { await Js.InvokeVoidAsync("leafletInterop.locateUser", false, UiStrings.LocationUnavailable); }
                 catch (JSDisconnectedException) { }
                 catch (InvalidOperationException) { }
             }
@@ -478,7 +478,7 @@ else
     // map init, so tapping repeatedly is cheap.
     private async Task LocateMeAsync()
     {
-        try { await Js.InvokeVoidAsync("leafletInterop.locateUser", true); }
+        try { await Js.InvokeVoidAsync("leafletInterop.locateUser", true, UiStrings.LocationUnavailable); }
         catch (JSDisconnectedException) { }
         catch (InvalidOperationException) { }
     }

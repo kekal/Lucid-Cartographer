@@ -21,8 +21,37 @@
         // map to the device on the next fix (set by the locate FAB).
         userMarker: null,
         locating: false,
-        recenterOnNextFix: false
+        recenterOnNextFix: false,
+        // Localized message shown (as a transient map toast) when a geolocation
+        // attempt fails. Passed in from MapPage via locateUser so the text stays
+        // in UiStrings rather than being hardcoded here.
+        locateErrorMessage: null
     };
+
+    // Lightweight transient toast anchored to the map container. Used to give
+    // the user visible feedback when geolocation fails — without it a denied /
+    // unavailable fix leaves the locate FAB looking dead. Auto-dismisses; a new
+    // toast replaces the previous one so repeated taps don't stack.
+    function showMapToast(message) {
+        if (!message || !state.map) return;
+        var container = state.map.getContainer();
+        if (!container) return;
+        var existing = container.querySelector('.map-toast');
+        if (existing) existing.remove();
+        var toast = document.createElement('div');
+        toast.className = 'map-toast';
+        toast.setAttribute('role', 'status');
+        toast.textContent = message;
+        container.appendChild(toast);
+        // Force reflow so the fade-in transition runs, then schedule removal.
+        // eslint-disable-next-line no-unused-expressions
+        toast.offsetWidth;
+        toast.classList.add('map-toast-show');
+        setTimeout(function () {
+            toast.classList.remove('map-toast-show');
+            setTimeout(function () { if (toast.parentNode) toast.remove(); }, 300);
+        }, 4000);
+    }
 
     function onUserLocationFound(e) {
         var ll = e.latlng;
@@ -52,9 +81,23 @@
 
     function onUserLocationError(e) {
         state.recenterOnNextFix = false;
-        // Common causes: permission denied, or an insecure context (plain http
-        // over a LAN IP — browsers only expose geolocation on https/localhost).
-        // Nothing actionable beyond a diagnostic; no star is drawn.
+        // Reset the in-progress guard and tear down the (now-dead) watch so a
+        // subsequent locate FAB tap can retry from scratch. Without this, the
+        // first failed attempt (e.g. the passive auto-locate on map load, which
+        // some mobile browsers reject because it lacks a user gesture) would
+        // leave `locating` stuck true — every later FAB tap then hits the
+        // `if (state.locating) return;` guard and silently does nothing, so the
+        // button looks broken even though the device could grant a fix on a
+        // user-initiated retry.
+        state.locating = false;
+        if (state.map) {
+            try { state.map.stopLocate(); } catch (_) { }
+        }
+        // Common causes: permission denied, GPS off, or an insecure context
+        // (plain http over a LAN IP — browsers only expose geolocation on
+        // https/localhost). Surface a visible toast so the FAB isn't a silent
+        // dead end, plus a console diagnostic.
+        showMapToast(state.locateErrorMessage);
         if (window.console) {
             window.console.warn('Geolocation unavailable:', e && e.code, e && e.message);
         }
@@ -345,10 +388,20 @@
         //
         // Note: geolocation is only exposed in a secure context — https or
         // localhost. Over plain http to a LAN IP the browser fires
-        // locationerror and no star appears; that's a transport limitation,
-        // not a bug here.
-        locateUser: function (recenter) {
+        // locationerror; we then show a toast (errorMessage) and reset the
+        // guard so the next FAB tap retries. The passive auto-locate on load
+        // has no user gesture, which some mobile browsers reject — the FAB tap
+        // (a real gesture) is the reliable trigger, so it must always be able
+        // to re-issue the request rather than being blocked by a stale guard.
+        locateUser: function (recenter, errorMessage) {
             if (!state.map) return;
+
+            // Remember the localized failure text (from UiStrings) so the error
+            // handler can show it as a toast. Updated on every call so it stays
+            // current across viewport flips / re-wires.
+            if (typeof errorMessage === 'string') {
+                state.locateErrorMessage = errorMessage;
+            }
 
             if (recenter) {
                 if (state.userMarker) {

@@ -711,3 +711,33 @@ html[data-theme="dark"] .m-tabbar a.active { color: #6aa1e8; }
 @media (prefers-reduced-motion: reduce) {
     .user-loc-pulse { animation: none; }
 }
+
+/* Transient feedback toast shown over the map (e.g. when geolocation fails so
+   the locate FAB isn't a silent dead end). Anchored bottom-center of the map
+   container, above Leaflet panes and the FAB stack. */
+.map-toast {
+    position: absolute;
+    left: 50%;
+    bottom: 16px;
+    transform: translate(-50%, 8px);
+    max-width: calc(100% - 32px);
+    z-index: 1200;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: rgba(33, 33, 33, 0.92);
+    color: #fff;
+    font-size: 13px;
+    line-height: 1.35;
+    text-align: center;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.map-toast-show {
+    opacity: 1;
+    transform: translate(-50%, 0);
+}
+@media (prefers-reduced-motion: reduce) {
+    .map-toast { transition: none; }
+}
