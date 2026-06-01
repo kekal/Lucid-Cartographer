@@ -25,7 +25,12 @@
         // Localized message shown (as a transient map toast) when a geolocation
         // attempt fails. Passed in from MapPage via locateUser so the text stays
         // in UiStrings rather than being hardcoded here.
-        locateErrorMessage: null
+        locateErrorMessage: null,
+        // True when the latest locate request came from a user tap on the FAB.
+        // The passive auto-locate on map load fails silently (no toast) because
+        // it has no user gesture and the failure isn't actionable; only an
+        // explicit tap surfaces the toast.
+        locateUserInitiated: false
     };
 
     // Lightweight transient toast anchored to the map container. Used to give
@@ -96,8 +101,11 @@
         // Common causes: permission denied, GPS off, or an insecure context
         // (plain http over a LAN IP — browsers only expose geolocation on
         // https/localhost). Surface a visible toast so the FAB isn't a silent
-        // dead end, plus a console diagnostic.
-        showMapToast(state.locateErrorMessage);
+        // dead end — but only for a user-initiated tap; the passive auto-locate
+        // on load fails silently so we don't nag on every mobile page open.
+        if (state.locateUserInitiated) {
+            showMapToast(state.locateErrorMessage);
+        }
         if (window.console) {
             window.console.warn('Geolocation unavailable:', e && e.code, e && e.message);
         }
@@ -402,6 +410,10 @@
             if (typeof errorMessage === 'string') {
                 state.locateErrorMessage = errorMessage;
             }
+            // recenter is only true for the locate FAB tap; the passive
+            // auto-locate on load passes false. Drives whether a failure shows
+            // the toast (see onUserLocationError).
+            state.locateUserInitiated = !!recenter;
 
             if (recenter) {
                 if (state.userMarker) {
@@ -511,4 +523,21 @@
         link.click();
         document.body.removeChild(link);
     };
+
+    // Locate FAB handler — wired client-side rather than via Blazor @onclick on
+    // purpose. The geolocation permission prompt only appears when the request
+    // is made under "transient activation" (synchronously inside the user's tap
+    // handler). Routing the tap through Blazor Server (@onclick -> SignalR ->
+    // server -> JS interop callback) loses that activation by the time
+    // navigator.geolocation runs, so the browser silently denies WITHOUT ever
+    // prompting. A delegated click listener on document calls locateUser
+    // straight from the gesture, preserving activation so the prompt shows. One
+    // listener, attached once — survives Blazor re-renders (the FAB only exists
+    // in the mobile layout; closest() is a no-op elsewhere).
+    document.addEventListener('click', function (e) {
+        var btn = e.target && e.target.closest ? e.target.closest('#locate-fab') : null;
+        if (!btn) return;
+        var msg = btn.getAttribute('data-loc-error') || null;
+        try { window.leafletInterop.locateUser(true, msg); } catch (_) { }
+    });
 })();
