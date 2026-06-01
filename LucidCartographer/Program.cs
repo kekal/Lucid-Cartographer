@@ -18,6 +18,7 @@ builder.Services
     .AddPoiServices()
     .AddImportPipeline()
     .AddEnrichmentPipeline(builder.Configuration)
+    .AddDeduplicationPipeline(builder.Configuration)
     .AddExportPipeline()
     .AddAppAuthentication(builder.Configuration, builder.Environment)
     .AddAppResiliencePipelines()

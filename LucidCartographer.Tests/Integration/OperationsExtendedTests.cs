@@ -84,7 +84,7 @@ public class OperationsExtendedTests : IntegrationTestBase
         await Page.WaitForSelectorAsync("text=data points loaded", new() { Timeout = 5000 });
 
         // Click Dedup button
-        await Page.Locator("button:has-text('Dedup')").ClickAsync();
+        await Page.Locator("button[aria-label='Deduplicate collection A']").ClickAsync();
         await Page.WaitForSelectorAsync("text=Result Preview", new() { Timeout = 10000 });
 
         // Dataset B dropdown should be disabled
@@ -107,7 +107,7 @@ public class OperationsExtendedTests : IntegrationTestBase
         await Page.WaitForSelectorAsync("text=data points loaded", new() { Timeout = 5000 });
 
         // Run Dedup
-        await Page.Locator("button:has-text('Dedup')").ClickAsync();
+        await Page.Locator("button[aria-label='Deduplicate collection A']").ClickAsync();
         await Page.WaitForSelectorAsync("text=Result Preview", new() { Timeout = 10000 });
 
         // Verify B is disabled
@@ -198,7 +198,7 @@ public class OperationsExtendedTests : IntegrationTestBase
         var subtractBtn = Page.Locator("button:has-text('A - B')");
         var intersectBtn = Page.Locator("button:has-text('A n B')");
         var unionBtn = Page.Locator("button:has-text('A u B')");
-        var dedupBtn = Page.Locator("button:has-text('Dedup')");
+        var dedupBtn = Page.Locator("button[aria-label='Deduplicate collection A']");
 
         Assert.True(await subtractBtn.IsDisabledAsync());
         Assert.True(await intersectBtn.IsDisabledAsync());

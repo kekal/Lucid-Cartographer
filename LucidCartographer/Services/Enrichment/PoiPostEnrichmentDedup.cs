@@ -61,10 +61,33 @@ internal static class PoiPostEnrichmentDedup
             return false;
         }
 
-        BackfillCanonicalFields(justEnriched, canonical);
-        await RewriteCollectionLinksAsync(db, justEnriched, canonical, ct);
-        await ReassignOrDropDuplicateImageAsync(db, justEnriched, canonical, ct);
-        db.Pois.Remove(justEnriched);
+        await MergePairAsync(db, justEnriched, canonical, ct, writeLock);
+        return true;
+    }
+
+    /// <summary>
+    /// Folds <paramref name="duplicate"/> into <paramref name="canonical"/>:
+    /// backfills any fields the canonical is missing, moves the duplicate's
+    /// collection links and image to the canonical, removes the duplicate
+    /// row, and commits — one <c>SaveChanges</c> per pair so that a
+    /// multi-member group (3+ rows for one place) sees each prior merge's
+    /// links already persisted, avoiding a duplicate composite-key insert.
+    /// Both rows must be tracked by <paramref name="db"/>. The caller picks
+    /// the canonical (smaller Id wins, by convention). When
+    /// <paramref name="writeLock"/> is supplied the commit is serialized
+    /// through it so a concurrent enrichment write does not collide.
+    /// </summary>
+    public static async Task MergePairAsync(
+        AppDbContext db,
+        Poi duplicate,
+        Poi canonical,
+        CancellationToken ct,
+        SemaphoreSlim? writeLock = null)
+    {
+        BackfillCanonicalFields(duplicate, canonical);
+        await RewriteCollectionLinksAsync(db, duplicate, canonical, ct);
+        await ReassignOrDropDuplicateImageAsync(db, duplicate, canonical, ct);
+        db.Pois.Remove(duplicate);
         if (writeLock is null)
         {
             await db.SaveChangesAsync(ct);
@@ -81,8 +104,6 @@ internal static class PoiPostEnrichmentDedup
                 writeLock.Release();
             }
         }
-
-        return true;
     }
 
     // ---- Match strategy ------------------------------------------------------

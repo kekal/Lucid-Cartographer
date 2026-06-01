@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
 using LucidCartographer.Services.Import;
+using LucidCartographer.Services.Operations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.Playwright;
@@ -36,12 +37,13 @@ public class PoiEnrichmentBackgroundService : BackgroundService
     private readonly IDbContextFactory<AppDbContext> _factory;
     private readonly EnrichmentProgressService _progress;
     private readonly EnrichmentTrigger _trigger;
+    private readonly DedupTrigger _dedupTrigger;
+    private readonly SqliteWriteLock _writeLock;
     private readonly ILogger<PoiEnrichmentBackgroundService> _logger;
     private readonly ResiliencePipeline _pipeline;
     private readonly EnrichmentOptions _options;
     private readonly TimeSpan _idlePollInterval;
     private readonly TimeSpan _baseRetryDelay;
-    private readonly SemaphoreSlim _sqliteWriteLock = new(1, 1);
     private readonly SemaphoreSlim _pageConcurrencyLock;
     // Tracks POI ids currently being enriched across all workers in this
     // process. Without it, two workers can pick the same id when their
@@ -54,6 +56,8 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         IDbContextFactory<AppDbContext> factory,
         EnrichmentProgressService progress,
         EnrichmentTrigger trigger,
+        DedupTrigger dedupTrigger,
+        SqliteWriteLock writeLock,
         ResiliencePipelineProvider<string> pipelineProvider,
         IOptions<EnrichmentOptions> options,
         ILogger<PoiEnrichmentBackgroundService> logger)
@@ -61,6 +65,8 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         _factory = factory;
         _progress = progress;
         _trigger = trigger;
+        _dedupTrigger = dedupTrigger;
+        _writeLock = writeLock;
         _logger = logger;
         _pipeline = pipelineProvider.GetPipeline("enrichment");
         _options = options.Value;
@@ -72,7 +78,7 @@ public class PoiEnrichmentBackgroundService : BackgroundService
 
     public override void Dispose()
     {
-        _sqliteWriteLock.Dispose();
+        // _writeLock is a DI singleton — the container owns its lifetime.
         _pageConcurrencyLock.Dispose();
         base.Dispose();
     }
@@ -128,6 +134,16 @@ public class PoiEnrichmentBackgroundService : BackgroundService
             try
             {
                 var processed = await ProcessBatchAsync(context, stoppingToken);
+                if (processed > 0)
+                {
+                    // The queue just drained after real work — this is the
+                    // moment a pipeline (file/list import, single-POI add, a
+                    // URL/id change) finishes enriching its rows. Per-row
+                    // dedup already folded the obvious bbox matches; signal a
+                    // full-DB pass to catch cross-batch races and place-id
+                    // matches whose coordinates sit outside the bbox.
+                    _dedupTrigger.Signal();
+                }
                 if (processed == 0)
                 {
                     // Sleep until either the idle timeout fires OR someone
@@ -467,7 +483,7 @@ public class PoiEnrichmentBackgroundService : BackgroundService
 
             await SaveChangesWithWriteLockAsync(db, ct);
 
-            var merged = await PoiPostEnrichmentDedup.MergeIfDuplicateAsync(db, poi, ct, _sqliteWriteLock);
+            var merged = await PoiPostEnrichmentDedup.MergeIfDuplicateAsync(db, poi, ct, _writeLock.Gate);
             if (merged)
             {
                 _logger.LogInformation(
@@ -529,14 +545,14 @@ public class PoiEnrichmentBackgroundService : BackgroundService
 
     private async Task SaveChangesWithWriteLockAsync(AppDbContext db, CancellationToken ct)
     {
-        await _sqliteWriteLock.WaitAsync(ct);
+        await _writeLock.Gate.WaitAsync(ct);
         try
         {
             await db.SaveChangesAsync(ct);
         }
         finally
         {
-            _sqliteWriteLock.Release();
+            _writeLock.Gate.Release();
         }
     }
 

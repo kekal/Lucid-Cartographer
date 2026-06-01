@@ -75,6 +75,12 @@ public static class UiStrings
     public const string ManagedSources = "Managed Sources";
     public const string ResetFailedEnrichment = "Reset failed enrichment";
     public const string FailedEnrichmentReset = "Reset {0} failed enrichment item(s).";
+    public const string DatabaseMaintenance = "Database maintenance";
+    public const string DeduplicateDatabase = "Deduplicate database";
+    public const string Deduplicating = "Deduplicating…";
+    public const string DeduplicateDone = "Merged {0} duplicate POI(s) across {1} place group(s).";
+    public const string DeduplicateNone = "No duplicates found — database is clean.";
+    public const string DeduplicateFailed = "Deduplication failed: {0}";
     public const string NoDatasetsYet = "No datasets imported yet. Use the import cards above to get started.";
     public const string CloseImportPanel = "Close import panel";
     public const string ImportFile = "Import File";

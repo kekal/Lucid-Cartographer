@@ -99,7 +99,7 @@ public class OperationsIntegrationTests : IntegrationTestBase
         await Page.WaitForSelectorAsync("text=data points loaded", new() { Timeout = 5000 });
 
         // Click "Dedup" button
-        await Page.Locator("button:has-text('Dedup')").ClickAsync();
+        await Page.Locator("button[aria-label='Deduplicate collection A']").ClickAsync();
         await Page.WaitForSelectorAsync("text=Result Preview", new() { Timeout = 10000 });
 
         // Result should show (same count as input if no duplicates)

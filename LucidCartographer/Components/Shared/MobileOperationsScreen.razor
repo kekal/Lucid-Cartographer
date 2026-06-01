@@ -77,6 +77,20 @@
             <div style="font-size:11px;color:var(--text-3);margin-top:6px">Merges proximate markers based on spatial logic.</div>
         </div>
 
+        <div class="section-title">@UiStrings.DatabaseMaintenance</div>
+        <div style="padding:0 18px">
+            <button class="btn btn-secondary btn-block" type="button" disabled="@Vm.IsDeduplicatingDatabase"
+                    @onclick="Vm.HandleDeduplicateDatabaseAsync">
+                <span class="ms" style="font-size:20px;color:var(--primary)" aria-hidden="true">@(Vm.IsDeduplicatingDatabase ? "hourglass_empty" : "join_inner")</span>
+                @(Vm.IsDeduplicatingDatabase ? UiStrings.Deduplicating : UiStrings.DeduplicateDatabase)
+            </button>
+            @if (!string.IsNullOrWhiteSpace(Vm.DedupDatabaseMessage))
+            {
+                <div style="margin-top:8px;padding:10px;border-radius:10px;background:var(--primary-soft);color:var(--primary);font-size:13px">@Vm.DedupDatabaseMessage</div>
+            }
+            <div style="font-size:11px;color:var(--text-3);margin-top:6px">Merges POIs across all collections that point to the same place. Also runs automatically after imports and hourly.</div>
+        </div>
+
         <div class="section-title">Result</div>
         @if (Vm.IsProcessing)
         {

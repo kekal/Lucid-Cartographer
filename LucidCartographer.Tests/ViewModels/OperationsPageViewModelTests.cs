@@ -17,13 +17,14 @@ public class OperationsPageViewModelTests
 {
     private readonly Mock<IPoiService> _poi = new();
     private readonly Mock<ISetOperationService> _ops = new();
+    private readonly Mock<IPoiDeduplicationService> _dedup = new();
     private readonly Mock<IFileExporter> _exporter = new();
     private readonly Mock<IJSRuntime> _js = new();
 
     private OperationsPageViewModel CreateVm()
     {
         _exporter.SetupGet(e => e.FormatName).Returns("KML");
-        return new OperationsPageViewModel(_poi.Object, _ops.Object, [_exporter.Object], _js.Object);
+        return new OperationsPageViewModel(_poi.Object, _ops.Object, _dedup.Object, [_exporter.Object], _js.Object);
     }
 
     private static PoiCollection MakeCollection(int id, string name)
@@ -163,5 +164,49 @@ public class OperationsPageViewModelTests
 
         // Notify happens at least once (start of method) before async work.
         fired.Should().BeGreaterOrEqualTo(1);
+    }
+
+    [Fact]
+    public async Task HandleDeduplicateDatabase_WithMerges_ReportsCount_AndReloads()
+    {
+        _poi.Setup(p => p.GetCollectionsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((List<PoiCollection>)[MakeCollection(1, "A")]);
+        _dedup.Setup(d => d.DeduplicateAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DedupResult(2, 5));
+
+        var vm = CreateVm();
+        await vm.HandleDeduplicateDatabaseAsync();
+
+        vm.IsDeduplicatingDatabase.Should().BeFalse();
+        vm.DedupDatabaseMessage.Should().Contain("5").And.Contain("2");
+        _dedup.Verify(d => d.DeduplicateAllAsync(It.IsAny<CancellationToken>()), Times.Once);
+        _poi.Verify(p => p.GetCollectionsAsync(It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task HandleDeduplicateDatabase_NoDuplicates_ReportsClean()
+    {
+        _poi.Setup(p => p.GetCollectionsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((List<PoiCollection>)[]);
+        _dedup.Setup(d => d.DeduplicateAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DedupResult(0, 0));
+
+        var vm = CreateVm();
+        await vm.HandleDeduplicateDatabaseAsync();
+
+        vm.DedupDatabaseMessage.Should().Be(UiStrings.DeduplicateNone);
+    }
+
+    [Fact]
+    public async Task HandleDeduplicateDatabase_ServiceThrows_SurfacesError()
+    {
+        _dedup.Setup(d => d.DeduplicateAllAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("boom"));
+
+        var vm = CreateVm();
+        await vm.HandleDeduplicateDatabaseAsync();
+
+        vm.IsDeduplicatingDatabase.Should().BeFalse();
+        vm.DedupDatabaseMessage.Should().Contain("boom");
     }
 }

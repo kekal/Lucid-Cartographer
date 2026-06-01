@@ -51,6 +51,7 @@ public class OperationsPageTests : BunitTestContext
         Services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         Services.AddScoped<IPoiMatcher, PoiMatcher>();
         Services.AddScoped<ISetOperationService, SetOperationService>();
+        Services.AddScoped<IPoiDeduplicationService>(_ => Mock.Of<IPoiDeduplicationService>());
         Services.AddSingleton<KmlExporter>();
         // The VM injects IEnumerable<IFileExporter>; satisfy with the test's KmlExporter.
         Services.AddSingleton<IFileExporter>(sp => sp.GetRequiredService<KmlExporter>());

@@ -15,6 +15,7 @@ namespace LucidCartographer.Components.Pages;
 public sealed class OperationsPageViewModel(
     IPoiService poiService,
     ISetOperationService setOperationService,
+    IPoiDeduplicationService deduplicationService,
     IEnumerable<IFileExporter> exporters,
     IJSRuntime js)
     : IAsyncDisposable
@@ -44,6 +45,12 @@ public sealed class OperationsPageViewModel(
     public string? CommitSuccess { get; private set; }
     public bool IsDedupMode { get; private set; }
     public string? SelectBHint { get; private set; }
+
+    // Whole-database deduplication (distinct from the within-collection
+    // SetOperation.Dedup preview above — this folds duplicate rows across the
+    // entire DB and persists immediately).
+    public bool IsDeduplicatingDatabase { get; private set; }
+    public string? DedupDatabaseMessage { get; private set; }
 
     // --- Lifecycle ---
 
@@ -132,6 +139,41 @@ public sealed class OperationsPageViewModel(
                 }
             }, _cts.Token);
         }, state: null, 500, Timeout.Infinite);
+    }
+
+    /// <summary>
+    /// Runs an on-demand full-database deduplication pass (the same engine the
+    /// background service uses) and reports the merge count. Merging deletes
+    /// the duplicate rows in place, so collection point counts may drop —
+    /// reload them afterwards.
+    /// </summary>
+    public async Task HandleDeduplicateDatabaseAsync()
+    {
+        if (IsDeduplicatingDatabase)
+        {
+            return;
+        }
+
+        IsDeduplicatingDatabase = true;
+        DedupDatabaseMessage = null;
+        Notify();
+        try
+        {
+            var result = await deduplicationService.DeduplicateAllAsync(_cts.Token);
+            DedupDatabaseMessage = result.PoisMerged > 0
+                ? string.Format(UiStrings.DeduplicateDone, result.PoisMerged, result.GroupsMerged)
+                : UiStrings.DeduplicateNone;
+            Collections = await poiService.GetCollectionsAsync();
+        }
+        catch (Exception ex)
+        {
+            DedupDatabaseMessage = string.Format(UiStrings.DeduplicateFailed, ex.Message);
+        }
+        finally
+        {
+            IsDeduplicatingDatabase = false;
+            Notify();
+        }
     }
 
     public void DiscardPoi(int poiId) => DiscardedIds.Add(poiId);

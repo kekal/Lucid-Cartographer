@@ -122,6 +122,14 @@ public abstract class IntegrationTestBase : IAsyncLifetime
         builder.Services.AddScoped<Services.Operations.ISetOperationService, Services.Operations.SetOperationService>();
         builder.Services.AddScoped<Services.IMapService, StubMapService>();
 
+        // Deduplication wiring (mirrors AddDeduplicationPipeline minus the
+        // hosted background pass — tests don't want a self-firing dedup loop).
+        // The DataSourcesPage VM @injects IPoiDeduplicationService, so without
+        // this the page fails to render and Playwright times out.
+        builder.Services.AddSingleton<Services.SqliteWriteLock>();
+        builder.Services.AddSingleton<Services.Operations.DedupTrigger>();
+        builder.Services.AddScoped<Services.Operations.IPoiDeduplicationService, Services.Operations.PoiDeduplicationService>();
+
         // Page ViewModels — added in commit 5ba80fa as a required @inject
         // dependency for every page-component. Without this registration
         // the Razor renderer fails to resolve the VM, the page never
