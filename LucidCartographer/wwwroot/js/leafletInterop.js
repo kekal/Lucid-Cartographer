@@ -422,6 +422,21 @@
                     state.map.setView(state.userMarker.getLatLng(), Math.max(state.map.getZoom(), 14));
                 } else {
                     state.recenterOnNextFix = true;
+                    // A user tap is our one chance to call geolocation under
+                    // transient activation (which is what makes the browser show
+                    // the permission prompt). If a watch is already "in progress"
+                    // but has produced no fix — e.g. the passive auto-locate on
+                    // load, which iOS Safari neither prompts for nor errors on
+                    // because it lacks a gesture, leaving `locating` stuck true —
+                    // tear it down so the code below re-issues map.locate INSIDE
+                    // this gesture. Without this the tap hits the guard and
+                    // returns before any geolocation call, so no prompt appears.
+                    if (state.locating) {
+                        try { state.map.stopLocate(); } catch (_) { }
+                        state.map.off('locationfound', onUserLocationFound);
+                        state.map.off('locationerror', onUserLocationError);
+                        state.locating = false;
+                    }
                 }
             }
 
@@ -429,6 +444,10 @@
             // start a second navigator.geolocation.watchPosition and leak it.
             if (state.locating) return;
             state.locating = true;
+            // off-then-on so retries (the error handler resets `locating` without
+            // detaching) never stack duplicate listeners.
+            state.map.off('locationfound', onUserLocationFound);
+            state.map.off('locationerror', onUserLocationError);
             state.map.on('locationfound', onUserLocationFound);
             state.map.on('locationerror', onUserLocationError);
             state.map.locate({
