@@ -484,34 +484,71 @@ public sealed class MapPageViewModel(
         await RefreshAfterMutationAsync();
     }
 
-    public async Task HandleMovePoiAsync((int PoiId, int TargetCollectionId) args)
+    // Set a POI's collection membership to exactly the chosen set (the membership
+    // editor behind the row "Move" action), optionally creating and including a
+    // new collection. Adds before removing: removing the POI's last membership
+    // first would orphan it, and RemovePoiFromCollectionAsync deletes orphans.
+    public async Task HandleSetMembershipsAsync((int PoiId, IReadOnlyList<int> CollectionIds, string? NewCollectionName) args)
     {
-        await poiService.AddPoiToCollectionAsync(args.PoiId, args.TargetCollectionId);
-
-        if (PoiCollectionMemberships.TryGetValue(args.PoiId, out var sourceCollectionIds))
+        var target = await ResolveTargetCollectionsAsync(args.CollectionIds, args.NewCollectionName);
+        if (target.Count == 0)
         {
-            foreach (var sourceCollectionId in sourceCollectionIds.Where(id => id != args.TargetCollectionId))
-            {
-                await poiService.RemovePoiFromCollectionAsync(args.PoiId, sourceCollectionId);
-            }
+            return; // never leave a POI orphaned (which would delete it)
+        }
+
+        await ApplyMembershipAsync(args.PoiId, target);
+        await RefreshAfterMutationAsync();
+    }
+
+    // Batch membership editor: set every selected POI's collections to the same
+    // chosen set (checked adds to all, unchecked removes from all).
+    public async Task HandleBatchSetMembershipsAsync((IReadOnlyList<int> PoiIds, IReadOnlyList<int> CollectionIds, string? NewCollectionName) args)
+    {
+        var target = await ResolveTargetCollectionsAsync(args.CollectionIds, args.NewCollectionName);
+        if (target.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var poiId in args.PoiIds)
+        {
+            await ApplyMembershipAsync(poiId, target);
         }
         await RefreshAfterMutationAsync();
     }
 
-    public async Task HandleMoveToNewCollectionAsync((int PoiId, string NewCollectionName) args)
+    // Resolve the requested collection ids plus an optional new collection into
+    // the final target set, creating the new collection and surfacing it in the
+    // sidebar when requested.
+    private async Task<HashSet<int>> ResolveTargetCollectionsAsync(IReadOnlyList<int> collectionIds, string? newCollectionName)
     {
-        var newCol = await poiService.CreateCollectionAsync(args.NewCollectionName);
-        await poiService.AddPoiToCollectionAsync(args.PoiId, newCol.Id);
-
-        if (PoiCollectionMemberships.TryGetValue(args.PoiId, out var sourceCollectionIds))
+        var target = new HashSet<int>(collectionIds);
+        if (!string.IsNullOrWhiteSpace(newCollectionName))
         {
-            foreach (var sourceCollectionId in sourceCollectionIds)
-            {
-                await poiService.RemovePoiFromCollectionAsync(args.PoiId, sourceCollectionId);
-            }
+            var newCol = await poiService.CreateCollectionAsync(newCollectionName.Trim());
+            target.Add(newCol.Id);
+            CollectionStates.Insert(0, new CollectionDisplayState(newCol));
         }
-        CollectionStates.Insert(0, new CollectionDisplayState(newCol));
-        await RefreshAfterMutationAsync();
+        return target;
+    }
+
+    // Diff the POI's current membership against the target: add the missing
+    // collections first, then remove the extras (add-before-remove avoids a
+    // transient orphan that RemovePoiFromCollectionAsync would delete).
+    private async Task ApplyMembershipAsync(int poiId, HashSet<int> target)
+    {
+        var current = PoiCollectionMemberships.TryGetValue(poiId, out var m)
+            ? new HashSet<int>(m)
+            : new HashSet<int>();
+
+        foreach (var add in target.Where(id => !current.Contains(id)))
+        {
+            await poiService.AddPoiToCollectionAsync(poiId, add);
+        }
+        foreach (var remove in current.Where(id => !target.Contains(id)))
+        {
+            await poiService.RemovePoiFromCollectionAsync(poiId, remove);
+        }
     }
 
     public async Task HandleCopyPoiAsync((int PoiId, int TargetCollectionId) args)
@@ -543,40 +580,6 @@ public sealed class MapPageViewModel(
                 CloseDetailPane();
             }
         }
-        await RefreshAfterMutationAsync();
-    }
-
-    public async Task HandleBatchMoveAsync((IReadOnlyList<int> PoiIds, int TargetCollectionId) args)
-    {
-        foreach (var poiId in args.PoiIds)
-        {
-            await poiService.AddPoiToCollectionAsync(poiId, args.TargetCollectionId);
-            if (PoiCollectionMemberships.TryGetValue(poiId, out var sourceCollectionIds))
-            {
-                foreach (var sourceCollectionId in sourceCollectionIds.Where(id => id != args.TargetCollectionId))
-                {
-                    await poiService.RemovePoiFromCollectionAsync(poiId, sourceCollectionId);
-                }
-            }
-        }
-        await RefreshAfterMutationAsync();
-    }
-
-    public async Task HandleBatchMoveToNewCollectionAsync((IReadOnlyList<int> PoiIds, string NewCollectionName) args)
-    {
-        var newCol = await poiService.CreateCollectionAsync(args.NewCollectionName);
-        foreach (var poiId in args.PoiIds)
-        {
-            await poiService.AddPoiToCollectionAsync(poiId, newCol.Id);
-            if (PoiCollectionMemberships.TryGetValue(poiId, out var sourceCollectionIds))
-            {
-                foreach (var sourceCollectionId in sourceCollectionIds)
-                {
-                    await poiService.RemovePoiFromCollectionAsync(poiId, sourceCollectionId);
-                }
-            }
-        }
-        CollectionStates.Insert(0, new CollectionDisplayState(newCol));
         await RefreshAfterMutationAsync();
     }
 

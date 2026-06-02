@@ -255,42 +255,7 @@ public class PoiTableTests : BunitTestContext
     }
 
     [Fact]
-    public void BatchMove_OpensModalWithAllCollections_AndFiresWithCheckedIds()
-    {
-        (IReadOnlyList<int> PoiIds, int TargetCollectionId)? moved = null;
-        List<Poi> pois = [CreatePoi(1, "A"), CreatePoi(2, "B")];
-        List<CollectionDisplayState> collections =
-        [
-            new(new PoiCollection { Id = 10, Name = "Alpha", Color = "#005bbf" }),
-            new(new PoiCollection { Id = 20, Name = "Beta", Color = "#006e2c" })
-        ];
-
-        var cut = RenderComponent<PoiTable>(parameters => parameters
-            .Add(p => p.Pois, pois)
-            .Add(p => p.Collections, collections)
-            // Even though POI 1 already belongs to Alpha, batch mode offers all.
-            .Add(p => p.PoiCollectionMemberships, new Dictionary<int, IReadOnlyList<int>> { [1] = [10] })
-            .Add(p => p.OnBatchMoveClicked,
-                EventCallback.Factory.Create<(IReadOnlyList<int>, int)>(this, args => moved = args)));
-
-        cut.Find("input[aria-label='Select A']").Change(true);
-        cut.Find("input[aria-label='Select B']").Change(true);
-        cut.Find("button[aria-label='Move selected to collection']").Click();
-
-        var options = cut.FindAll("div.flex-1.overflow-y-auto.p-2 > button")
-            .Select(x => x.TextContent.Trim())
-            .ToList();
-        options.Should().BeEquivalentTo(["Alpha", "Beta"]);
-
-        cut.FindAll("div.flex-1.overflow-y-auto.p-2 > button").First(b => b.TextContent.Contains("Beta")).Click();
-
-        moved.Should().NotBeNull();
-        moved!.Value.PoiIds.Should().BeEquivalentTo([1, 2]);
-        moved.Value.TargetCollectionId.Should().Be(20);
-    }
-
-    [Fact]
-    public void MoveModal_ShowsAllCollections()
+    public void MoveModal_ListsAllCollections_WithCurrentMembershipChecked()
     {
         List<Poi> pois = [CreatePoi(1, "Test Place")];
         List<CollectionDisplayState> collections =
@@ -307,10 +272,97 @@ public class PoiTableTests : BunitTestContext
 
         cut.Find("button[aria-label='Move Test Place to another collection']").Click();
 
-        var options = cut.FindAll("div.flex-1.overflow-y-auto.p-2 > button")
-            .Select(x => x.TextContent.Trim())
-            .ToList();
+        cut.FindAll("input.membership-checkbox").Should().HaveCount(3);
+        cut.Find("input[aria-label='Toggle Alpha']").HasAttribute("checked").Should().BeTrue();
+        cut.Find("input[aria-label='Toggle Beta']").HasAttribute("checked").Should().BeTrue();
+        cut.Find("input[aria-label='Toggle Gamma']").HasAttribute("checked").Should().BeFalse();
+    }
 
-        options.Should().BeEquivalentTo(["Alpha", "Beta", "Gamma"]);
+    [Fact]
+    public void MoveModal_Apply_FiresWithEditedMembership()
+    {
+        (int PoiId, IReadOnlyList<int> CollectionIds, string? NewCollectionName)? applied = null;
+        List<Poi> pois = [CreatePoi(1, "Test Place")];
+        List<CollectionDisplayState> collections =
+        [
+            new(new PoiCollection { Id = 1, Name = "Alpha", Color = "#005bbf" }),
+            new(new PoiCollection { Id = 2, Name = "Beta", Color = "#006e2c" })
+        ];
+
+        var cut = RenderComponent<PoiTable>(parameters => parameters
+            .Add(p => p.Pois, pois)
+            .Add(p => p.Collections, collections)
+            .Add(p => p.PoiCollectionMemberships, new Dictionary<int, IReadOnlyList<int>> { [1] = [1] })
+            .Add(p => p.OnSetMembershipsClicked,
+                EventCallback.Factory.Create<(int, IReadOnlyList<int>, string?)>(this, args => applied = args)));
+
+        cut.Find("button[aria-label='Move Test Place to another collection']").Click();
+        // Starts in Alpha(1). Add Beta(2), drop Alpha(1) → final membership {2}.
+        cut.Find("input[aria-label='Toggle Beta']").Change(true);
+        cut.Find("input[aria-label='Toggle Alpha']").Change(false);
+        cut.Find("button[aria-label='Apply collection changes']").Click();
+
+        applied.Should().NotBeNull();
+        applied!.Value.PoiId.Should().Be(1);
+        applied.Value.CollectionIds.Should().BeEquivalentTo([2]);
+        applied.Value.NewCollectionName.Should().BeNull();
+    }
+
+    [Fact]
+    public void MoveModal_ApplyDisabled_WhenNothingChecked()
+    {
+        List<Poi> pois = [CreatePoi(1, "Test Place")];
+        List<CollectionDisplayState> collections =
+        [
+            new(new PoiCollection { Id = 1, Name = "Alpha", Color = "#005bbf" })
+        ];
+
+        var cut = RenderComponent<PoiTable>(parameters => parameters
+            .Add(p => p.Pois, pois)
+            .Add(p => p.Collections, collections)
+            .Add(p => p.PoiCollectionMemberships, new Dictionary<int, IReadOnlyList<int>> { [1] = [1] }));
+
+        cut.Find("button[aria-label='Move Test Place to another collection']").Click();
+        cut.Find("button[aria-label='Apply collection changes']").HasAttribute("disabled").Should().BeFalse();
+
+        // Unchecking the only membership would orphan (delete) the POI, so Apply
+        // must disable until at least one collection is chosen again.
+        cut.Find("input[aria-label='Toggle Alpha']").Change(false);
+        cut.Find("button[aria-label='Apply collection changes']").HasAttribute("disabled").Should().BeTrue();
+    }
+
+    [Fact]
+    public void BatchMove_SeedsUnion_AndApplyFiresWithCheckedIds()
+    {
+        (IReadOnlyList<int> PoiIds, IReadOnlyList<int> CollectionIds, string? NewCollectionName)? applied = null;
+        List<Poi> pois = [CreatePoi(1, "A"), CreatePoi(2, "B")];
+        List<CollectionDisplayState> collections =
+        [
+            new(new PoiCollection { Id = 10, Name = "Alpha", Color = "#005bbf" }),
+            new(new PoiCollection { Id = 20, Name = "Beta", Color = "#006e2c" })
+        ];
+
+        var cut = RenderComponent<PoiTable>(parameters => parameters
+            .Add(p => p.Pois, pois)
+            .Add(p => p.Collections, collections)
+            .Add(p => p.PoiCollectionMemberships, new Dictionary<int, IReadOnlyList<int>> { [1] = [10] })
+            .Add(p => p.OnBatchSetMembershipsClicked,
+                EventCallback.Factory.Create<(IReadOnlyList<int>, IReadOnlyList<int>, string?)>(this, args => applied = args)));
+
+        cut.Find("input[aria-label='Select A']").Change(true);
+        cut.Find("input[aria-label='Select B']").Change(true);
+        cut.Find("button[aria-label='Move selected to collection']").Click();
+
+        // Union seed: only A is in Alpha(10) → Alpha checked, Beta not.
+        cut.Find("input[aria-label='Toggle Alpha']").HasAttribute("checked").Should().BeTrue();
+        cut.Find("input[aria-label='Toggle Beta']").HasAttribute("checked").Should().BeFalse();
+
+        cut.Find("input[aria-label='Toggle Beta']").Change(true);
+        cut.Find("button[aria-label='Apply collection changes']").Click();
+
+        applied.Should().NotBeNull();
+        applied!.Value.PoiIds.Should().BeEquivalentTo([1, 2]);
+        applied.Value.CollectionIds.Should().BeEquivalentTo([10, 20]);
+        applied.Value.NewCollectionName.Should().BeNull();
     }
 }

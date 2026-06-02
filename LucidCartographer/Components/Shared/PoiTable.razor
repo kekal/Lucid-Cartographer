@@ -171,53 +171,102 @@
     </div>
 </div>
 
-@* Move / Copy modal (single-POI row action or batch) *@
+@* Collection modal. Copy = click a collection to add the POI(s) to it
+   (add-only, instant). Move = a multi-select membership editor: check the
+   collections the POI(s) should belong to, then Apply. *@
 @if (_modalPoiId != null || _batchMode)
 {
     <div class="fixed inset-0 bg-black/40 flex items-center justify-center" style="z-index: 10000;" @onclick="CloseModal">
         <div class="bg-white rounded-xl shadow-2xl w-80 max-h-[60%] flex flex-col" @onclick:stopPropagation="true">
             <div class="px-4 py-3 border-b border-surface-container-high flex items-center justify-between">
                 <span class="font-headline font-bold text-sm">
-                    @{ var verb = _isCopy ? "Copy" : "Move"; }
-                    @(_batchMode ? $"{verb} {Pois.Count(p => _selectedIds.Contains(p.Id))} to collection" : $"{verb} to collection")
+                    @{
+                        var modalCount = Pois.Count(p => _selectedIds.Contains(p.Id));
+                        var modalTitle = _isCopy
+                            ? (_batchMode ? $"Copy {modalCount} to collection" : "Copy to collection")
+                            : (_batchMode ? $"Edit collections for {modalCount}" : "Edit collections");
+                    }
+                    @modalTitle
                 </span>
-                <button class="p-1 hover:bg-surface-container-low rounded-full" @onclick="CloseModal">
+                <button class="p-1 hover:bg-surface-container-low rounded-full" @onclick="CloseModal" aria-label="Close">
                     <span class="material-symbols-outlined text-base">close</span>
                 </button>
             </div>
-            <div class="flex-1 overflow-y-auto p-2">
-                @if (Collections != null)
-                {
-                    @foreach (var col in GetModalCollections())
+
+            @if (_isCopy)
+            {
+                <div class="flex-1 overflow-y-auto p-2">
+                    @if (Collections != null)
                     {
-                        <button class="w-full text-left px-3 py-2 rounded-lg hover:bg-surface-container-low transition-colors text-sm flex items-center gap-2"
-                                @onclick="() => HandleTargetSelected(col.Id)">
-                            <span class="w-3 h-3 rounded-full flex-shrink-0" style="background-color: @col.Color"></span>
-                            @col.Name
-                        </button>
-                    }
-                }
-                <div class="border-t border-surface-container-high mt-1 pt-1">
-                    @if (!_showNewCollectionInput)
-                    {
-                        <button class="w-full text-left px-3 py-2 rounded-lg hover:bg-surface-container-low transition-colors text-sm flex items-center gap-2 text-primary"
-                                @onclick="() => { _showNewCollectionInput = true; }">
-                            <span class="material-symbols-outlined text-base">add</span>
-                            New collection
-                        </button>
-                    }
-                    else
-                    {
-                        <form class="flex items-center gap-2 px-3 py-2" @onsubmit="HandleCreateAndTarget" @onsubmit:preventDefault>
-                            <input @bind="_newCollectionName" placeholder="Collection name"
-                                   class="flex-1 text-sm px-2 py-1 border border-surface-container-high rounded-lg focus:ring-2 focus:ring-primary focus:outline-none" />
-                            <button type="submit" class="text-primary hover:text-primary-container p-1" aria-label="@(_isCopy ? "Create and copy" : "Create and move")">
-                                <span class="material-symbols-outlined text-base">check</span>
+                        @foreach (var col in GetModalCollections())
+                        {
+                            <button class="w-full text-left px-3 py-2 rounded-lg hover:bg-surface-container-low transition-colors text-sm flex items-center gap-2"
+                                    @onclick="() => HandleTargetSelected(col.Id)">
+                                <span class="w-3 h-3 rounded-full flex-shrink-0" style="background-color: @col.Color"></span>
+                                @col.Name
                             </button>
-                        </form>
+                        }
                     }
+                    <div class="border-t border-surface-container-high mt-1 pt-1">
+                        @if (!_showNewCollectionInput)
+                        {
+                            <button class="w-full text-left px-3 py-2 rounded-lg hover:bg-surface-container-low transition-colors text-sm flex items-center gap-2 text-primary"
+                                    @onclick="() => { _showNewCollectionInput = true; }">
+                                <span class="material-symbols-outlined text-base">add</span>
+                                New collection
+                            </button>
+                        }
+                        else
+                        {
+                            <form class="flex items-center gap-2 px-3 py-2" @onsubmit="HandleCreateAndTarget" @onsubmit:preventDefault>
+                                <input @bind="_newCollectionName" placeholder="Collection name"
+                                       class="flex-1 text-sm px-2 py-1 border border-surface-container-high rounded-lg focus:ring-2 focus:ring-primary focus:outline-none" />
+                                <button type="submit" class="text-primary hover:text-primary-container p-1" aria-label="Create and copy">
+                                    <span class="material-symbols-outlined text-base">check</span>
+                                </button>
+                            </form>
+                        }
+                    </div>
                 </div>
-            </div>
+            }
+            else
+            {
+                @* Membership editor. Checked = the collections the POI(s) will
+                   belong to after Apply. Pre-checked from the POI's current
+                   membership (single) or the union across the selection (batch);
+                   an optional new collection is created and included on Apply. *@
+                <div class="flex-1 overflow-y-auto p-2">
+                    @if (Collections != null)
+                    {
+                        @foreach (var col in GetModalCollections())
+                        {
+                            <label class="w-full px-3 py-2 rounded-lg hover:bg-surface-container-low transition-colors text-sm flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" class="membership-checkbox accent-primary cursor-pointer"
+                                       checked="@_checkedCollectionIds.Contains(col.Id)"
+                                       @onchange="() => ToggleChecked(col.Id)"
+                                       aria-label="@($"Toggle {col.Name}")" />
+                                <span class="w-3 h-3 rounded-full flex-shrink-0" style="background-color: @col.Color"></span>
+                                @col.Name
+                            </label>
+                        }
+                    }
+                    <div class="border-t border-surface-container-high mt-1 pt-1 px-3 py-2">
+                        <input @bind="_newCollectionName" @bind:event="oninput" placeholder="New collection (optional)"
+                               aria-label="New collection name"
+                               class="w-full text-sm px-2 py-1 border border-surface-container-high rounded-lg focus:ring-2 focus:ring-primary focus:outline-none" />
+                    </div>
+                </div>
+                <div class="px-4 py-3 border-t border-surface-container-high flex items-center justify-end gap-2">
+                    <button class="px-3 py-1.5 rounded-lg text-sm text-on-surface-variant hover:bg-surface-container-low"
+                            @onclick="CloseModal">Cancel</button>
+                    <button class="px-3 py-1.5 rounded-lg text-sm bg-primary text-white disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-primary"
+                            disabled="@(!CanApplyMemberships())"
+                            @onclick="HandleApplyMemberships"
+                            aria-label="Apply collection changes">
+                        Apply
+                    </button>
+                </div>
+            }
         </div>
     </div>
 }
@@ -233,15 +282,16 @@
     [Parameter] public EventCallback<int> OnPoiSelected { get; set; }
     [Parameter] public EventCallback<int> OnFocusClicked { get; set; }
     [Parameter] public EventCallback<int> OnDeleteClicked { get; set; }
-    [Parameter] public EventCallback<(int PoiId, int TargetCollectionId)> OnMoveClicked { get; set; }
-    [Parameter] public EventCallback<(int PoiId, string NewCollectionName)> OnMoveToNewClicked { get; set; }
+    // Move is now a membership editor: set the POI's collections to exactly the
+    // checked set (CollectionIds), optionally creating and including NewCollectionName.
+    [Parameter] public EventCallback<(int PoiId, IReadOnlyList<int> CollectionIds, string? NewCollectionName)> OnSetMembershipsClicked { get; set; }
     [Parameter] public EventCallback<(int PoiId, int TargetCollectionId)> OnCopyClicked { get; set; }
     [Parameter] public EventCallback<(int PoiId, string NewCollectionName)> OnCopyToNewClicked { get; set; }
 
     // Batch operations over the checked rows.
     [Parameter] public EventCallback<IReadOnlyList<int>> OnBatchDeleteClicked { get; set; }
-    [Parameter] public EventCallback<(IReadOnlyList<int> PoiIds, int TargetCollectionId)> OnBatchMoveClicked { get; set; }
-    [Parameter] public EventCallback<(IReadOnlyList<int> PoiIds, string NewCollectionName)> OnBatchMoveToNewClicked { get; set; }
+    // Batch membership editor: set every selected POI's collections to the checked set.
+    [Parameter] public EventCallback<(IReadOnlyList<int> PoiIds, IReadOnlyList<int> CollectionIds, string? NewCollectionName)> OnBatchSetMembershipsClicked { get; set; }
     [Parameter] public EventCallback<(IReadOnlyList<int> PoiIds, int TargetCollectionId)> OnBatchCopyClicked { get; set; }
     [Parameter] public EventCallback<(IReadOnlyList<int> PoiIds, string NewCollectionName)> OnBatchCopyToNewClicked { get; set; }
 
@@ -250,6 +300,11 @@
     private bool _batchMode;
     private bool _showNewCollectionInput;
     private string _newCollectionName = "";
+
+    // Move (membership editor) only: the collections currently ticked. Seeded
+    // from existing membership when the modal opens; Apply sets the POI(s)'
+    // membership to exactly this set (plus any new collection).
+    private HashSet<int> _checkedCollectionIds = [];
     private ElementReference _scrollContainer;
     private int? _lastScrolledPoiId;
 
@@ -321,20 +376,51 @@
             return [];
         }
 
-        // Batch mode mixes POIs with differing memberships, so offer every
-        // collection. Single copy hides collections the POI already belongs to.
-        if (_batchMode)
+        // The membership editor (Move) lists every collection with a checkbox,
+        // and batch copy offers all collections. Only a single copy hides the
+        // collections the POI already belongs to.
+        if (!_isCopy || _batchMode)
         {
             return Collections;
         }
 
         var memberships = GetCollectionMemberships(_modalPoiId!.Value);
-        return _isCopy ? Collections.Where(c => !memberships.Contains(c.Id)) : Collections;
+        return Collections.Where(c => !memberships.Contains(c.Id));
     }
 
-    private void OpenMoveModal(int poiId) { _modalPoiId = poiId; _batchMode = false; _isCopy = false; _showNewCollectionInput = false; _newCollectionName = ""; }
-    private void OpenCopyModal(int poiId) { _modalPoiId = poiId; _batchMode = false; _isCopy = true; _showNewCollectionInput = false; _newCollectionName = ""; }
-    private void CloseModal() { _modalPoiId = null; _batchMode = false; _showNewCollectionInput = false; _newCollectionName = ""; }
+    private void OpenMoveModal(int poiId)
+    {
+        _modalPoiId = poiId; _batchMode = false; _isCopy = false;
+        _showNewCollectionInput = false; _newCollectionName = "";
+        _checkedCollectionIds = new HashSet<int>(GetCollectionMemberships(poiId));
+    }
+
+    private void OpenCopyModal(int poiId)
+    {
+        _modalPoiId = poiId; _batchMode = false; _isCopy = true;
+        _showNewCollectionInput = false; _newCollectionName = "";
+        _checkedCollectionIds = [];
+    }
+
+    private void CloseModal()
+    {
+        _modalPoiId = null; _batchMode = false; _showNewCollectionInput = false;
+        _newCollectionName = ""; _checkedCollectionIds = [];
+    }
+
+    private void ToggleChecked(int collectionId)
+    {
+        if (!_checkedCollectionIds.Remove(collectionId))
+        {
+            _checkedCollectionIds.Add(collectionId);
+        }
+    }
+
+    // Require at least one collection (a checked one or a new name): a POI with
+    // no collections is orphaned, and RemovePoiFromCollectionAsync deletes
+    // orphaned POIs outright.
+    private bool CanApplyMemberships() =>
+        _checkedCollectionIds.Count > 0 || !string.IsNullOrWhiteSpace(_newCollectionName);
 
     // --- Batch selection ---
 
@@ -361,14 +447,25 @@
 
     private void OpenBatchMove()
     {
-        if (CurrentSelectedIds().Count == 0) { return; }
+        var ids = CurrentSelectedIds();
+        if (ids.Count == 0) { return; }
         _batchMode = true; _isCopy = false; _modalPoiId = null; _showNewCollectionInput = false; _newCollectionName = "";
+        // Seed from the union of the selection's memberships: applying as-is
+        // keeps every existing membership (and homogenises the set across the
+        // selection); unchecking a box removes that collection from all of them.
+        var union = new HashSet<int>();
+        foreach (var id in ids)
+        {
+            foreach (var c in GetCollectionMemberships(id)) { union.Add(c); }
+        }
+        _checkedCollectionIds = union;
     }
 
     private void OpenBatchCopy()
     {
         if (CurrentSelectedIds().Count == 0) { return; }
         _batchMode = true; _isCopy = true; _modalPoiId = null; _showNewCollectionInput = false; _newCollectionName = "";
+        _checkedCollectionIds = [];
     }
 
     private async Task HandleBatchDelete()
@@ -399,40 +496,27 @@
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Error deleting POI {poiId}: {ex.Message}"); }
     }
 
+    // Copy only (add-to-collection on click). Move uses the membership editor.
     private async Task HandleTargetSelected(int targetCollectionId)
     {
-        var isCopy = _isCopy;
         if (_batchMode)
         {
             var ids = CurrentSelectedIds();
             CloseModal();
             if (ids.Count == 0) { return; }
             _selectedIds.Clear();
-            try
-            {
-                if (isCopy) { await OnBatchCopyClicked.InvokeAsync((ids, targetCollectionId)); }
-                else { await OnBatchMoveClicked.InvokeAsync((ids, targetCollectionId)); }
-            }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Batch {(isCopy ? "copy" : "move")} failed: {ex.Message}"); }
+            try { await OnBatchCopyClicked.InvokeAsync((ids, targetCollectionId)); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Batch copy failed: {ex.Message}"); }
             return;
         }
 
         var poiId = _modalPoiId!.Value;
         CloseModal();
-        try
-        {
-            if (isCopy)
-            {
-                await OnCopyClicked.InvokeAsync((poiId, targetCollectionId));
-            }
-            else
-            {
-                await OnMoveClicked.InvokeAsync((poiId, targetCollectionId));
-            }
-        }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Error {(isCopy ? "copying" : "moving")} POI {poiId}: {ex.Message}"); }
+        try { await OnCopyClicked.InvokeAsync((poiId, targetCollectionId)); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Error copying POI {poiId}: {ex.Message}"); }
     }
 
+    // Copy only: create a new collection and add the POI(s) to it.
     private async Task HandleCreateAndTarget()
     {
         if (string.IsNullOrWhiteSpace(_newCollectionName))
@@ -441,7 +525,6 @@
         }
 
         var name = _newCollectionName.Trim();
-        var isCopy = _isCopy;
 
         if (_batchMode)
         {
@@ -449,12 +532,8 @@
             CloseModal();
             if (ids.Count == 0) { return; }
             _selectedIds.Clear();
-            try
-            {
-                if (isCopy) { await OnBatchCopyToNewClicked.InvokeAsync((ids, name)); }
-                else { await OnBatchMoveToNewClicked.InvokeAsync((ids, name)); }
-            }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Batch create-and-{(isCopy ? "copy" : "move")} failed: {ex.Message}"); }
+            try { await OnBatchCopyToNewClicked.InvokeAsync((ids, name)); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Batch create-and-copy failed: {ex.Message}"); }
             return;
         }
 
@@ -465,17 +544,32 @@
 
         var poiId = _modalPoiId.Value;
         CloseModal();
-        try
+        try { await OnCopyToNewClicked.InvokeAsync((poiId, name)); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Error creating collection and copying POI {poiId}: {ex.Message}"); }
+    }
+
+    // Move: apply the checked set as the POI(s)' exact collection membership.
+    private async Task HandleApplyMemberships()
+    {
+        if (!CanApplyMemberships()) { return; }
+
+        var checkedIds = _checkedCollectionIds.ToList();
+        var newName = string.IsNullOrWhiteSpace(_newCollectionName) ? null : _newCollectionName.Trim();
+
+        if (_batchMode)
         {
-            if (isCopy)
-            {
-                await OnCopyToNewClicked.InvokeAsync((poiId, name));
-            }
-            else
-            {
-                await OnMoveToNewClicked.InvokeAsync((poiId, name));
-            }
+            var ids = CurrentSelectedIds();
+            CloseModal();
+            if (ids.Count == 0) { return; }
+            _selectedIds.Clear();
+            try { await OnBatchSetMembershipsClicked.InvokeAsync((ids, checkedIds, newName)); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Batch set memberships failed: {ex.Message}"); }
+            return;
         }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Error creating collection and {(isCopy ? "copying" : "moving")} POI {poiId}: {ex.Message}"); }
+
+        var poiId = _modalPoiId!.Value;
+        CloseModal();
+        try { await OnSetMembershipsClicked.InvokeAsync((poiId, checkedIds, newName)); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Set memberships failed for POI {poiId}: {ex.Message}"); }
     }
 }
