@@ -116,7 +116,28 @@ public static class ImageDownloadHelper
             }
 
             // …then cap while reading (don't trust Content-Length alone).
-            var bytes = await ReadCappedAsync(resp, ct);
+            // With HttpCompletionOption.ResponseHeadersRead the 20s client timeout
+            // also covers the body read, so a slow/Slowloris host can fire it
+            // mid-stream — surfaced as OperationCanceledException (incl.
+            // TaskCanceledException) or an IOException wrapping it. Translate those
+            // to the documented ArgumentException, matching the GetAsync-phase catch.
+            // Genuine caller cancellation (ct.IsCancellationRequested) still
+            // propagates via the filter; the size-cap ArgumentException from
+            // ReadCappedAsync is not an OperationCanceledException/IOException, so it
+            // passes through untouched.
+            byte[] bytes;
+            try
+            {
+                bytes = await ReadCappedAsync(resp, ct);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                throw new ArgumentException("Image URL could not be downloaded (timed out).", nameof(imageUrl));
+            }
+            catch (IOException ex)
+            {
+                throw new ArgumentException($"Image URL could not be downloaded ({ex.Message}).", nameof(imageUrl));
+            }
 
             if (!LooksLikeImage(bytes))
             {

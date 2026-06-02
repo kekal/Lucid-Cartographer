@@ -42,6 +42,41 @@ public class ImageDownloadHelperTests
         protected override bool TryComputeLength(out long length) { length = 0; return false; }
     }
 
+    // A body stream whose read throws like an HttpClient.Timeout firing mid-body:
+    // TaskCanceledException with a token UNRELATED to the caller's ct (so the
+    // caller's ct.IsCancellationRequested stays false — exactly the Slowloris case).
+    private sealed class TimeoutMidBodyStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            => throw new TaskCanceledException("simulated client timeout", null, new CancellationToken(true));
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    // Returns headers (image/png, no length) but the body read stalls and times out.
+    private sealed class TimeoutMidBodyContent : HttpContent
+    {
+        public TimeoutMidBodyContent(string contentType)
+            => Headers.ContentType = new MediaTypeHeaderValue(contentType);
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+            => throw new NotSupportedException();
+        protected override Task<Stream> CreateContentReadStreamAsync()
+            => Task.FromResult<Stream>(new TimeoutMidBodyStream());
+        protected override bool TryComputeLength(out long length) { length = 0; return false; }
+    }
+
+    private static IHttpClientFactory FactoryTimingOutMidBody(string contentType = "image/png")
+        => new StubHttpClientFactory(new StubHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new TimeoutMidBodyContent(contentType) }));
+
     private static IHttpClientFactory FactoryReturning(HttpStatusCode status, byte[]? body, string? contentType, long? contentLengthOverride = null)
         => new StubHttpClientFactory(new StubHandler(_ =>
         {
@@ -148,6 +183,30 @@ public class ImageDownloadHelperTests
         var http = FactoryReturning(HttpStatusCode.NotFound, null, null);
         var act = () => ImageDownloadHelper.DownloadAsync(http, "https://example.com/missing.png", CancellationToken.None);
         await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task Download_TimeoutMidBody_ThrowsArgumentException()
+    {
+        // Headers arrive, then the body read times out (ResponseHeadersRead means
+        // the client timeout spans the body too). Must surface as ArgumentException,
+        // NOT the raw TaskCanceledException, per the documented error contract — and
+        // the caller did NOT cancel, so this is a timeout, not real cancellation.
+        var http = FactoryTimingOutMidBody();
+        var act = () => ImageDownloadHelper.DownloadAsync(http, "https://example.com/slow.png", CancellationToken.None);
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task Download_CallerCancels_PropagatesCancellation()
+    {
+        // Genuine caller cancellation must STILL surface as OperationCanceledException
+        // (the `when (!ct.IsCancellationRequested)` filter must not swallow it).
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var http = FactoryTimingOutMidBody();
+        var act = () => ImageDownloadHelper.DownloadAsync(http, "https://example.com/slow.png", cts.Token);
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
     // ---- ApplyAsync (atomic DB write of bytes + ImageUrl) ----
