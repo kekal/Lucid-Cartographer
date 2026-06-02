@@ -178,7 +178,7 @@ public class OperationsPageViewModelTests
         await vm.HandleDeduplicateDatabaseAsync();
 
         vm.IsDeduplicatingDatabase.Should().BeFalse();
-        vm.DedupDatabaseMessage.Should().Contain("5").And.Contain("2");
+        vm.DedupDatabaseMessage.Should().Be(string.Format(UiStrings.DeduplicateDone, 5, 2));
         _dedup.Verify(d => d.DeduplicateAllAsync(It.IsAny<CancellationToken>()), Times.Once);
         _poi.Verify(p => p.GetCollectionsAsync(It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
@@ -208,5 +208,54 @@ public class OperationsPageViewModelTests
 
         vm.IsDeduplicatingDatabase.Should().BeFalse();
         vm.DedupDatabaseMessage.Should().Contain("boom");
+    }
+
+    [Fact]
+    public async Task HandleDeduplicateDatabase_InvalidatesStaleDedupPreview()
+    {
+        // Run a within-collection Dedup first so a preview exists.
+        _ops.Setup(s => s.ExecuteAsync(SetOperation.Dedup, 1, null, 100, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new OperationResult { Description = "deduped", Pois = [MakePoi(1, "P1")] });
+        _poi.Setup(p => p.GetCollectionsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((List<PoiCollection>)[MakeCollection(1, "A")]);
+        _dedup.Setup(d => d.DeduplicateAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DedupResult(1, 1));
+
+        var vm = CreateVm();
+        vm.CollectionAId = 1;
+        await vm.RunOperationAsync(SetOperation.Dedup);
+        vm.DiscardPoi(1);
+        vm.Result.Should().NotBeNull();
+        vm.ResultPois.Should().NotBeEmpty();
+
+        // The whole-DB pass may delete a previewed row, so the preview must be
+        // cleared to stop the now-defunct rows being committed.
+        await vm.HandleDeduplicateDatabaseAsync();
+
+        vm.Result.Should().BeNull();
+        vm.ResultPois.Should().BeEmpty();
+        vm.DiscardedIds.Should().BeEmpty();
+        vm.ActiveOp.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task DoCommit_WhenServiceThrows_SurfacesMessage_DoesNotPropagate()
+    {
+        _ops.Setup(s => s.ExecuteAsync(It.IsAny<SetOperation>(), It.IsAny<int>(), It.IsAny<int?>(),
+                It.IsAny<double>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new OperationResult { Description = "ok", Pois = [MakePoi(1, "P1")] });
+        _ops.Setup(s => s.CommitResultAsync(It.IsAny<List<Poi>>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("FK violated"));
+
+        var vm = CreateVm();
+        vm.CollectionAId = 1; vm.CollectionBId = 2;
+        await vm.RunOperationAsync(SetOperation.Subtract);
+        vm.CommitName = "MyName";
+
+        // Must NOT throw — the circuit would otherwise be torn down.
+        await vm.DoCommitAsync();
+
+        vm.CommitSuccess.Should().Contain("FK violated");
     }
 }

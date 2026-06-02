@@ -189,6 +189,17 @@ public class SetOperationService(IDbContextFactory<AppDbContext> factory, IPoiMa
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
+        // Defence-in-depth: the supplied rows may be stale (e.g. a whole-DB
+        // dedup pass deleted a previewed Poi between the operation and the
+        // commit). Inserting a dangling PoiId would violate the FK to Poi.Id
+        // and abort the transaction, so only link ids that still exist.
+        var requestedIds = pois.Select(p => p.Id).Distinct().ToList();
+        var existingIds = await db.Pois
+            .AsNoTracking()
+            .Where(p => requestedIds.Contains(p.Id))
+            .Select(p => p.Id)
+            .ToListAsync(cancellationToken);
+
         var collection = new PoiCollection
         {
             Name = name,
@@ -199,12 +210,12 @@ public class SetOperationService(IDbContextFactory<AppDbContext> factory, IPoiMa
         db.PoiCollections.Add(collection);
         await db.SaveChangesAsync(cancellationToken);
 
-        db.PoiCollectionItems.AddRange(pois.Select(p => new PoiCollectionItem
+        db.PoiCollectionItems.AddRange(existingIds.Select(id => new PoiCollectionItem
         {
-            PoiId = p.Id,
+            PoiId = id,
             PoiCollectionId = collection.Id
         }));
-        collection.PoiCount = pois.Count;
+        collection.PoiCount = existingIds.Count;
         await db.SaveChangesAsync(cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);

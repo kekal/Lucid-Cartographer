@@ -164,6 +164,15 @@ public sealed class OperationsPageViewModel(
                 ? string.Format(UiStrings.DeduplicateDone, result.PoisMerged, result.GroupsMerged)
                 : UiStrings.DeduplicateNone;
             Collections = await poiService.GetCollectionsAsync();
+
+            // The whole-DB pass may have physically deleted a Poi that the
+            // within-collection Dedup preview still references (the preview
+            // keeps group[0]; the DB pass keeps the lowest Id). Invalidate the
+            // stale preview so those defunct rows can no longer be committed.
+            Result = null;
+            ResultPois = [];
+            DiscardedIds.Clear();
+            ActiveOp = null;
         }
         catch (Exception ex)
         {
@@ -191,10 +200,21 @@ public sealed class OperationsPageViewModel(
 
     public async Task DoCommitAsync()
     {
-        var poisToSave = ResultPois.Where(p => !DiscardedIds.Contains(p.Id)).ToList();
-        var saved = await setOperationService.CommitResultAsync(poisToSave, CommitName);
-        CommitSuccess = $"Saved \"{saved.Name}\" with {saved.PoiCount} POIs";
-        Collections = await poiService.GetCollectionsAsync();
+        try
+        {
+            var poisToSave = ResultPois.Where(p => !DiscardedIds.Contains(p.Id)).ToList();
+            var saved = await setOperationService.CommitResultAsync(poisToSave, CommitName);
+            CommitSuccess = $"Saved \"{saved.Name}\" with {saved.PoiCount} POIs";
+            Collections = await poiService.GetCollectionsAsync();
+        }
+        catch (Exception ex)
+        {
+            // CommitResultAsync runs in a transaction, so the DB has already
+            // rolled back. Surface the failure as a user-visible message rather
+            // than letting it propagate and tear down the Blazor circuit
+            // (which the MainLayout ErrorBoundary would catch, wiping state).
+            CommitSuccess = $"Commit failed: {ex.Message}";
+        }
     }
 
     public async Task ExportResultAsync()

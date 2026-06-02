@@ -2,6 +2,7 @@ using FluentAssertions;
 using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
 using LucidCartographer.Services.Operations;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 namespace LucidCartographer.Tests;
@@ -312,6 +313,53 @@ public class SetOperationServiceTests
             items.Select(i => i.PoiId).Should().Contain(poi1.Id);
             items.Select(i => i.PoiId).Should().Contain(poi2.Id);
         }
+    }
+
+    [Fact]
+    public async Task CommitResultAsync_SkipsDanglingPoiIds_OverRealFkConstraint()
+    {
+        // The in-memory EF provider does NOT enforce foreign keys, so this
+        // scenario (a previewed Poi physically deleted by a whole-DB dedup
+        // pass before commit) is only reproducible against real SQLite.
+        await using var conn = new SqliteConnection("DataSource=:memory:");
+        await conn.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(conn).Options;
+        var factory = new SqliteContextFactory(options);
+
+        Poi survivor, deleted;
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.EnsureCreatedAsync();
+            survivor = new Poi { Name = "Survivor", Latitude = 1, Longitude = 1 };
+            deleted = new Poi { Name = "Deleted", Latitude = 2, Longitude = 2 };
+            db.Pois.AddRange(survivor, deleted);
+            await db.SaveChangesAsync();
+
+            // Simulate the whole-DB dedup removing the previewed row.
+            db.Pois.Remove(deleted);
+            await db.SaveChangesAsync();
+        }
+
+        var service = CreateService(factory);
+
+        // The stale 'deleted' row would violate the real FK on Poi.Id; the
+        // commit must drop it instead of throwing and aborting.
+        var commit = () => service.CommitResultAsync([survivor, deleted], "Result Set");
+        var collection = await commit.Should().NotThrowAsync();
+        collection.Which.PoiCount.Should().Be(1);
+
+        await using (var db = factory.CreateDbContext())
+        {
+            var items = await db.PoiCollectionItems
+                .Where(ci => ci.PoiCollectionId == collection.Which.Id)
+                .ToListAsync();
+            items.Should().ContainSingle().Which.PoiId.Should().Be(survivor.Id);
+        }
+    }
+
+    private sealed class SqliteContextFactory(DbContextOptions<AppDbContext> options) : IDbContextFactory<AppDbContext>
+    {
+        public AppDbContext CreateDbContext() => new(options);
     }
 
     // --- Error handling ---
