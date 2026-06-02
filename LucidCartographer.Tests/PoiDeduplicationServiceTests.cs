@@ -353,4 +353,63 @@ public class PoiDeduplicationServiceTests
         rows.Select(p => p.Id).Should().BeEquivalentTo(new[] { canonicalId, farId },
             "the canonical and the far row survive; only the drifted same-id duplicate is merged");
     }
+
+    [Fact]
+    public async Task DeduplicateAll_TransitiveChain_SkippedSubsetCollapsesIntoSecondaryCanonical()
+    {
+        // DEDUP-2 follow-up: the original fix re-validated each member against the
+        // single lowest-Id canonical and SKIPPED any that did not match, leaving
+        // them "for a future pass". But when the skipped members are a genuine
+        // same-place pair that the canonical happens not to match, that future
+        // pass re-forms the identical group and re-skips them — they never
+        // collapse. This is the A(far) ~ B ~ C(near each other) shape: A is the
+        // canonical, the near rows are B and C below (here named near1/near2),
+        // and A matches NEITHER of them directly.
+        //
+        // A can only be unioned into the group through a member it DOES match, so
+        // a place-id-drifted bridge (same ftid as A, sitting among the near rows)
+        // is what pulls A in — exactly the drift mechanic the DEDUP-2 test uses.
+        // The bridge folds into A by place id; the near pair, far from A, must now
+        // re-cluster and collapse into a SECONDARY canonical instead of surviving
+        // as two stranded singletons. A survives as its own place.
+        var factory = TestDbHelper.CreateFactory();
+        const string ftid = "0x47abc0000000aaaa:0x47def0000000bbbb";
+        int canonicalId, near1Id, near2Id, bridgeId;
+
+        await using (var seed = await factory.CreateDbContextAsync())
+        {
+            // A: Warsaw, carries the place id. Added first → lowest Id → primary
+            // canonical and far-apart survivor.
+            var a = Enriched("Wieża", 52.2297, 21.0122, PlaceUrl(ftid, 52.2297, 21.0122));
+            // Bridge: same place id as A but coords drifted ~250km to Kraków, and
+            // physically among the near pair. Folds into A by place id.
+            var bridge = Enriched("Wieża", 50.06400, 19.94500, PlaceUrl(ftid, 50.06400, 19.94500));
+            // near1 / near2: same name, no place id, a few metres apart in Kraków.
+            // Each bridges to the group by name+proximity but is far from A. They
+            // are the genuine same-place pair that must collapse together.
+            var near1 = Enriched("Wieża", 50.06401, 19.94501);
+            var near2 = Enriched("Wieża", 50.06402, 19.94502);
+
+            seed.Pois.AddRange(a, bridge, near1, near2);
+            await seed.SaveChangesAsync();
+            canonicalId = a.Id;
+            bridgeId = bridge.Id;
+            near1Id = near1.Id;
+            near2Id = near2.Id;
+        }
+
+        var result = await NewService(factory).DeduplicateAllAsync();
+
+        // Two merges: the drifted bridge folds into A, and near2 folds into the
+        // secondary canonical near1 — one transitive group, two duplicates gone.
+        result.Should().Be(new DedupResult(1, 2),
+            "the place-id bridge folds into A AND the far-apart near pair collapses into its own canonical");
+        await using var check = await factory.CreateDbContextAsync();
+        var rows = await check.Pois.ToListAsync();
+        rows.Select(p => p.Id).Should().BeEquivalentTo(new[] { canonicalId, near1Id },
+            "A survives as one place; the near pair collapses into the lower-Id near row (secondary canonical), " +
+            "while the bridge and the higher-Id near duplicate are removed");
+        rows.Select(p => p.Id).Should().NotContain(bridgeId);
+        rows.Select(p => p.Id).Should().NotContain(near2Id);
+    }
 }

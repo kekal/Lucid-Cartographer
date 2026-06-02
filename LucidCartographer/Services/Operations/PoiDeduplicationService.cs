@@ -1,4 +1,5 @@
 using LucidCartographer.Data;
+using LucidCartographer.Data.Entities;
 using LucidCartographer.Services.Enrichment;
 using Microsoft.EntityFrameworkCore;
 
@@ -65,38 +66,71 @@ public sealed class PoiDeduplicationService(
         {
             ct.ThrowIfCancellationRequested();
 
-            // Smallest Id is canonical — matches the post-enrichment dedup
-            // convention so the surviving row is stable regardless of which
-            // path merged it.
+            // FindDuplicateGroups unions transitively (A~B by place id, B~C by
+            // name+proximity), so a group can contain a pair that is neither
+            // id-equal nor within tolerance — A and C bridged only through B.
+            // Merging is DESTRUCTIVE (the duplicate is deleted and its links
+            // reparented), so we never merge a pair IsMatch does not confirm
+            // directly. But re-validating only against the single lowest-Id
+            // canonical and skipping the rest stranded a genuine same-place
+            // subset: an A(far)~B~C(near each other) chain where the canonical A
+            // matches neither B nor C would skip BOTH every pass, and since the
+            // group re-forms identically next pass, B~C would never collapse.
+            //
+            // So re-cluster within the group instead of skipping. We grow a list
+            // of sub-cluster canonicals in ascending Id order (the scan order),
+            // and fold each row into the FIRST canonical it matches — i.e. the
+            // lowest-Id canonical it is the same place as. A row matching none
+            // becomes a new canonical (its own sub-cluster) and survives. This
+            // keeps every invariant intact: the smaller-Id-canonical convention
+            // (canonicals are visited Id-ascending, first match wins), place-id-
+            // first precedence and the bbox/name+proximity rule (all inside
+            // IsMatch), link union + image hand-off (inside MergePairAsync), and
+            // idempotence (a clean DB forms no groups; a residual group folds
+            // nothing because each row is already its own canonical).
             var ordered = group.OrderBy(p => p.Id).ToList();
-            var canonical = ordered[0];
+            var canonicals = new List<Poi>();
             var mergedInGroup = false;
 
-            foreach (var duplicate in ordered.Skip(1))
+            foreach (var poi in ordered)
             {
-                // FindDuplicateGroups unions transitively (A~B by place id, B~C
-                // by name+proximity), so a group can contain a pair that is
-                // neither id-equal nor within tolerance — A and C bridged only
-                // through B. Merging is DESTRUCTIVE (the duplicate is deleted and
-                // its links reparented), so re-validate canonical~duplicate
-                // directly here. IsMatch checks place id first (equal ftid wins
-                // regardless of coord drift, so legitimately-drifted same-place
-                // rows still merge), then name+proximity. A transitive-only
-                // bridge fails this check; skip it and leave it for a future pass
-                // rather than deleting a far-apart real-world place.
-                if (!matcher.IsMatch(canonical, duplicate))
+                ct.ThrowIfCancellationRequested();
+
+                // First canonical (lowest Id, since canonicals is Id-ascending)
+                // that is the same place as poi. IsMatch checks place id first
+                // (equal ftid wins regardless of coord drift, so legitimately-
+                // drifted same-place rows still merge), then name+proximity.
+                Poi? target = null;
+                foreach (var canonical in canonicals)
                 {
-                    logger.LogWarning(
-                        "Skipping dedup merge of Poi {Duplicate} into canonical {Canonical}: " +
-                        "grouped transitively but they are not the same place (no shared place id, " +
-                        "and name+proximity does not hold); leaving {Duplicate} for a future pass",
-                        duplicate.Id, canonical.Id, duplicate.Id);
+                    if (matcher.IsMatch(canonical, poi))
+                    {
+                        target = canonical;
+                        break;
+                    }
+                }
+
+                if (target is null)
+                {
+                    // poi is a transitive-only bridge relative to every existing
+                    // canonical. Start a new sub-cluster rather than deleting it:
+                    // a later sibling that matches poi (but not the primary
+                    // canonical) now collapses INTO poi, while a truly lone
+                    // far-apart row simply survives as a singleton canonical.
+                    if (canonicals.Count > 0)
+                    {
+                        logger.LogWarning(
+                            "Poi {Poi} grouped transitively but is not the same place as any established " +
+                            "canonical (primary {Primary}); starting a secondary canonical for its sub-cluster",
+                            poi.Id, canonicals[0].Id);
+                    }
+                    canonicals.Add(poi);
                     continue;
                 }
 
                 try
                 {
-                    await PoiPostEnrichmentDedup.MergePairAsync(db, duplicate, canonical, ct, writeLock.Gate);
+                    await PoiPostEnrichmentDedup.MergePairAsync(db, poi, target, ct, writeLock.Gate);
                     poisMerged++;
                     mergedInGroup = true;
                 }
@@ -110,7 +144,7 @@ public sealed class PoiDeduplicationService(
                     logger.LogWarning(ex,
                         "Deduplication aborted mid-pass (concurrent write to Poi {Duplicate} or {Canonical}); " +
                         "merged {Pois} so far, will retry on next pass",
-                        duplicate.Id, canonical.Id, poisMerged);
+                        poi.Id, target.Id, poisMerged);
 
                     if (mergedInGroup)
                     {
