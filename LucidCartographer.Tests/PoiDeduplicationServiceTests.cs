@@ -9,12 +9,19 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace LucidCartographer.Tests;
 
 /// <summary>
-/// Exercises the whole-database deduplication engine end to end against an
-/// in-memory SQLite DB. The engine combines <see cref="PoiMatcher.FindDuplicateGroups"/>
-/// with the shared pair-merge mechanics, so these tests double as a guard on
-/// the group-wide behaviour (multi-member groups, place-id-over-coords,
+/// Exercises the whole-database deduplication engine end to end against the
+/// EF Core InMemory provider (see <see cref="TestDbHelper"/>). The engine
+/// combines <see cref="PoiMatcher.FindDuplicateGroups"/> with the shared
+/// pair-merge mechanics, so these tests double as a guard on the group-wide
+/// behaviour (multi-member groups, place-id-over-coords, field backfill,
 /// link union, idempotence) that the per-row post-enrichment dedup never
 /// hits.
+///
+/// NOTE: the InMemory provider is non-relational and does NOT enforce the
+/// [ConcurrencyCheck] Version token, so the DbUpdateException abort branch
+/// in <see cref="PoiDeduplicationService.DeduplicateAllAsync"/> is NOT
+/// covered here — these tests assert field/flag merge outcomes, not
+/// concurrency behaviour.
 /// </summary>
 public class PoiDeduplicationServiceTests
 {
@@ -212,5 +219,138 @@ public class PoiDeduplicationServiceTests
         result.PoisMerged.Should().Be(3, "1 from the cafe pair + 2 from the bar trio");
         await using var check = await factory.CreateDbContextAsync();
         (await check.Pois.CountAsync()).Should().Be(3, "one survivor per group + the lonely Paris row");
+    }
+
+    [Fact]
+    public async Task DeduplicateAll_RichDuplicateFoldedIntoSparseCanonical_BackfillsAllFields()
+    {
+        // DEDUP-1: the lowest-Id row is kept as canonical, but it may be an old
+        // sparse stub. When a richer higher-Id duplicate is folded in and then
+        // hard-deleted, its merge-worthy fields must survive on the canonical —
+        // otherwise the richness is lost for good.
+        var factory = TestDbHelper.CreateFactory();
+        const string ftid = "0x47045b3f13482675:0xc522afd5119f73c7";
+        int canonicalId;
+
+        await using (var seed = await factory.CreateDbContextAsync())
+        {
+            // Sparse canonical (added first → smaller Id). Same place id as the
+            // duplicate so they merge regardless of coord drift.
+            var sparse = Enriched("Old Stub", 50.00, 20.00, PlaceUrl(ftid, 50.00, 20.00));
+
+            // Rich duplicate (added second → larger Id) carrying all the fields
+            // the canonical is missing.
+            var rich = Enriched("Old Stub", 50.00001, 20.00001, PlaceUrl(ftid, 50.00001, 20.00001));
+            rich.Category = "restaurant";
+            rich.Notes = "Great pierogi";
+            rich.Rating = 5;
+            rich.GoogleRating = 4.6;
+            rich.ReviewCount = 1234;
+            rich.Country = "Poland";
+            rich.Region = "Lesser Poland";
+
+            seed.Pois.AddRange(sparse, rich);
+            await seed.SaveChangesAsync();
+            canonicalId = Math.Min(sparse.Id, rich.Id);
+        }
+
+        var result = await NewService(factory).DeduplicateAllAsync();
+
+        result.Should().Be(new DedupResult(1, 1));
+        await using var check = await factory.CreateDbContextAsync();
+        var survivor = await check.Pois.SingleAsync();
+        survivor.Id.Should().Be(canonicalId, "smaller-Id row stays canonical");
+        survivor.Category.Should().Be("restaurant");
+        survivor.Notes.Should().Be("Great pierogi");
+        survivor.Rating.Should().Be(5);
+        survivor.GoogleRating.Should().Be(4.6);
+        survivor.ReviewCount.Should().Be(1234);
+        survivor.Country.Should().Be("Poland");
+        survivor.Region.Should().Be("Lesser Poland");
+    }
+
+    [Fact]
+    public async Task DeduplicateAll_SoftFailCanonicalGainsPlaceUrl_ClearsNeedsManualUrl()
+    {
+        // ENR-1: a soft-failed canonical (no place URL, NeedsManualUrl=true) that
+        // inherits a /maps/place/ URL from a better-resolved duplicate must have
+        // its stale NeedsManualUrl flag reconciled to false — otherwise McpDtos
+        // expose HasPlaceUrl=true && NeedsManualUrl=true, baiting an agent into
+        // nulling the good coords.
+        var factory = TestDbHelper.CreateFactory();
+        const string ftid = "0x471111111111aaaa:0x472222222222bbbb";
+        int canonicalId;
+
+        await using (var seed = await factory.CreateDbContextAsync())
+        {
+            // Soft-fail canonical: real coords, IsEnriched, needs manual URL, no
+            // GoogleMapsUrl. Added first → smaller Id → canonical.
+            var softFail = new Poi
+            {
+                Name = "Lookout Tower",
+                Latitude = 49.5000,
+                Longitude = 22.0000,
+                GoogleMapsUrl = null,
+                IsEnriched = true,
+                EnrichmentNeedsManualUrl = true,
+                AddedDate = DateTime.UtcNow
+            };
+
+            // Newer duplicate that resolved a real /maps/place/ URL. No ftid on
+            // the canonical, so these match by name + proximity.
+            var resolved = Enriched("Lookout Tower", 49.50001, 22.00001, PlaceUrl(ftid, 49.50001, 22.00001));
+
+            seed.Pois.AddRange(softFail, resolved);
+            await seed.SaveChangesAsync();
+            canonicalId = Math.Min(softFail.Id, resolved.Id);
+        }
+
+        var result = await NewService(factory).DeduplicateAllAsync();
+
+        result.Should().Be(new DedupResult(1, 1));
+        await using var check = await factory.CreateDbContextAsync();
+        var survivor = await check.Pois.SingleAsync();
+        survivor.Id.Should().Be(canonicalId);
+        survivor.GoogleMapsUrl.Should().Contain("/maps/place/", "the place URL was backfilled from the duplicate");
+        survivor.EnrichmentNeedsManualUrl.Should().BeFalse(
+            "a canonical that now has a /maps/place/ URL no longer needs a manual URL");
+    }
+
+    [Fact]
+    public async Task DeduplicateAll_TransitiveBridgeAcrossDistance_DoesNotMergeFarRow()
+    {
+        // DEDUP-2: union-find can transitively group A~B (same place id, drifted
+        // coords) with B~C (same name, nearby) even when A and C are hundreds of
+        // km apart. The merge must re-validate each pair: B (same id as A) still
+        // folds in, but the far-apart C must be left untouched, not deleted.
+        var factory = TestDbHelper.CreateFactory();
+        const string ftid = "0x47abc0000000aaaa:0x47def0000000bbbb";
+        int canonicalId, farId;
+
+        await using (var seed = await factory.CreateDbContextAsync())
+        {
+            // A: Warsaw, carries the place id. Added first → canonical.
+            var a = Enriched("Wieża", 52.2297, 21.0122, PlaceUrl(ftid, 52.2297, 21.0122));
+            // B: same place id as A but coords drifted ~250km to Kraków — must
+            // still merge (place id wins over distance).
+            var b = Enriched("Wieża", 50.0647, 19.9450, PlaceUrl(ftid, 50.0647, 19.9450));
+            // C: same name, ~1.5m from B, NO place id → bridges to B by
+            // name+proximity but is far from A. Must NOT be folded into A.
+            var c = Enriched("Wieża", 50.06471, 19.94501);
+
+            seed.Pois.AddRange(a, b, c);
+            await seed.SaveChangesAsync();
+            canonicalId = a.Id;
+            farId = c.Id;
+        }
+
+        var result = await NewService(factory).DeduplicateAllAsync();
+
+        result.Should().Be(new DedupResult(1, 1),
+            "only B (same place id) folds into A; the far-apart C is skipped");
+        await using var check = await factory.CreateDbContextAsync();
+        var rows = await check.Pois.ToListAsync();
+        rows.Select(p => p.Id).Should().BeEquivalentTo(new[] { canonicalId, farId },
+            "the canonical and the far row survive; only the drifted same-id duplicate is merged");
     }
 }

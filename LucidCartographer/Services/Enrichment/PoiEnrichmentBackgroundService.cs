@@ -497,10 +497,106 @@ public class PoiEnrichmentBackgroundService : BackgroundService
             _progress.Set(newRemaining);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (DbUpdateConcurrencyException)
+        {
+            // The concurrency token fired: a concurrent writer changed or
+            // deleted this row between our load and our commit. The likeliest
+            // cause is the dedup pass folding this just-scraped row into an
+            // older canonical and hard-deleting it — in which case this row is
+            // gone for good and the misleading "will retry next cycle" never
+            // happens (nothing re-enqueues a deleted row). Re-enqueue the
+            // surviving canonical so the place's fresh data is re-fetched.
+            await ReenqueueSurvivingCanonicalAsync(poiId, details, ct);
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
                 "Persisting enrichment for Poi {PoiId} failed — will retry next cycle", poiId);
+        }
+    }
+
+    /// <summary>
+    /// Recovery for the dedup-deletes-mid-enrichment race (a
+    /// <see cref="DbUpdateConcurrencyException"/> on the success commit): the
+    /// just-scraped row was folded into an older canonical and removed, so its
+    /// fresh scrape would otherwise be lost. On a fresh context, find the
+    /// surviving same-place row (by stable place id from the scraped URL, else
+    /// by a coordinate bounding box) and set
+    /// <see cref="Poi.EnrichmentRequested"/> so the worker re-fetches it next
+    /// cycle. If the row was changed rather than deleted (still present), this
+    /// is a no-op beyond a Warning — the next pass picks up the live state.
+    /// </summary>
+    private async Task ReenqueueSurvivingCanonicalAsync(int poiId, EnrichedDetails details, CancellationToken ct)
+    {
+        try
+        {
+            await using var db = await _factory.CreateDbContextAsync(ct);
+
+            // Still present? Then it was updated, not deleted by dedup — nothing
+            // is lost; let the next cycle observe the live state.
+            if (await db.Pois.AsNoTracking().AnyAsync(p => p.Id == poiId, ct))
+            {
+                _logger.LogWarning(
+                    "Concurrent write to Poi {PoiId} during enrichment persist; row still exists, " +
+                    "leaving it for the next cycle", poiId);
+                return;
+            }
+
+            var ftid = PoiUrlHelper.ExtractFeatureId(details.GoogleMapsUrl);
+            Poi? survivor = null;
+
+            // Stable Google place id is the most reliable hand-off: the dedup
+            // backfill copies GoogleMapsUrl onto the canonical, so the survivor
+            // carries the same feature id we just scraped.
+            if (ftid is not null)
+            {
+                var idCandidates = await db.Pois
+                    .Where(p => p.GoogleMapsUrl != null && p.GoogleMapsUrl.Contains("/maps/place/"))
+                    .ToListAsync(ct);
+                survivor = idCandidates.Find(p => PoiUrlHelper.ExtractFeatureId(p.GoogleMapsUrl) == ftid);
+            }
+
+            // Fall back to a coordinate bounding box around the scraped coords —
+            // mirrors the dedup candidate pre-filter.
+            if (survivor is null && details is { Latitude: not null, Longitude: not null })
+            {
+                const double box = 0.002;
+                var latLo = details.Latitude.Value - box;
+                var latHi = details.Latitude.Value + box;
+                var lonLo = details.Longitude.Value - box;
+                var lonHi = details.Longitude.Value + box;
+                survivor = await db.Pois
+                    .Where(p => p.Latitude != null && p.Longitude != null
+                                && p.Latitude >= latLo && p.Latitude <= latHi
+                                && p.Longitude >= lonLo && p.Longitude <= lonHi)
+                    .OrderBy(p => p.Id)
+                    .FirstOrDefaultAsync(ct);
+            }
+
+            if (survivor is null)
+            {
+                _logger.LogWarning(
+                    "Poi {PoiId} was deleted by a concurrent dedup mid-enrichment and no surviving " +
+                    "canonical could be located to re-enqueue; its fresh scrape is lost", poiId);
+                return;
+            }
+
+            if (!survivor.EnrichmentRequested)
+            {
+                survivor.EnrichmentRequested = true;
+                await SaveChangesWithWriteLockAsync(db, ct);
+            }
+
+            _logger.LogWarning(
+                "Poi {PoiId} was deleted by a concurrent dedup mid-enrichment; re-enqueued surviving " +
+                "canonical Poi {Survivor} so the place's fresh data is re-fetched", poiId, survivor.Id);
+            _trigger.Signal();
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to re-enqueue surviving canonical after Poi {PoiId} was deleted mid-enrichment", poiId);
         }
     }
 

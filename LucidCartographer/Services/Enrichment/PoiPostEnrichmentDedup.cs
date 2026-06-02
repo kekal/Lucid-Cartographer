@@ -85,6 +85,7 @@ internal static class PoiPostEnrichmentDedup
         SemaphoreSlim? writeLock = null)
     {
         BackfillCanonicalFields(duplicate, canonical);
+        ReconcileEnrichmentHealthFlags(canonical);
         await RewriteCollectionLinksAsync(db, duplicate, canonical, ct);
         await ReassignOrDropDuplicateImageAsync(db, duplicate, canonical, ct);
         db.Pois.Remove(duplicate);
@@ -269,6 +270,67 @@ internal static class PoiPostEnrichmentDedup
         if (string.IsNullOrWhiteSpace(canonical.Phone) && !string.IsNullOrWhiteSpace(duplicate.Phone))
         {
             canonical.Phone = duplicate.Phone;
+        }
+
+        // The canonical is the smaller-Id row, which is often an older, sparser
+        // stub; the duplicate being folded in may be the richer (later enriched)
+        // row. Because MergePairAsync hard-deletes the duplicate, any field we
+        // don't backfill here is lost for good. Mirror SetOperationService
+        // .MergeBSideData — the codebase already treats these as merge-worthy.
+        if (string.IsNullOrWhiteSpace(canonical.Category) && !string.IsNullOrWhiteSpace(duplicate.Category))
+        {
+            canonical.Category = duplicate.Category;
+        }
+
+        if (string.IsNullOrWhiteSpace(canonical.Notes) && !string.IsNullOrWhiteSpace(duplicate.Notes))
+        {
+            canonical.Notes = duplicate.Notes;
+        }
+
+        if (string.IsNullOrWhiteSpace(canonical.Country) && !string.IsNullOrWhiteSpace(duplicate.Country))
+        {
+            canonical.Country = duplicate.Country;
+        }
+
+        if (string.IsNullOrWhiteSpace(canonical.Region) && !string.IsNullOrWhiteSpace(duplicate.Region))
+        {
+            canonical.Region = duplicate.Region;
+        }
+
+        if (!canonical.Rating.HasValue && duplicate.Rating.HasValue)
+        {
+            canonical.Rating = duplicate.Rating;
+        }
+
+        if (!canonical.GoogleRating.HasValue && duplicate.GoogleRating.HasValue)
+        {
+            canonical.GoogleRating = duplicate.GoogleRating;
+        }
+
+        if (!canonical.ReviewCount.HasValue && duplicate.ReviewCount.HasValue)
+        {
+            canonical.ReviewCount = duplicate.ReviewCount;
+        }
+    }
+
+    /// <summary>
+    /// Reconciles stale enrichment health flags after a merge. A canonical
+    /// that soft-failed (EnrichmentNeedsManualUrl=true, no place URL) may have
+    /// just inherited a real <c>/maps/place/</c> URL from a better-resolved
+    /// duplicate via <see cref="BackfillCanonicalFields"/>. Leaving
+    /// NeedsManualUrl set would expose the self-contradictory
+    /// HasPlaceUrl=true &amp;&amp; NeedsManualUrl=true to MCP agents, baiting a
+    /// set_poi_google_maps_url call that nulls the good coords. Clear the flag
+    /// once the canonical actually has a place URL. Call AFTER the backfill so
+    /// an inherited URL is already reflected on the canonical.
+    /// </summary>
+    private static void ReconcileEnrichmentHealthFlags(Poi canonical)
+    {
+        if (canonical.EnrichmentNeedsManualUrl
+            && !string.IsNullOrWhiteSpace(canonical.GoogleMapsUrl)
+            && canonical.GoogleMapsUrl.Contains("/maps/place/", StringComparison.OrdinalIgnoreCase))
+        {
+            canonical.EnrichmentNeedsManualUrl = false;
         }
     }
 }

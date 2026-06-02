@@ -74,6 +74,26 @@ public sealed class PoiDeduplicationService(
 
             foreach (var duplicate in ordered.Skip(1))
             {
+                // FindDuplicateGroups unions transitively (A~B by place id, B~C
+                // by name+proximity), so a group can contain a pair that is
+                // neither id-equal nor within tolerance — A and C bridged only
+                // through B. Merging is DESTRUCTIVE (the duplicate is deleted and
+                // its links reparented), so re-validate canonical~duplicate
+                // directly here. IsMatch checks place id first (equal ftid wins
+                // regardless of coord drift, so legitimately-drifted same-place
+                // rows still merge), then name+proximity. A transitive-only
+                // bridge fails this check; skip it and leave it for a future pass
+                // rather than deleting a far-apart real-world place.
+                if (!matcher.IsMatch(canonical, duplicate))
+                {
+                    logger.LogWarning(
+                        "Skipping dedup merge of Poi {Duplicate} into canonical {Canonical}: " +
+                        "grouped transitively but they are not the same place (no shared place id, " +
+                        "and name+proximity does not hold); leaving {Duplicate} for a future pass",
+                        duplicate.Id, canonical.Id, duplicate.Id);
+                    continue;
+                }
+
                 try
                 {
                     await PoiPostEnrichmentDedup.MergePairAsync(db, duplicate, canonical, ct, writeLock.Gate);
