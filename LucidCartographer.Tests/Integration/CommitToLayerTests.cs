@@ -229,8 +229,14 @@ public class CommitToLayerTests : IntegrationTestBase
         // (above the map) is a reliable proxy: it's a Blazor-rendered
         // element that reflects the real PoiService.GetVisiblePoisGroupedAsync
         // output, independent of the JavaScript Leaflet layer's timing.
+        //
+        // Blazor Server renders the counter in two passes: it first shows the
+        // initial "0 items" before GetVisiblePoisGroupedAsync resolves, then
+        // re-renders with the real count. Wait for a non-zero count to appear
+        // rather than reading the counter once and racing the second render.
+        await Page.WaitForSelectorAsync("text=/[1-9]\\d* items/", new() { Timeout = 10000 });
         var itemsCountText = await Page
-            .Locator("text=/\\d+ items/")
+            .Locator("text=/[1-9]\\d* items/")
             .First
             .TextContentAsync();
         Assert.NotNull(itemsCountText);
