@@ -43,13 +43,6 @@ internal sealed class ImportPersister(
     private int _added;
     private int _skipped;
 
-    /// <summary>
-    /// Ids of the POIs created by this import pass, populated after
-    /// <see cref="SaveNewPoisAsync"/>. The orchestrator uses these to
-    /// explicitly request enrichment (creation no longer auto-enqueues).
-    /// </summary>
-    public IReadOnlyList<int> AddedPoiIds => _newPois.Select(e => e.Poi.Id).ToList();
-
     public async Task<ImportResult> RunAsync()
     {
         await CreateCollectionAsync();
@@ -397,13 +390,16 @@ internal sealed class ImportPersister(
             // store-generated principal key fails if we set it here
             // ("PoiImage.PoiId unknown" on save).
             AddedDate = DateTime.UtcNow,
-            // Pure data state: not yet enriched, and NOT yet enqueued.
-            // Creation is decoupled from enrichment — the orchestrator (the
-            // process driving the import) explicitly requests enrichment for
-            // these rows after they are saved (see AddedPoiIds + the
-            // RequestEnrichmentAsync handoff in ImportOrchestrator).
+            // Not yet enriched, but enqueued atomically: BuildPoi runs only for
+            // genuinely new rows (dedup-linked existing rows never flow through
+            // here), so setting EnrichmentRequested at construction commits the
+            // enqueue flag in the SAME SaveChanges that creates the row. This
+            // closes the window where a committed import row could be left with
+            // EnrichmentRequested=false — invisible to the worker forever — if a
+            // later, separate flip-and-save step threw. The worker keys strictly
+            // off EnrichmentRequested (EnrichmentStateMachine.QueuePredicate).
             IsEnriched = false,
-            EnrichmentRequested = false
+            EnrichmentRequested = true
         };
     }
 

@@ -92,7 +92,6 @@ public class ImportOrchestrator(
         ImportResult? lastResult = null;
         var totalAdded = 0;
         var totalSkipped = 0;
-        var addedPoiIds = new List<int>();
 
         foreach (var group in groups)
         {
@@ -104,25 +103,18 @@ public class ImportOrchestrator(
             anyAdded |= persister.AddedAny;
             totalAdded += groupResult.AddedCount;
             totalSkipped += groupResult.SkippedCount;
-            addedPoiIds.AddRange(persister.AddedPoiIds);
             lastResult = groupResult;
         }
 
-        // Decoupling: creation does not auto-enqueue. Import is a higher-level
-        // pipeline, so it explicitly requests enrichment for the rows it added
-        // (only newly-created POIs — dedup-linked existing rows are left alone),
-        // then wakes the worker instead of making the user wait for the next
-        // poll tick. The rows are tracked on this same context.
-        if (addedPoiIds.Count > 0)
+        // Enqueue atomicity: each newly-created row is born with
+        // EnrichmentRequested=true (set in ImportPersister.BuildPoi) and committed
+        // in the SAME SaveChanges that inserts it, so a group that commits is
+        // always queued — even if a LATER group throws (SQLite-busy, constraint,
+        // cancellation between groups). Dedup-linked existing rows are never
+        // rebuilt, so they are correctly left un-enqueued. All that remains here
+        // is to wake the worker once instead of waiting for the next poll tick.
+        if (anyAdded)
         {
-            var newRows = await db.Pois
-                .Where(p => addedPoiIds.Contains(p.Id))
-                .ToListAsync(cancellationToken);
-            foreach (var row in newRows)
-            {
-                row.EnrichmentRequested = true;
-            }
-            await db.SaveChangesAsync(cancellationToken);
             enrichmentTrigger.Signal();
         }
 

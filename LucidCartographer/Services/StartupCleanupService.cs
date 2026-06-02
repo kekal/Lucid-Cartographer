@@ -131,7 +131,11 @@ public sealed class StartupCleanupService(
     /// re-enqueues them under the explicit-request model:
     ///  (a) failure-capped rows with valid coords (enrichment gave up); and
     ///  (b) rows marked enriched that never resolved a canonical /maps/place/ URL
-    ///      (false positives that may carry a stray SERP photo — POI #604).
+    ///      AND carry no extracted text (Address/Website/Phone all empty) — the
+    ///      pseudo-enriched false positives that may hold a stray SERP photo
+    ///      (POI #604). Genuinely-enriched rows whose place URL was later edited
+    ///      to a shortlink/website/cleared keep their populated fields, so the
+    ///      empty-text guard spares them and their real photo.
     /// For revived rows lacking a place URL the untrustworthy photo is dropped.
     /// Dormant manually-created POIs (EnrichmentRequested=false, IsEnriched=false,
     /// FailureCount=0) match NEITHER cohort, so creation stays decoupled from
@@ -146,7 +150,10 @@ public sealed class StartupCleanupService(
                         && (
                             (!p.IsEnriched && p.EnrichmentFailureCount > 0)
                             || (p.IsEnriched
-                                && (p.GoogleMapsUrl == null || !p.GoogleMapsUrl.Contains("/maps/place/")))
+                                && (p.GoogleMapsUrl == null || !p.GoogleMapsUrl.Contains("/maps/place/"))
+                                && (p.Address == null || p.Address == "")
+                                && (p.Website == null || p.Website == "")
+                                && (p.Phone == null || p.Phone == ""))
                         ))
             .ToListAsync(cancellationToken);
 

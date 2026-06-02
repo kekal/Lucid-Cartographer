@@ -4,6 +4,7 @@ using LucidCartographer.Data.Entities;
 using LucidCartographer.Services.Enrichment;
 using LucidCartographer.Services.Import;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace LucidCartographer.Tests;
@@ -325,6 +326,50 @@ public class ImportOrchestratorTests
     }
 
     [Fact]
+    public async Task ImportFromScrapedAsync_LaterGroupSaveThrows_EarlierGroupRowsStayQueued()
+    {
+        // Enqueue atomicity regression: a multi-<Folder> import splits into one
+        // persistence group per folder, and each group commits independently
+        // (no enclosing transaction — SQLite commits every SaveChanges). If a
+        // LATER group's SaveChanges throws (here: SQLite-busy/constraint
+        // simulated by an interceptor) AFTER an earlier group already committed,
+        // the earlier group's rows must already carry EnrichmentRequested=true.
+        // The worker keys strictly off EnrichmentRequested, so a row left at
+        // false here would be invisible forever. Before the fix the flag was
+        // flipped only in a separate post-loop SaveChanges that never ran when a
+        // later group threw — so this asserted true would have been false.
+        var dbName = Guid.NewGuid().ToString();
+        var factory = CreateThrowingFactory(dbName, throwOnCollectionNamed: "Boom");
+        var orchestrator = CreateOrchestrator(factory);
+
+        // GroupBy preserves first-occurrence key order, so "Alpha" is group 1
+        // (fully persisted) and "Boom" is group 2 (its first SaveChanges throws).
+        List<ImportedPoi> scraped =
+        [
+            new(Name: "Alpha Place", Latitude: 50.0, Longitude: 20.0,
+                GoogleMapsUrl: "https://www.google.com/maps/place/Alpha", FolderName: "Alpha"),
+            new(Name: "Boom Place", Latitude: 51.0, Longitude: 21.0,
+                GoogleMapsUrl: "https://www.google.com/maps/place/Boom", FolderName: "Boom"),
+        ];
+
+        var import = async () => await orchestrator.ImportFromScrapedAsync(scraped, "Reimport");
+        await import.Should().ThrowAsync<Exception>("the later group's SaveChanges is forced to fail");
+
+        // Read back through a CLEAN context (no interceptor) so we observe what
+        // was actually committed for the earlier group.
+        await using var check = new AppDbContext(InMemoryOptions(dbName));
+        var alpha = await check.Pois.FirstOrDefaultAsync(p => p.Name == "Alpha Place");
+        alpha.Should().NotBeNull("the earlier group committed before the later group threw");
+        alpha!.EnrichmentRequested.Should().BeTrue(
+            "a committed import row must be born queued, or the worker never enriches it");
+        alpha.IsEnriched.Should().BeFalse("the row is queued, not yet enriched");
+
+        // The failing group's row must NOT have been committed.
+        (await check.Pois.AnyAsync(p => p.Name == "Boom Place"))
+            .Should().BeFalse("the later group's SaveChanges threw before persisting its rows");
+    }
+
+    [Fact]
     public async Task ImportFromScrapedAsync_DuplicateWithLegacySearchGoogleUrl_UpgradesToImportedUrl()
     {
         var factory = TestDbHelper.CreateFactory();
@@ -449,5 +494,57 @@ public class ImportOrchestratorTests
             .ToListAsync();
         placZabawIds.Should().HaveCount(3);
         placZabawIds.Distinct().Should().HaveCount(3, "three distinct playgrounds must map to three distinct Poi rows");
+    }
+
+    // ---- helpers for the enqueue-atomicity regression test -------------------
+
+    private static DbContextOptions<AppDbContext> InMemoryOptions(string dbName) =>
+        new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(dbName)
+            .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+
+    // A factory whose context throws on the SaveChanges that first inserts the
+    // collection with the given name, simulating a later import group failing
+    // (SQLite-busy / constraint / DbUpdateException) after an earlier group has
+    // already committed.
+    private static IDbContextFactory<AppDbContext> CreateThrowingFactory(string dbName, string throwOnCollectionNamed)
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(dbName)
+            .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
+            .AddInterceptors(new ThrowOnCollectionInsertInterceptor(throwOnCollectionNamed))
+            .Options;
+        return new TestDbContextFactory(options);
+    }
+
+    private sealed class ThrowOnCollectionInsertInterceptor(string collectionName) : SaveChangesInterceptor
+    {
+        private bool ShouldThrow(DbContext? context) =>
+            context is not null
+            && context.ChangeTracker.Entries<PoiCollection>()
+                .Any(e => e.State == EntityState.Added && e.Entity.Name == collectionName);
+
+        public override InterceptionResult<int> SavingChanges(
+            DbContextEventData eventData, InterceptionResult<int> result)
+        {
+            if (ShouldThrow(eventData.Context))
+            {
+                throw new InvalidOperationException(
+                    $"Simulated SaveChanges failure for collection '{collectionName}'.");
+            }
+            return base.SavingChanges(eventData, result);
+        }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (ShouldThrow(eventData.Context))
+            {
+                throw new InvalidOperationException(
+                    $"Simulated SaveChanges failure for collection '{collectionName}'.");
+            }
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
     }
 }
