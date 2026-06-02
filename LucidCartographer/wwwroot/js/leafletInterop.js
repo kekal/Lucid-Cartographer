@@ -82,34 +82,59 @@
             state.recenterOnNextFix = false;
             state.map.setView(ll, Math.max(state.map.getZoom(), 14));
         }
+        // A successful fix clears the "user just tapped" flag so any later
+        // spontaneous watch error (a transient blip well after the tap) does
+        // NOT pop a toast — only an error that directly follows a tap, before
+        // the first fix, is something the user is actively waiting on.
+        state.locateUserInitiated = false;
     }
 
     function onUserLocationError(e) {
-        state.recenterOnNextFix = false;
-        // Reset the in-progress guard and tear down the (now-dead) watch so a
-        // subsequent locate FAB tap can retry from scratch. Without this, the
-        // first failed attempt (e.g. the passive auto-locate on map load, which
-        // some mobile browsers reject because it lacks a user gesture) would
-        // leave `locating` stuck true — every later FAB tap then hits the
-        // `if (state.locating) return;` guard and silently does nothing, so the
-        // button looks broken even though the device could grant a fix on a
-        // user-initiated retry.
-        state.locating = false;
-        if (state.map) {
-            try { state.map.stopLocate(); } catch (_) { }
+        // PositionError codes:
+        //   1 PERMISSION_DENIED   — blocked for this site / browser / OS
+        //   2 POSITION_UNAVAILABLE — GPS or OS location services are off
+        //   3 TIMEOUT             — no fix in time
+        // Leaflet also synthesises code 0 for an insecure context (geolocation
+        // is only exposed over https / localhost) when the API is missing.
+        var code = e && typeof e.code !== 'undefined' ? e.code : null;
+
+        // With watch:true the OS fires this callback for TRANSIENT failures
+        // (code 2 POSITION_UNAVAILABLE / code 3 TIMEOUT) while the same watch
+        // can still recover and deliver a fix moments later. Tearing the watch
+        // down here (stopLocate -> clearWatch) on the FIRST such blip would
+        // permanently kill a watch that would otherwise self-heal. So only tear
+        // down for PERMANENT failures — permission denied (code 1) or an
+        // insecure context (code 0) — where retrying the live watch is hopeless
+        // and the user must re-grant under a fresh FAB gesture.
+        var permanent = code === 1 || code === 0;
+        if (permanent) {
+            // Reset the in-progress guard and tear down the dead watch so a
+            // subsequent locate FAB tap can retry from scratch. Without this the
+            // failed attempt would leave `locating` stuck true and every later
+            // FAB tap would hit the `if (state.locating) return;` guard and
+            // silently do nothing — the button would look broken even though a
+            // user-initiated retry could be granted.
+            state.recenterOnNextFix = false;
+            state.locating = false;
+            if (state.map) {
+                try { state.map.stopLocate(); } catch (_) { }
+            }
+        } else {
+            // Transient: keep the watch alive so it can self-heal on the next
+            // poll. Don't touch `state.locating` (the watch is still running and
+            // the single-watch guard must stay armed). Clear recenterOnNextFix so
+            // a stale FAB request doesn't yank the map once a late fix arrives.
+            state.recenterOnNextFix = false;
         }
-        // Common causes: permission denied, GPS off, or an insecure context
-        // (plain http over a LAN IP — browsers only expose geolocation on
-        // https/localhost). Surface a visible toast so the FAB isn't a silent
-        // dead end — but only for a user-initiated tap; the passive auto-locate
-        // on load fails silently so we don't nag on every mobile page open.
+
+        // Surface a visible toast so the FAB isn't a silent dead end — but only
+        // for a user-initiated tap that hasn't yet produced a fix; the passive
+        // auto-locate on load fails silently so we don't nag on every mobile
+        // page open, and a fix resets locateUserInitiated so a later spontaneous
+        // watch blip doesn't toast for something the user never triggered.
         if (state.locateUserInitiated) {
             // Append a code-specific hint so the user can diagnose on the device
-            // itself (no desktop devtools needed). PositionError codes:
-            //   1 PERMISSION_DENIED   — blocked for this site / browser / OS
-            //   2 POSITION_UNAVAILABLE — GPS or OS location services are off
-            //   3 TIMEOUT             — no fix in time
-            var code = e && typeof e.code !== 'undefined' ? e.code : null;
+            // itself (no desktop devtools needed).
             var hint = code === 1 ? ' — permission blocked (allow location for this site)'
                 : code === 2 ? ' — location unavailable (turn on GPS / Location services)'
                 : code === 3 ? ' — timed out (try again, ideally outdoors)'
@@ -117,6 +142,9 @@
             var msg = (state.locateErrorMessage || 'Location error')
                 + hint + (code !== null ? ' [code ' + code + ']' : '');
             showMapToast(msg);
+            // Don't re-toast for a follow-up blip from the same watch; only an
+            // error that directly follows a tap (before any fix) is actionable.
+            state.locateUserInitiated = false;
         }
         if (window.console) {
             window.console.warn('Geolocation unavailable:', e && e.code, e && e.message);
@@ -428,27 +456,39 @@
             state.locateUserInitiated = !!recenter;
 
             if (recenter) {
+                // Re-center on the device on the next real fix, in BOTH cases:
+                //  - no marker yet: the first fix is where we jump.
+                //  - marker exists: we jump to its (possibly stale) position
+                //    immediately for snappy feedback below, but the watch may
+                //    have silently stalled (one fix then went quiet, no error),
+                //    so we also re-issue it; this flag makes the *fresh* fix
+                //    re-center on the actual current position rather than
+                //    leaving the map parked on the stale marker.
+                state.recenterOnNextFix = true;
                 if (state.userMarker) {
-                    // Already have a fix — jump there immediately for snappy
-                    // feedback; the ongoing watch keeps it fresh.
+                    // Already have a (possibly stale) fix — jump there
+                    // immediately for snappy feedback; the (re)issued watch then
+                    // refreshes the marker and recenters on the next real fix.
                     state.map.setView(state.userMarker.getLatLng(), Math.max(state.map.getZoom(), 14));
-                } else {
-                    state.recenterOnNextFix = true;
-                    // A user tap is our one chance to call geolocation under
-                    // transient activation (which is what makes the browser show
-                    // the permission prompt). If a watch is already "in progress"
-                    // but has produced no fix — e.g. the passive auto-locate on
-                    // load, which iOS Safari neither prompts for nor errors on
-                    // because it lacks a gesture, leaving `locating` stuck true —
-                    // tear it down so the code below re-issues map.locate INSIDE
-                    // this gesture. Without this the tap hits the guard and
-                    // returns before any geolocation call, so no prompt appears.
-                    if (state.locating) {
-                        try { state.map.stopLocate(); } catch (_) { }
-                        state.map.off('locationfound', onUserLocationFound);
-                        state.map.off('locationerror', onUserLocationError);
-                        state.locating = false;
-                    }
+                }
+                // A user tap is our one chance to call geolocation under
+                // transient activation (which is what makes the browser show the
+                // permission prompt). If a watch is flagged "in progress" but has
+                // gone quiet — the passive auto-locate on load that iOS Safari
+                // neither prompts for nor errors on (leaving `locating` stuck
+                // true), or a watch that delivered one fix then silently stalled
+                // — tear it down so the code below re-issues map.locate INSIDE
+                // this gesture. This teardown must run REGARDLESS of whether a
+                // userMarker already exists: otherwise the userMarker branch
+                // would setView to the stale marker, then hit the
+                // `if (state.locating) return;` guard and never restart a stalled
+                // watch. Without this the tap returns before any geolocation
+                // call and no prompt / fresh fix ever comes.
+                if (state.locating) {
+                    try { state.map.stopLocate(); } catch (_) { }
+                    state.map.off('locationfound', onUserLocationFound);
+                    state.map.off('locationerror', onUserLocationError);
+                    state.locating = false;
                 }
             }
 
