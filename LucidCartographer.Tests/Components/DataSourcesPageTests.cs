@@ -40,6 +40,11 @@ public class DataSourcesPageTests : BunitTestContext
         Services.AddSingleton<ImportJobStatusService>();
         Services.AddSingleton<IImportJobQueue>(_ => Mock.Of<IImportJobQueue>());
 
+        // Background-export wiring: the page enqueues via IExportJobQueue and
+        // subscribes to ExportJobStatusService for progress.
+        Services.AddSingleton<Services.Export.ExportJobStatusService>();
+        Services.AddSingleton<Services.Export.IExportJobQueue>(_ => Mock.Of<Services.Export.IExportJobQueue>());
+
         // Page-scoped ViewModel — page now @injects this instead of
         // individual services (Stage 2 ViewModel discipline).
         Services.AddTransient<DataSourcesPageViewModel>();
@@ -189,6 +194,17 @@ public class DataSourcesPageTests : BunitTestContext
             .ToList();
         deleteButtons.Should().HaveCount(1);
         deleteButtons[0].InnerHtml.Should().Contain("delete");
+    }
+
+    [Fact]
+    public void Table_Has_GoogleSavedList_Export_Button_For_Each_Row()
+    {
+        SeedOneCollection();
+        var cut = RenderComponent<DataSourcesPage>();
+
+        var btn = cut.FindAll("table tbody button")
+            .Single(b => b.GetAttribute("aria-label") == "Export Test Set to a Google Maps Saved List");
+        btn.InnerHtml.Should().Contain("bookmark_add");
     }
 
     [Fact]

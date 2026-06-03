@@ -1,3 +1,4 @@
+using LucidCartographer.Services;
 using Microsoft.Playwright;
 using Polly;
 using Polly.Registry;
@@ -6,7 +7,8 @@ namespace LucidCartographer.Services.Import;
 
 public class GoogleMapsListScraper(
     ILogger<GoogleMapsListScraper> logger,
-    ResiliencePipelineProvider<string> pipelineProvider)
+    ResiliencePipelineProvider<string> pipelineProvider,
+    GoogleBrowserLock browserLock)
     : IGoogleMapsListScraper
 {
     private const string DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -125,6 +127,13 @@ public class GoogleMapsListScraper(
         logger.LogInformation("Fetching saved Google Maps lists (profile: {Path})", BrowserProfilePath);
 
         await PlaywrightBootstrap.EnsureBrowsersInstalledAsync(logger, cancellationToken);
+
+        // The export job and the scraper share the same persistent profile dir,
+        // which Chromium locks — refuse immediately (rather than freeze) if a
+        // Google browser operation is already running.
+        using var lease = await browserLock.TryAcquireAsync(cancellationToken)
+            ?? throw new InvalidOperationException(
+                "A Google browser operation is already running. Please wait for it to finish, then try again.");
 
         Directory.CreateDirectory(BrowserProfilePath);
 
@@ -394,6 +403,12 @@ public class GoogleMapsListScraper(
         logger.LogInformation("Starting scrape of {Url}", trimmedUrl);
 
         await PlaywrightBootstrap.EnsureBrowsersInstalledAsync(logger, cancellationToken);
+
+        // Serialise against the exporter / Fetch My Lists — all share the
+        // persistent profile dir. Scrapes are already single-flight via the
+        // Polly "scraper" pipeline, so waiting here only blocks cross-feature
+        // collisions. (Held across the headless fallback too; harmless.)
+        using var lease = await browserLock.AcquireAsync(cancellationToken);
 
         using var playwright = await Playwright.CreateAsync();
 

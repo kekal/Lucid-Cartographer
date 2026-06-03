@@ -19,21 +19,23 @@ namespace LucidCartographer.Tests.ViewModels;
 public class DataSourcesPageViewModelTests
 {
     private readonly Mock<IImportJobQueue> _queue = new();
+    private readonly Mock<IExportJobQueue> _exportQueue = new();
     private readonly Mock<IPoiService> _poi = new();
     private readonly Mock<IGoogleMapsListScraper> _scraper = new();
     private readonly Mock<IFileExporter> _exporter = new();
     private readonly Mock<IJSRuntime> _js = new();
     private readonly EnrichmentTrigger _trigger = new();
 
-    // ImportJobStatusService is concrete and depends on a BehaviorSubject;
-    // construct it directly with a deterministic seed.
+    // Status services are concrete (BehaviorSubject); construct directly.
     private readonly ImportJobStatusService _status = new();
+    private readonly ExportJobStatusService _exportStatus = new();
 
     private DataSourcesPageViewModel CreateVm()
     {
         _exporter.SetupGet(e => e.FormatName).Returns("KML");
         return new DataSourcesPageViewModel(
-            _queue.Object, _status, _poi.Object, _scraper.Object,
+            _queue.Object, _status, _exportQueue.Object, _exportStatus,
+            _poi.Object, _scraper.Object,
             [_exporter.Object], _js.Object, _trigger,
             NullLogger<DataSourcesPageViewModel>.Instance);
     }
@@ -256,5 +258,69 @@ public class DataSourcesPageViewModelTests
 
         vm.RenameCollectionId.Should().BeNull();
         vm.RenameError.Should().BeNull();
+    }
+
+    // --- Google Saved-List export ---
+
+    [Fact]
+    public async Task HandleExportToGoogleList_EnqueuesPayload_WithCollectionNameAsListName()
+    {
+        _poi.Setup(p => p.GetCollectionsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((List<PoiCollection>)[MakeCollection(31, "Trip → West")]);
+        _poi.Setup(p => p.GetFailedEnrichmentCountAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
+
+        var vm = CreateVm();
+        await vm.InitializeAsync();
+
+        vm.HandleExportToGoogleListAsync(31);
+
+        _exportQueue.Verify(q => q.Enqueue(It.Is<ExportJobPayload>(
+            pl => pl.CollectionId == 31 && pl.ListName == "Trip → West")), Times.Once);
+    }
+
+    [Fact]
+    public async Task HandleExportToGoogleList_UnknownCollection_DoesNotEnqueue()
+    {
+        _poi.Setup(p => p.GetCollectionsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        _poi.Setup(p => p.GetFailedEnrichmentCountAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
+
+        var vm = CreateVm();
+        await vm.InitializeAsync();
+
+        vm.HandleExportToGoogleListAsync(999);
+
+        _exportQueue.Verify(q => q.Enqueue(It.IsAny<ExportJobPayload>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExportStatusStream_Running_SetsBusyFlagAndMessage()
+    {
+        _poi.Setup(p => p.GetCollectionsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        _poi.Setup(p => p.GetFailedEnrichmentCountAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
+
+        var vm = CreateVm();
+        await vm.InitializeAsync();
+
+        _exportStatus.Publish(new ExportJobStatus(ExportJobState.Running, "Saving 2/5 to 'Trip'…", CollectionId: 31));
+
+        vm.IsGoogleExporting.Should().BeTrue();
+        vm.ExportingCollectionId.Should().Be(31);
+        vm.GoogleExportMessage.Should().Be("Saving 2/5 to 'Trip'…");
+    }
+
+    [Fact]
+    public async Task ExportStatusStream_Failed_ClearsBusyFlag_SurfacesError()
+    {
+        _poi.Setup(p => p.GetCollectionsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        _poi.Setup(p => p.GetFailedEnrichmentCountAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
+
+        var vm = CreateVm();
+        await vm.InitializeAsync();
+        _exportStatus.Publish(new ExportJobStatus(ExportJobState.Running, "working"));
+
+        _exportStatus.Publish(new ExportJobStatus(ExportJobState.Failed, "Export to 'Trip' failed: boom", Error: "boom"));
+
+        vm.IsGoogleExporting.Should().BeFalse();
+        vm.GoogleExportMessage.Should().Be("boom");
     }
 }

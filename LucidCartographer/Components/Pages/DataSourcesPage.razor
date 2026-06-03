@@ -141,6 +141,17 @@ else
             <div class="mb-4 p-2 rounded-lg bg-primary/10 text-primary text-sm">@Vm.MaintenanceMessage</div>
         }
 
+        @if (!string.IsNullOrWhiteSpace(Vm.GoogleExportMessage))
+        {
+            <div class="mb-4 p-2 rounded-lg bg-primary/10 text-primary text-sm flex items-center gap-2">
+                @if (Vm.IsGoogleExporting)
+                {
+                    <span class="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" aria-hidden="true"></span>
+                }
+                <span>@Vm.GoogleExportMessage</span>
+            </div>
+        }
+
         @if (Vm.Collections.Count == 0)
         {
             <div class="bg-surface-container-low rounded-xl p-8 text-center text-on-surface-variant">
@@ -219,6 +230,15 @@ else
                                                 @onclick="() => Vm.HandleExportToMyMapsAsync(col.Id)">
                                             <span class="material-symbols-outlined text-sm" aria-hidden="true">
                                                 @(Vm.ExportingId == col.Id ? "hourglass_empty" : "map")
+                                            </span>
+                                        </button>
+                                        <button class="text-primary hover:bg-primary/10 p-1 rounded-lg transition-colors"
+                                                aria-label="@($"Export {col.Name} to a Google Maps Saved List")"
+                                                title="Export to Google Saved List"
+                                                disabled="@(Vm.ExportingCollectionId == col.Id)"
+                                                @onclick="() => Vm.HandleExportToGoogleListAsync(col.Id)">
+                                            <span class="material-symbols-outlined text-sm" aria-hidden="true">
+                                                @(Vm.ExportingCollectionId == col.Id ? "hourglass_empty" : "bookmark_add")
                                             </span>
                                         </button>
                                         <button class="text-primary hover:bg-primary/10 p-1 rounded-lg transition-colors"

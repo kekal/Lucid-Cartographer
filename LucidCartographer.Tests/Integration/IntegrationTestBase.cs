@@ -130,6 +130,20 @@ public abstract class IntegrationTestBase : IAsyncLifetime
         builder.Services.AddSingleton<Services.Operations.DedupTrigger>();
         builder.Services.AddScoped<Services.Operations.IPoiDeduplicationService, Services.Operations.PoiDeduplicationService>();
 
+        // Google Saved-List export pipeline (mirrors AddExportPipeline minus the
+        // file exporters already registered above). The DataSourcesPage VM @injects
+        // IExportJobQueue + ExportJobStatusService, and both the scraper and the
+        // exporter need the shared GoogleBrowserLock — without these the page VM
+        // can't be resolved, the page never renders, and Playwright times out.
+        builder.Services.AddSingleton<Services.GoogleBrowserLock>();
+        builder.Services.AddSingleton<Services.Export.IGoogleMapsListExporter, Services.Export.GoogleMapsListExporter>();
+        builder.Services.AddSingleton<Services.Export.ExportJobStatusService>();
+        builder.Services.AddSingleton<Services.Export.ExportJobQueue>();
+        builder.Services.AddSingleton<Services.Export.IExportJobQueue>(sp => sp.GetRequiredService<Services.Export.ExportJobQueue>());
+        // ExportJobProcessor + ExportBackgroundService (the hosted consumer) are
+        // intentionally NOT registered here — integration tests must not spin up a
+        // headful export consumer. The page VM only needs the queue + status bus.
+
         // Page ViewModels — added in commit 5ba80fa as a required @inject
         // dependency for every page-component. Without this registration
         // the Razor renderer fails to resolve the VM, the page never

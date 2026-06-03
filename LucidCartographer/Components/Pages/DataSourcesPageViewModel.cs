@@ -17,6 +17,8 @@ namespace LucidCartographer.Components.Pages;
 public sealed class DataSourcesPageViewModel(
     IImportJobQueue importJobQueue,
     ImportJobStatusService importJobStatus,
+    IExportJobQueue exportJobQueue,
+    ExportJobStatusService exportJobStatus,
     IPoiService poiService,
     IGoogleMapsListScraper scraper,
     IEnumerable<IFileExporter> exporters,
@@ -27,6 +29,10 @@ public sealed class DataSourcesPageViewModel(
 {
     private readonly CancellationTokenSource _cts = new();
     private IDisposable? _statusSubscription;
+    private IDisposable? _exportStatusSubscription;
+    // True once we've seen a Queued/Running export this session — lets us ignore a
+    // stale terminal status the BehaviorSubject replays to a freshly loaded page.
+    private bool _exportObservedActive;
 
     public event Action? StateChanged;
 
@@ -70,8 +76,16 @@ public sealed class DataSourcesPageViewModel(
     public bool AddPoiSuccess { get; private set; }
     public bool AddPoiSaving { get; private set; }
 
-    // Export indicator (per-collection)
+    // Export indicator (per-collection) — the KML "Export to My Maps" action.
     public int? ExportingId { get; private set; }
+
+    // Google Saved-List export (background job). ExportingCollectionId drives the
+    // per-row spinner/disable (only the active collection's button), IsGoogleExporting
+    // gates the progress banner, and GoogleExportMessage streams coarse per-place
+    // progress from ExportJobStatusService.
+    public bool IsGoogleExporting { get; private set; }
+    public int? ExportingCollectionId { get; private set; }
+    public string? GoogleExportMessage { get; private set; }
 
     // Delete confirmation
     public int? PendingDeleteId { get; private set; }
@@ -116,6 +130,46 @@ public sealed class DataSourcesPageViewModel(
         // still running. This is the whole point of the Coravel refactor:
         // the user can navigate away and come back and still see status.
         _statusSubscription = importJobStatus.Changes.Subscribe(OnImportJobStatusChanged);
+        _exportStatusSubscription = exportJobStatus.Changes.Subscribe(OnExportJobStatusChanged);
+    }
+
+    private void OnExportJobStatusChanged(ExportJobStatus status)
+    {
+        switch (status.State)
+        {
+            case ExportJobState.Queued:
+            case ExportJobState.Running:
+                IsGoogleExporting = true;
+                ExportingCollectionId = status.CollectionId;
+                GoogleExportMessage = status.Message;
+                _exportObservedActive = true;
+                break;
+            case ExportJobState.Completed:
+                IsGoogleExporting = false;
+                ExportingCollectionId = null;
+                // Ignore a terminal status replayed by the BehaviorSubject on a
+                // fresh page (we never observed this job run) — otherwise every
+                // revisit triggers a spurious reload + a stale "export done" banner.
+                if (!_exportObservedActive)
+                {
+                    return;
+                }
+                _exportObservedActive = false;
+                GoogleExportMessage = status.Message;
+                _ = ReloadAfterCompletionWithLoggingAsync();
+                return;
+            case ExportJobState.Failed:
+                IsGoogleExporting = false;
+                ExportingCollectionId = null;
+                if (!_exportObservedActive)
+                {
+                    return;
+                }
+                _exportObservedActive = false;
+                GoogleExportMessage = status.Error ?? status.Message;
+                break;
+        }
+        Notify();
     }
 
     private void OnImportJobStatusChanged(ImportJobStatus status)
@@ -541,6 +595,26 @@ public sealed class DataSourcesPageViewModel(
     }
 
     /// <summary>
+    /// Enqueue a background export of the collection's POIs into a Google Maps
+    /// Saved List named after the collection. Returns immediately; a headful
+    /// browser opens and progress streams via <see cref="ExportJobStatusService"/>.
+    /// </summary>
+    public void HandleExportToGoogleListAsync(int collectionId)
+    {
+        var col = Collections.FirstOrDefault(c => c.Id == collectionId);
+        if (col is null)
+        {
+            return;
+        }
+
+        exportJobQueue.Enqueue(new ExportJobPayload
+        {
+            CollectionId = collectionId,
+            ListName = col.Name
+        });
+    }
+
+    /// <summary>
     /// Strips characters that are invalid in file names (and ':' / '/' which the
     /// browser's download attribute mishandles) so a collection name like
     /// "4-7.06: Запад → Kalisz" yields a usable .kml download. Unicode letters
@@ -666,6 +740,7 @@ public sealed class DataSourcesPageViewModel(
     public ValueTask DisposeAsync()
     {
         _statusSubscription?.Dispose();
+        _exportStatusSubscription?.Dispose();
         try { _cts.Cancel(); }
         catch (ObjectDisposedException) { /* token source already disposed */ }
         _cts.Dispose();
