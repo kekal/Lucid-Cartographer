@@ -7,6 +7,10 @@ services:
         # so it can write the SQLite DB and OAuth keys. Override in .env.
         PUID: ${PUID:-1026}
         PGID: ${PGID:-100}
+    # Stable hostname so the persisted Chrome profile's singleton lock always
+    # matches the current container (lets Chromium self-recover a stale lock
+    # instead of seeing "in use by another computer" after a recreate).
+    hostname: cartographer
     ports:
       - "5087:8080"
     volumes:

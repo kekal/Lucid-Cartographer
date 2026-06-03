@@ -183,6 +183,7 @@ public sealed class BrowserSessionManager : IBrowserSession, IAsyncDisposable
 
             await PlaywrightBootstrap.EnsureBrowsersInstalledAsync(_logger, ct);
             Directory.CreateDirectory(ProfilePath);
+            ClearStaleSingletonLocks();
 
             _logger.LogInformation(
                 "Launching shared Chromium session (headless={Headless}, profile={Path})",
@@ -204,6 +205,32 @@ public sealed class BrowserSessionManager : IBrowserSession, IAsyncDisposable
         finally
         {
             _initGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Remove the Chromium profile singleton locks left behind when a previous
+    /// container instance held this persistent profile. The profile lives on the
+    /// /data volume, so after a container is recreated the lock still records the
+    /// old hostname/pid and Chromium refuses to launch ("profile in use by another
+    /// computer"). Safe to clear here: we only reach this when there is no live
+    /// context in THIS process, so no running Chromium of ours owns the lock.
+    /// </summary>
+    private void ClearStaleSingletonLocks()
+    {
+        foreach (var name in new[] { "SingletonLock", "SingletonSocket", "SingletonCookie" })
+        {
+            var path = Path.Combine(ProfilePath, name);
+            try
+            {
+                // SingletonLock is a symlink that may dangle (target pid gone), so
+                // don't gate on File.Exists — just attempt the delete.
+                File.Delete(path);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Could not remove profile lock {Lock}", name);
+            }
         }
     }
 
