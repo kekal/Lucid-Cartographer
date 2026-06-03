@@ -352,14 +352,30 @@ public class GoogleMapsListExporter(
         var (bestIndex, radios) = await ReadAndMatchAsync();
 
         // We already created/matched the target list earlier this run, but it's not
-        // in THIS place's menu yet (Google propagates a new list with a few seconds'
-        // lag). Re-open the Save menu a few times rather than creating a duplicate.
-        for (var retry = 0; bestIndex < 0 && listEnsured && retry < 3; retry++)
+        // in THIS place's Save menu. The menu's list set is fetched at SPA page load
+        // and a freshly-created list won't appear until the page is reloaded —
+        // reopening the menu alone never refreshes it. So RELOAD the place (refetch
+        // the account's lists) and reopen Save, rather than creating a duplicate.
+        for (var retry = 0; bestIndex < 0 && listEnsured && retry < 4; retry++)
         {
             logger.LogInformation(
-                "List '{List}' expected but not in the menu yet; reopening (retry {N}/3)", listName, retry + 1);
+                "List '{List}' not in this menu; reloading place to refresh lists (retry {N}/4)", listName, retry + 1);
             await page.Keyboard.PressAsync("Escape");
-            await page.WaitForTimeoutAsync(2000);
+            try
+            {
+                await page.ReloadAsync(new PageReloadOptions { WaitUntil = WaitUntilState.Commit, Timeout = 30000 });
+            }
+            catch (Exception ex) when (ex is TimeoutException or PlaywrightException)
+            {
+                logger.LogWarning("Reload during list-refresh retry failed: {Msg}", ex.Message);
+            }
+            try
+            {
+                await page.GetByRole(AriaRole.Heading).First.WaitForAsync(new() { Timeout = 20000 });
+            }
+            catch (TimeoutException) { /* best effort */ }
+            await page.WaitForTimeoutAsync(2500);
+
             var reopened = await TryClickNamedAsync(
                 n => page.GetByRole(AriaRole.Button, new() { Name = n, Exact = true }), SaveLabels, 8000);
             if (!reopened)
@@ -431,7 +447,9 @@ public class GoogleMapsListExporter(
             n => page.GetByRole(AriaRole.Button, new() { Name = n }), ConfirmLabels, 8000);
         if (confirmed)
         {
-            await page.WaitForTimeoutAsync(1500);
+            // Let Google commit the new list server-side before the next place
+            // navigates, so its fresh page load includes the list.
+            await page.WaitForTimeoutAsync(3000);
             return new ExportPlaceResult(placeUrl, placeName, ExportOutcome.Created, $"Created list '{listName}' and saved.");
         }
 
