@@ -197,7 +197,14 @@ public sealed class BrowserSessionManager : IBrowserSession, IAsyncDisposable
                     Headless = _options.Headless,
                     Locale = "en-US",
                     UserAgent = DefaultUserAgent,
-                    Args = ["--disable-blink-features=AutomationControlled"]
+                    Args =
+                    [
+                        "--disable-blink-features=AutomationControlled",
+                        // The persistent profile can exit dirty (the container kills
+                        // Chromium on stop), which otherwise pops a "Restore pages"
+                        // bubble over the page on next launch.
+                        "--hide-crash-restore-bubble"
+                    ]
                 });
 
             return _context;

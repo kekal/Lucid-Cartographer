@@ -61,10 +61,28 @@ public static class NoVncProxyEndpoint
         {
             using var upstream = await Http.GetAsync(target, HttpCompletionOption.ResponseHeadersRead, ctx.RequestAborted);
             ctx.Response.StatusCode = (int)upstream.StatusCode;
-            if (upstream.Content.Headers.ContentType is { } contentType)
+            var contentType = upstream.Content.Headers.ContentType?.ToString();
+            if (contentType is not null)
             {
-                ctx.Response.ContentType = contentType.ToString();
+                ctx.Response.ContentType = contentType;
             }
+
+            // For the main client document, inject CSS to hide the noVNC control
+            // bar — autoconnect means the user never needs its buttons, so the
+            // embed shows just the remote browser.
+            if (path.EndsWith("vnc.html", StringComparison.OrdinalIgnoreCase)
+                && (contentType?.Contains("text/html", StringComparison.OrdinalIgnoreCase) ?? false))
+            {
+                var html = await upstream.Content.ReadAsStringAsync(ctx.RequestAborted);
+                const string hideBar = "<style>#noVNC_control_bar_anchor{display:none!important;}</style>";
+                html = html.Contains("</head>", StringComparison.OrdinalIgnoreCase)
+                    ? html.Replace("</head>", hideBar + "</head>", StringComparison.OrdinalIgnoreCase)
+                    : hideBar + html;
+                ctx.Response.ContentType = "text/html; charset=utf-8";
+                await ctx.Response.WriteAsync(html, ctx.RequestAborted);
+                return;
+            }
+
             await upstream.Content.CopyToAsync(ctx.Response.Body, ctx.RequestAborted);
         }
         catch (Exception) when (ctx.RequestAborted.IsCancellationRequested)
