@@ -27,8 +27,9 @@ public class GoogleSessionPageViewModelTests
     [Fact]
     public void NoVncUrl_TargetsTheProxiedWebsockifyPath()
     {
-        CreateVm().NoVncUrl.Should().StartWith("/google-session/novnc/vnc_lite.html")
-            .And.Contain("path=google-session/novnc/websockify");
+        CreateVm().NoVncUrl.Should().StartWith("/google-session/novnc/vnc.html")
+            .And.Contain("path=google-session/novnc/websockify")
+            .And.Contain("resize=scale");
     }
 
     [Fact]

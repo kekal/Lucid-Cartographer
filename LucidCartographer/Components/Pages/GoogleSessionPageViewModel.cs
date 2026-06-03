@@ -28,11 +28,12 @@ public sealed class GoogleSessionPageViewModel(
     /// <summary>
     /// Same-origin noVNC client URL (proxied + behind cookie auth). resize=scale
     /// scales the fixed remote framebuffer to fit the iframe (x11vnc can't resize
-    /// the Xvfb display, so resize=remote would overflow with scrollbars).
+    /// the Xvfb display, so resize=remote would overflow with scrollbars). Uses the
+    /// full vnc.html client — vnc_lite.html ignores the resize param.
     /// </summary>
     public string NoVncUrl =>
-        "/google-session/novnc/vnc_lite.html" +
-        "?path=google-session/novnc/websockify&autoconnect=1&resize=scale&reconnect=1";
+        "/google-session/novnc/vnc.html" +
+        "?path=google-session/novnc/websockify&autoconnect=true&resize=scale&reconnect=true";
 
     /// <summary>
     /// Whether to render the embedded remote view. Hidden until the user clicks
