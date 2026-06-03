@@ -22,6 +22,9 @@ public interface IGoogleMapsListScraper
     /// <summary>True if a persistent browser profile directory exists with content.</summary>
     bool HasBrowserProfile { get; }
 
-    /// <summary>Deletes the persistent browser profile so the user can log in with a different account.</summary>
-    void ResetBrowserProfile();
+    /// <summary>
+    /// Closes the shared browser session (if open) and deletes the persistent
+    /// profile so the user can sign in with a different account.
+    /// </summary>
+    Task ResetBrowserProfileAsync(CancellationToken cancellationToken = default);
 }

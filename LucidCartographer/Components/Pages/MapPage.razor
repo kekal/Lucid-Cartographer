@@ -223,9 +223,12 @@ else
     @* ===================== DESKTOP (unchanged) ===================== *@
     <div class="flex h-full">
         @* Left Sidebar — Collections (width drag-resizable via _sidebarHandle) *@
+        @* w-60 (=240px, the default SidebarWidth) is kept as a stable hook for
+           integration tests; the inline style below always wins for actual width,
+           so drag-resize is unaffected. *@
         <div @ref="_sidebarContainer"
              style="width: @(Vm.SidebarWidth)px;"
-             class="flex-shrink-0 bg-surface-container-low flex flex-col min-w-0">
+             class="w-60 flex-shrink-0 bg-surface-container-low flex flex-col min-w-0">
             <CollectionSidebar Collections="Vm.CollectionStates"
                               OnVisibilityToggled="Vm.HandleVisibilityToggledAsync" />
         </div>

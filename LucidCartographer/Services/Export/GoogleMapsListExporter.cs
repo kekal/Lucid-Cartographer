@@ -1,4 +1,5 @@
 using LucidCartographer.Services;
+using LucidCartographer.Services.Browser;
 using Microsoft.Playwright;
 
 namespace LucidCartographer.Services.Export;
@@ -22,17 +23,10 @@ namespace LucidCartographer.Services.Export;
 /// </summary>
 public class GoogleMapsListExporter(
     ILogger<GoogleMapsListExporter> logger,
-    GoogleBrowserLock browserLock)
+    GoogleBrowserLock browserLock,
+    IBrowserSession session)
     : IGoogleMapsListExporter
 {
-    private const string DefaultUserAgent =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-
-    // Shared with the importer's persistent profile so an existing "Fetch My
-    // Lists" sign-in carries over and we don't force a fresh login.
-    private static readonly string BrowserProfilePath =
-        Path.Combine(AppContext.BaseDirectory, "data", "chrome-profile");
-
     // "Saved"/"Сохранено" (past tense) is what the button reads once the place is
     // already in ANY list; "Save"/"Сохранить" before. Match all four.
     private static readonly string[] SaveLabels = ["Save", "Saved", "Сохранить", "Сохранено"];
@@ -69,26 +63,26 @@ public class GoogleMapsListExporter(
     {
         logger.LogInformation(
             "Export starting: list='{List}', {Count} place(s), profile={Path}",
-            listName, placeUrls.Count, BrowserProfilePath);
+            listName, placeUrls.Count, session.ProfilePath);
 
-        await Import.PlaywrightBootstrap.EnsureBrowsersInstalledAsync(logger, ct);
-        Directory.CreateDirectory(BrowserProfilePath);
+        // Borrow a page from the single shared session (the same browser the user
+        // signs into via the Google session page). Close the page, never the context.
+        var page = await session.NewPageAsync(ct);
+        try
+        {
+            await EnsureSignedInAsync(page, ct);
 
-        using var playwright = await Playwright.CreateAsync();
-        await using var context = await playwright.Chromium.LaunchPersistentContextAsync(
-            BrowserProfilePath,
-            new BrowserTypeLaunchPersistentContextOptions
-            {
-                Headless = false,
-                Locale = "en-US",
-                UserAgent = DefaultUserAgent,
-                Args = ["--disable-blink-features=AutomationControlled"]
-            });
+            return await RunExportAsync(page, listName, placeUrls, onProgress, ct);
+        }
+        finally
+        {
+            try { await page.CloseAsync(); } catch (Exception ex) { logger.LogDebug(ex, "Error closing export page"); }
+        }
+    }
 
-        var page = context.Pages.Count > 0 ? context.Pages[0] : await context.NewPageAsync();
-
-        await EnsureSignedInAsync(page, ct);
-
+    private async Task<ExportRunReport> RunExportAsync(
+        IPage page, string listName, IReadOnlyList<string> placeUrls, Action<ExportProgress>? onProgress, CancellationToken ct)
+    {
         var results = new List<ExportPlaceResult>(placeUrls.Count);
         for (var i = 0; i < placeUrls.Count; i++)
         {
@@ -134,105 +128,29 @@ public class GoogleMapsListExporter(
     }
 
     /// <summary>
-    /// Navigate to Maps, clear consent, and wait (up to 5 min) for the user to
-    /// sign in inside the headful window. Mirror of the scraper's login sequence.
+    /// Navigate to Maps, clear consent, and fail fast if the shared session isn't
+    /// signed into Google. Login is no longer performed inline (there's no window
+    /// to watch during a background job) — the user signs in once on the Google
+    /// session page, which drives this same shared browser.
     /// </summary>
     private async Task EnsureSignedInAsync(IPage page, CancellationToken ct)
     {
         await page.GotoAsync("https://www.google.com/maps",
             new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30000 });
         await page.WaitForTimeoutAsync(5000); // Let the SPA render
+        ct.ThrowIfCancellationRequested();
 
         logger.LogInformation("Post-navigation URL: {Url}", page.Url);
+        await GoogleConsent.DismissAsync(page, logger);
 
-        // Consent dialog (same pattern as the scraper).
-        try
+        if (!await GoogleSignIn.IsSignedInAsync(page, logger))
         {
-            var consentSelectors = new[]
-            {
-                "button[aria-label*='Accept']",
-                "button[aria-label*='accept']",
-                "button:has-text('Accept all')",
-                "button:has-text('Agree')",
-                "button:has-text('Принять')",
-                "form[action*='consent'] button"
-            };
-            foreach (var sel in consentSelectors)
-            {
-                var btn = page.Locator(sel).First;
-                if (await btn.IsVisibleAsync())
-                {
-                    logger.LogInformation("Clicking consent button: {Selector}", sel);
-                    var clickTask = btn.ClickAsync();
-                    try
-                    {
-                        await page.WaitForURLAsync(
-                            u => !u.Contains("consent.google.com"),
-                            new() { Timeout = 15000 });
-                    }
-                    catch (TimeoutException) { }
-                    await clickTask;
-                    try
-                    {
-                        await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new() { Timeout = 15000 });
-                    }
-                    catch (TimeoutException) { }
-                    break;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogDebug(ex, "No consent dialog found or failed to click");
+            throw new InvalidOperationException(
+                "Not signed in to Google. Open the Google session page (Data Sources → Google session), " +
+                "sign in, then retry the export.");
         }
 
-        var loginDeadline = DateTime.UtcNow.AddMinutes(5);
-        while (!await IsLoggedInAsync(page))
-        {
-            ct.ThrowIfCancellationRequested();
-            if (DateTime.UtcNow > loginDeadline)
-            {
-                throw new TimeoutException(
-                    "Sign-in was not completed within 5 minutes. Please sign in to Google in the browser window.");
-            }
-
-            logger.LogInformation("Waiting for user to sign in... (URL: {Url})", page.Url);
-            try
-            {
-                var signInLink = page.Locator("a[href*='ServiceLogin']").First;
-                if (await signInLink.IsVisibleAsync())
-                {
-                    await signInLink.ClickAsync();
-                    logger.LogInformation("Clicked sign-in link to redirect to Google login");
-                    await page.WaitForTimeoutAsync(3000);
-                }
-            }
-            catch { /* best effort */ }
-
-            await page.WaitForTimeoutAsync(2000);
-        }
-
-        logger.LogInformation("User is logged in. Current URL: {Url}", page.Url);
-    }
-
-    private async Task<bool> IsLoggedInAsync(IPage page)
-    {
-        var url = page.Url;
-        if (url.Contains("accounts.google.com") || url.Contains("signin"))
-        {
-            return false;
-        }
-        var signInHref = await page.EvaluateAsync<string>(@"
-            (() => {
-                const links = document.querySelectorAll('a');
-                for (const el of links) {
-                    const href = el.href || '';
-                    if (href.includes('ServiceLogin') || href.includes('/signin/identifier'))
-                        return href;
-                }
-                return '';
-            })()");
-        return string.IsNullOrEmpty(signInHref);
+        logger.LogInformation("Shared session is signed in. URL: {Url}", page.Url);
     }
 
     /// <summary>Length of the shared leading run of two strings (ordinal).</summary>

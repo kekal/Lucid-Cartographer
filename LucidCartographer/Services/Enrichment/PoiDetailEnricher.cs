@@ -1,3 +1,4 @@
+using LucidCartographer.Services.Browser;
 using Microsoft.Playwright;
 
 namespace LucidCartographer.Services.Enrichment;
@@ -99,50 +100,7 @@ public static class PoiDetailEnricher
         // the first successful click the rest skip this branch.
         if (page.Url.Contains("consent.google.com"))
         {
-            string[] consentSelectors =
-            [
-                "button[aria-label*='Accept']",
-                "button[aria-label*='accept']",
-                "button:has-text('Accept all')",
-                "button:has-text('Agree')",
-                "form[action*='consent'] button"
-            ];
-            foreach (var sel in consentSelectors)
-            {
-                try
-                {
-                    var btn = page.Locator(sel).First;
-                    if (await btn.IsVisibleAsync())
-                    {
-                        var clickTask = btn.ClickAsync();
-                        try
-                        {
-                            await page.WaitForURLAsync(
-                                u => !u.Contains("consent.google.com"),
-                                new() { Timeout = 15000 });
-                        }
-                        catch (TimeoutException) { }
-                        catch (PlaywrightException ex) when (IsNavigationAbortDuringConsent(ex))
-                        {
-                            logger?.LogDebug(ex, "Consent redirect wait aborted; continuing with current page URL '{Url}'", page.Url);
-                        }
-                        try
-                        {
-                            await clickTask;
-                        }
-                        catch (PlaywrightException ex) when (IsNavigationAbortDuringConsent(ex))
-                        {
-                            logger?.LogDebug(ex, "Consent click navigation aborted; continuing with current page URL '{Url}'", page.Url);
-                        }
-                        break;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    logger?.LogWarning(ex, "Consent selector miss for '{Selector}'", sel);
-                    EnrichmentMetrics.RecordSelectorMiss();
-                }
-            }
+            await GoogleConsent.DismissAsync(page, logger);
         }
 
         // Wait for the URL to transition to the canonical /maps/place/
@@ -339,10 +297,6 @@ public static class PoiDetailEnricher
         }
         return null;
     }
-
-    private static bool IsNavigationAbortDuringConsent(PlaywrightException ex)
-        => ex.Message.Contains("ERR_ABORTED", StringComparison.OrdinalIgnoreCase)
-           || ex.Message.Contains("frame was detached", StringComparison.OrdinalIgnoreCase);
 
     private static async Task<string?> TryExtractImageUrlAsync(IPage page, ILogger? logger)
     {

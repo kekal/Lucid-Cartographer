@@ -1,4 +1,3 @@
-using LucidCartographer.Services;
 using LucidCartographer.Services.Export;
 
 namespace LucidCartographer.Configuration;
@@ -17,9 +16,8 @@ public static class ExportPipelineExtensions
         services.AddSingleton<IFileExporter, KmlExporter>();
         services.AddSingleton<IFileExporter, GpxExporter>();
 
-        // Shared lock so the exporter and the scraper never launch the persistent
-        // profile concurrently (Chromium locks the profile dir). Injected by both.
-        services.AddSingleton<GoogleBrowserLock>();
+        // GoogleBrowserLock + the shared IBrowserSession are registered by
+        // AddBrowserSession (called from Program.cs) — the exporter injects both.
 
         // Headful Google Maps Saved-List exporter (single browser session).
         services.AddSingleton<IGoogleMapsListExporter, GoogleMapsListExporter>();

@@ -40,6 +40,11 @@
                 <input type="text" name="search" id="search-input" placeholder="@UiStrings.SearchPois" aria-label="@UiStrings.SearchPois"
                        class="pl-9 pr-4 py-1.5 rounded-full bg-surface-container-low text-sm text-on-surface placeholder:text-outline focus:ring-2 focus:ring-primary focus:bg-white transition-colors w-48 focus:w-64" />
             </form>
+            @* Google session: sign in the shared browser used for Fetch My Lists / export. *@
+            <a href="/google-session" class="p-2 rounded-full hover:bg-surface-container-low transition-colors"
+               aria-label="Google session" title="Google session (sign-in for Fetch My Lists / export)">
+                <span class="material-symbols-outlined text-on-surface-variant">account_circle</span>
+            </a>
             @* LOW-03: Logout link with JS confirmation *@
             <a href="/logout" class="p-2 rounded-full hover:bg-surface-container-low transition-colors"
                aria-label="@UiStrings.Logout"

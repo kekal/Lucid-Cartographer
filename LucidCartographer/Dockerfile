@@ -18,6 +18,14 @@ RUN dotnet publish -c Release -o /app/publish
 FROM mcr.microsoft.com/playwright/dotnet:v1.49.0-noble
 WORKDIR /app
 
+# Remote-view stack for the Google sign-in: Xvfb (virtual display for the headful
+# Chromium), x11vnc (VNC server on that display), and noVNC + websockify (web
+# client + websocket bridge). All bound to localhost at runtime and only reachable
+# through the app's authenticated same-origin proxy. Installed as root before USER.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        xvfb x11vnc novnc websockify \
+    && rm -rf /var/lib/apt/lists/*
+
 # MED-02: Run as a non-root user. UID/GID are build args so the container user
 # matches the owner of the bind-mounted /data volume on the host (e.g. a NAS
 # PUID/PGID) — otherwise it can't write the SQLite DB or the OAuth keys. Defaults
@@ -33,6 +41,10 @@ RUN groupadd --gid ${PGID} appgroup 2>/dev/null || true && \
 
 # Copy the published app (root-owned at this point).
 COPY --from=build /app/publish .
+
+# Entrypoint that boots Xvfb + x11vnc + websockify, then the app.
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 755 /usr/local/bin/docker-entrypoint.sh
 
 # Set ownership and permissions in a shell RUN, NOT via `COPY --chown=${VAR}`:
 # the COPY --chown directive does not reliably expand build-arg variables on
@@ -55,6 +67,13 @@ ENV ASPNETCORE_ENVIRONMENT=Production
 ENV DB_PATH=/data/cartographer.db
 # Keep the diagnostic log on the writable /data volume, not in /app.
 ENV SCRAPE_DIAG_LOG=/data/scrape-diag.log
+# Persist the shared Chrome profile on the /data volume so the Google sign-in
+# survives container restarts (otherwise it lands under /app and is ephemeral).
+ENV CHROME_PROFILE_PATH=/data/chrome-profile
+# Virtual display used by the headful shared browser session.
+ENV DISPLAY=:99
+# Enable the embedded noVNC remote view for the Google sign-in (server only).
+ENV Browser__RemoteView__Enabled=true
 
 EXPOSE 8080
 
@@ -64,4 +83,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl --fail --silent http://localhost:8080/health || wget -q -O /dev/null http://localhost:8080/health || exit 1
 
-ENTRYPOINT ["dotnet", "LucidCartographer.dll"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

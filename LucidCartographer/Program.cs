@@ -19,6 +19,7 @@ builder.Services
     .AddImportPipeline()
     .AddEnrichmentPipeline(builder.Configuration)
     .AddDeduplicationPipeline(builder.Configuration)
+    .AddBrowserSession(builder.Configuration)
     .AddExportPipeline()
     .AddAppAuthentication(builder.Configuration, builder.Environment)
     .AddAppResiliencePipelines()
@@ -66,6 +67,10 @@ if (!app.Environment.IsDevelopment())
     app.UseResponseCompression();
 }
 
+// Raw WebSocket support for the noVNC reverse proxy (Google session remote view).
+// Harmless when the proxy is disabled; Blazor's SignalR transport is unaffected.
+app.UseWebSockets();
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseLanBypassOrAuth();
@@ -77,6 +82,10 @@ app.MapHealthChecks("/health"); // MED-01
 app.MapAuthEndpoints();
 app.MapOAuthEndpoints();
 app.MapPoiImageEndpoints();
+
+// Same-origin noVNC proxy for the Google sign-in remote view (Docker/Linux only;
+// no-op unless Browser:RemoteView:Enabled). Behind the cookie-auth route guard.
+app.MapNoVncProxy();
 
 // MCP endpoint for external agents (Claude Code). DisableAntiforgery because the
 // JSON-RPC POSTs carry no antiforgery token; McpApiKeyFilter enforces auth

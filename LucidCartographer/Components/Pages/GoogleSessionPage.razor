@@ -1,0 +1,96 @@
+@page "/google-session"
+@rendermode InteractiveServer
+@inject GoogleSessionPageViewModel Vm
+@implements IAsyncDisposable
+
+<PageTitle>Google session</PageTitle>
+
+<div class="p-6 max-w-4xl mx-auto">
+    <div class="mb-6">
+        <h2 class="text-2xl font-bold font-headline text-on-surface">Google session</h2>
+        <p class="text-on-surface-variant mt-1">
+            Sign in to the Google account used for "Fetch My Lists" and Saved-List export.
+            The login runs in a shared browser on the server; complete it in the view below,
+            then it carries across every Google operation.
+        </p>
+    </div>
+
+    @* Status + actions *@
+    <div class="bg-surface-container-low rounded-xl p-5 mb-6">
+        <div class="flex items-center gap-3 mb-4">
+            @if (Vm.SignedIn == true)
+            {
+                <span class="material-symbols-outlined text-green-600">check_circle</span>
+                <span class="font-medium">Signed in to Google.</span>
+            }
+            else if (Vm.SignedIn == false)
+            {
+                <span class="material-symbols-outlined text-amber-600">error</span>
+                <span class="font-medium">Not signed in.</span>
+            }
+            else
+            {
+                <span class="material-symbols-outlined text-on-surface-variant">help</span>
+                <span class="font-medium">Sign-in status unknown — check it.</span>
+            }
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+            <button class="px-4 py-2 rounded-lg bg-primary text-on-primary font-medium disabled:opacity-50 flex items-center gap-2"
+                    disabled="@Vm.IsBusy" @onclick="Vm.OpenSignInAsync">
+                @if (Vm.IsBusy)
+                {
+                    <span class="material-symbols-outlined animate-spin text-base">progress_activity</span>
+                }
+                <span>Open Google sign-in</span>
+            </button>
+            <button class="px-4 py-2 rounded-lg bg-surface-container text-on-surface font-medium disabled:opacity-50"
+                    disabled="@Vm.IsBusy" @onclick="Vm.RefreshStatusAsync">
+                Refresh status
+            </button>
+            <button class="px-4 py-2 rounded-lg bg-surface-container text-error font-medium disabled:opacity-50"
+                    disabled="@Vm.IsBusy" @onclick="Vm.ResetProfileAsync"
+                    title="Sign out / switch account by deleting the saved profile">
+                Reset profile
+            </button>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(Vm.StatusMessage))
+        {
+            <p class="text-sm text-on-surface-variant mt-3">@Vm.StatusMessage</p>
+        }
+    </div>
+
+    @* Remote view (server only) *@
+    @if (Vm.RemoteViewEnabled)
+    {
+        <div class="bg-surface-container-low rounded-xl p-2">
+            <p class="text-sm text-on-surface-variant px-3 py-2">
+                Live browser view — click "Open Google sign-in" above, then complete the login here.
+            </p>
+            <iframe src="@Vm.NoVncUrl"
+                    title="Remote browser view"
+                    class="w-full rounded-lg border-0"
+                    style="height: 70vh; min-height: 480px;"></iframe>
+        </div>
+    }
+    else
+    {
+        <div class="bg-surface-container-low rounded-xl p-5 text-sm text-on-surface-variant">
+            The remote view is disabled in this environment. "Open Google sign-in" opens a real
+            browser window on this machine — complete the login there, then click "Refresh status".
+        </div>
+    }
+</div>
+
+@code {
+    protected override void OnInitialized() => Vm.StateChanged += OnStateChanged;
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    public async ValueTask DisposeAsync()
+    {
+        Vm.StateChanged -= OnStateChanged;
+        await Vm.DisposeAsync();
+    }
+}

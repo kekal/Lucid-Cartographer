@@ -136,6 +136,9 @@ public abstract class IntegrationTestBase : IAsyncLifetime
         // exporter need the shared GoogleBrowserLock — without these the page VM
         // can't be resolved, the page never renders, and Playwright times out.
         builder.Services.AddSingleton<Services.GoogleBrowserLock>();
+        // Shared browser session is faked — tests must not launch a real headful
+        // Chromium. Both the exporter and the scraper depend on IBrowserSession.
+        builder.Services.AddSingleton<Services.Browser.IBrowserSession>(new FakeBrowserSession());
         builder.Services.AddSingleton<Services.Export.IGoogleMapsListExporter, Services.Export.GoogleMapsListExporter>();
         builder.Services.AddSingleton<Services.Export.ExportJobStatusService>();
         builder.Services.AddSingleton<Services.Export.ExportJobQueue>();

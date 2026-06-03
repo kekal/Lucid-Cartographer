@@ -1,4 +1,5 @@
 using LucidCartographer.Services;
+using LucidCartographer.Services.Browser;
 using Microsoft.Playwright;
 using Polly;
 using Polly.Registry;
@@ -8,14 +9,10 @@ namespace LucidCartographer.Services.Import;
 public class GoogleMapsListScraper(
     ILogger<GoogleMapsListScraper> logger,
     ResiliencePipelineProvider<string> pipelineProvider,
-    GoogleBrowserLock browserLock)
+    GoogleBrowserLock browserLock,
+    IBrowserSession session)
     : IGoogleMapsListScraper
 {
-    private const string DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-
-    private static readonly string BrowserProfilePath =
-        Path.Combine(AppContext.BaseDirectory, "data", "chrome-profile");
-
     // Separate semaphore for the interactive FetchSavedListsAsync flow —
     // this must NOT go through the "scraper" Polly pipeline which has a
     // 10-min timeout and concurrency=1 meant for headless scrapes.
@@ -72,38 +69,13 @@ public class GoogleMapsListScraper(
         }
     }
 
-    public bool HasBrowserProfile
-    {
-        get
-        {
-            try
-            {
-                return Directory.Exists(BrowserProfilePath) &&
-                       Directory.EnumerateFileSystemEntries(BrowserProfilePath).Any();
-            }
-            catch
-            {
-                return false;
-            }
-        }
-    }
+    // The persistent profile is now owned by the shared browser session; these
+    // delegate so the scraper's public surface (used by the Data Sources VM)
+    // stays stable.
+    public bool HasBrowserProfile => session.HasProfile;
 
-    public void ResetBrowserProfile()
-    {
-        try
-        {
-            if (Directory.Exists(BrowserProfilePath))
-            {
-                Directory.Delete(BrowserProfilePath, recursive: true);
-                logger.LogInformation("Browser profile reset: {Path}", BrowserProfilePath);
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to delete browser profile at {Path}", BrowserProfilePath);
-            throw;
-        }
-    }
+    public Task ResetBrowserProfileAsync(CancellationToken cancellationToken = default)
+        => session.ResetProfileAsync(cancellationToken);
 
     public async Task<IReadOnlyList<SavedListInfo>> FetchSavedListsAsync(CancellationToken cancellationToken = default)
     {
@@ -124,32 +96,28 @@ public class GoogleMapsListScraper(
 
     private async Task<IReadOnlyList<SavedListInfo>> FetchSavedListsInternalAsync(CancellationToken cancellationToken)
     {
-        logger.LogInformation("Fetching saved Google Maps lists (profile: {Path})", BrowserProfilePath);
+        logger.LogInformation("Fetching saved Google Maps lists (profile: {Path})", session.ProfilePath);
 
-        await PlaywrightBootstrap.EnsureBrowsersInstalledAsync(logger, cancellationToken);
-
-        // The export job and the scraper share the same persistent profile dir,
-        // which Chromium locks — refuse immediately (rather than freeze) if a
+        // Serialise against the exporter / authenticated scrape — all drive the
+        // single shared browser. Refuse immediately (rather than freeze) if a
         // Google browser operation is already running.
         using var lease = await browserLock.TryAcquireAsync(cancellationToken)
             ?? throw new InvalidOperationException(
                 "A Google browser operation is already running. Please wait for it to finish, then try again.");
 
-        Directory.CreateDirectory(BrowserProfilePath);
+        var page = await session.NewPageAsync(cancellationToken);
+        try
+        {
+            return await FetchSavedListsOnPageAsync(page, cancellationToken);
+        }
+        finally
+        {
+            try { await page.CloseAsync(); } catch (Exception ex) { logger.LogDebug(ex, "Error closing fetch-lists page"); }
+        }
+    }
 
-        using var playwright = await Playwright.CreateAsync();
-        await using var context = await playwright.Chromium.LaunchPersistentContextAsync(
-            BrowserProfilePath,
-            new BrowserTypeLaunchPersistentContextOptions
-            {
-                Headless = false,
-                Locale = "en-US",
-                UserAgent = DefaultUserAgent,
-                Args = ["--disable-blink-features=AutomationControlled"]
-            });
-
-        var page = context.Pages.Count > 0 ? context.Pages[0] : await context.NewPageAsync();
-
+    private async Task<IReadOnlyList<SavedListInfo>> FetchSavedListsOnPageAsync(IPage page, CancellationToken cancellationToken)
+    {
         // Navigate to Google Maps, then open the saved lists via the
         // hamburger menu → "Your places" → "Lists" tab. There is no
         // standalone /maps/lists URL; saved lists live inside the SPA.
@@ -159,81 +127,16 @@ public class GoogleMapsListScraper(
 
         logger.LogInformation("Post-navigation URL: {Url}", page.Url);
 
-        // Handle consent dialog (same pattern as ScrapeInternalAsync)
-        try
+        await GoogleConsent.DismissAsync(page, logger);
+
+        // Login is no longer performed inline — the user signs in once on the
+        // Google session page (which drives this same shared browser). Fail fast
+        // with a clear message if the session isn't authenticated.
+        if (!await GoogleSignIn.IsSignedInAsync(page, logger))
         {
-            var consentSelectors = new[]
-            {
-                "button[aria-label*='Accept']",
-                "button[aria-label*='accept']",
-                "button:has-text('Accept all')",
-                "button:has-text('Agree')",
-                "button:has-text('Принять')",
-                "form[action*='consent'] button"
-            };
-            foreach (var sel in consentSelectors)
-            {
-                var btn = page.Locator(sel).First;
-                if (await btn.IsVisibleAsync())
-                {
-                    logger.LogInformation("Clicking consent button: {Selector}", sel);
-                    var clickTask = btn.ClickAsync();
-                    try
-                    {
-                        await page.WaitForURLAsync(
-                            u => !u.Contains("consent.google.com"),
-                            new() { Timeout = 15000 });
-                    }
-                    catch (TimeoutException) { }
-                    await clickTask;
-                    try
-                    {
-                        await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new() { Timeout = 15000 });
-                    }
-                    catch (TimeoutException) { }
-                    break;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogDebug(ex, "No consent dialog found or failed to click");
-        }
-
-        var loginDeadline = DateTime.UtcNow.AddMinutes(5);
-        while (!await IsLoggedInAsync())
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (DateTime.UtcNow > loginDeadline)
-            {
-                throw new TimeoutException("Sign-in was not completed within 5 minutes. Please sign in to Google in the browser window.");
-            }
-
-            logger.LogInformation("Waiting for user to sign in... (URL: {Url})", page.Url);
-
-            // If on the Maps page with a sign-in link, click it to redirect to login
-            try
-            {
-                var signInLink = page.Locator("a[href*='ServiceLogin']").First;
-                if (await signInLink.IsVisibleAsync())
-                {
-                    await signInLink.ClickAsync();
-                    logger.LogInformation("Clicked sign-in link to redirect to Google login");
-                    await page.WaitForTimeoutAsync(3000);
-                }
-            }
-            catch { /* best effort */ }
-
-            await page.WaitForTimeoutAsync(2000);
-        }
-
-        logger.LogInformation("User is logged in. Current URL: {Url}", page.Url);
-
-        // After login, ensure we're on Google Maps
-        if (!page.Url.Contains("/maps"))
-        {
-            await page.GotoAsync("https://www.google.com/maps",
-                new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 30000 });
+            throw new InvalidOperationException(
+                "Not signed in to Google. Open the Google session page (Data Sources → Google session), " +
+                "sign in, then try Fetch My Lists again.");
         }
 
         await page.WaitForTimeoutAsync(2000);
@@ -362,90 +265,26 @@ public class GoogleMapsListScraper(
 
         logger.LogInformation("Discovered {Count} saved lists with URLs", results.Count);
 
-        // Close the browser (profile persists on disk)
-        await context.CloseAsync();
-
+        // Page is closed by the caller; the shared context + profile persist.
         return results;
-
-        // Check if user is logged in. Two scenarios:
-        // 1. URL redirected to accounts.google.com (explicit login page)
-        // 2. On Maps page but not logged in (has a "Sign in" link)
-        // In both cases, the browser is visible — wait for user to log in.
-        async Task<bool> IsLoggedInAsync()
-        {
-            var url = page.Url;
-            if (url.Contains("accounts.google.com") || url.Contains("signin"))
-            {
-                logger.LogInformation("IsLoggedIn: false (URL contains accounts/signin): {Url}", url);
-                return false;
-            }
-            // Check if the page has a sign-in link (ServiceLogin).
-            // Important: do NOT match on generic 'accounts.google.com'
-            // because the sign-OUT link also uses that domain.
-            var signInHref = await page.EvaluateAsync<string>(@"
-                    (() => {
-                        const links = document.querySelectorAll('a');
-                        for (const el of links) {
-                            const href = el.href || '';
-                            if (href.includes('ServiceLogin') || href.includes('/signin/identifier'))
-                                return href;
-                        }
-                        return '';
-                    })()");
-            var isLoggedIn = string.IsNullOrEmpty(signInHref);
-            logger.LogInformation("IsLoggedIn: {Result} (signInHref='{Href}')", isLoggedIn, signInHref.Length > 100 ? signInHref[..100] : signInHref);
-            return isLoggedIn;
-        }
     }
 
     private async Task<ScrapeResult> ScrapeInternalAsync(string trimmedUrl, Action<int>? onProgress, CancellationToken cancellationToken)
     {
         logger.LogInformation("Starting scrape of {Url}", trimmedUrl);
 
-        await PlaywrightBootstrap.EnsureBrowsersInstalledAsync(logger, cancellationToken);
-
-        // Serialise against the exporter / Fetch My Lists — all share the
-        // persistent profile dir. Scrapes are already single-flight via the
-        // Polly "scraper" pipeline, so waiting here only blocks cross-feature
-        // collisions. (Held across the headless fallback too; harmless.)
+        // Serialise against the exporter / Fetch My Lists — all drive the single
+        // shared browser. Scrapes are already single-flight via the Polly
+        // "scraper" pipeline, so waiting here only blocks cross-feature collisions.
         using var lease = await browserLock.AcquireAsync(cancellationToken);
 
-        using var playwright = await Playwright.CreateAsync();
-
-        // Use the persistent profile if available (needed for private/saved lists).
-        // Otherwise fall back to an anonymous headless browser.
-        IBrowser? browser = null;
-        IBrowserContext context;
-        if (HasBrowserProfile)
-        {
-            logger.LogInformation("Using persistent browser profile for authenticated scrape");
-            context = await playwright.Chromium.LaunchPersistentContextAsync(
-                BrowserProfilePath,
-                new BrowserTypeLaunchPersistentContextOptions
-                {
-                    Headless = false,
-                    Locale = "en-US",
-                    UserAgent = DefaultUserAgent,
-                    Args = ["--disable-blink-features=AutomationControlled"]
-                });
-        }
-        else
-        {
-            browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
-            {
-                Headless = true
-            });
-            context = await browser.NewContextAsync(new BrowserNewContextOptions
-            {
-                Locale = "en-US",
-                UserAgent = DefaultUserAgent
-            });
-        }
+        // Borrow a page from the shared session. Public shared-list scrapes don't
+        // require a Google login, but using the same session means private/saved
+        // lists work once signed in. Close the page (never the context).
+        var page = await session.NewPageAsync(cancellationToken);
 
         try
         {
-            var page = context.Pages.Count > 0 ? context.Pages[0] : await context.NewPageAsync();
-
             // Navigate to the list URL
             await page.GotoAsync(trimmedUrl, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30000 });
 
@@ -454,54 +293,8 @@ public class GoogleMapsListScraper(
 
             logger.LogInformation("Page URL after navigation: {Url}", page.Url);
 
-            // Accept cookies/consent if dialog appears
-            try
-            {
-                var consentSelectors = new[]
-                {
-                    "button[aria-label*='Accept']",
-                    "button[aria-label*='accept']",
-                    "button:has-text('Accept all')",
-                    "button:has-text('Agree')",
-                    "button:has-text('Принять')",
-                    "form[action*='consent'] button"
-                };
-                foreach (var sel in consentSelectors)
-                {
-                    var btn = page.Locator(sel).First;
-                    if (await btn.IsVisibleAsync())
-                    {
-                        logger.LogInformation("Clicking consent button: {Selector}", sel);
-                        // The consent button redirects back to the real maps URL;
-                        // WaitForNavigationAsync only works for real navigations, but
-                        // consent.google.com does a real one, so wait for the URL to
-                        // move off consent.google.com rather than sleeping blind.
-                        var clickTask = btn.ClickAsync();
-                        try
-                        {
-                            await page.WaitForURLAsync(
-                                u => !u.Contains("consent.google.com"),
-                                new() { Timeout = 15000 });
-                        }
-                        catch (TimeoutException)
-                        {
-                            logger.LogWarning("Consent redirect did not complete within 15s; continuing anyway");
-                        }
-                        await clickTask;
-                        // Then wait for the maps UI to finish laying out.
-                        try
-                        {
-                            await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new() { Timeout = 15000 });
-                        }
-                        catch (TimeoutException) { /* NetworkIdle rarely reached on maps */ }
-                        break;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogDebug(ex, "No cookie consent dialog found or failed to click it");
-            }
+            // Accept cookies/consent if dialog appears (shared helper).
+            await GoogleConsent.DismissAsync(page, logger);
 
             logger.LogInformation("Post-consent URL: {Url}", page.Url);
 
@@ -804,7 +597,7 @@ public class GoogleMapsListScraper(
                         imageUrl = baseUrl + "=w1024";
                         try
                         {
-                            var resp = await context.APIRequest.GetAsync(imageUrl);
+                            var resp = await page.Context.APIRequest.GetAsync(imageUrl);
                             if (resp.Status == 200)
                             {
                                 imageData = await resp.BodyAsync();
@@ -869,11 +662,8 @@ public class GoogleMapsListScraper(
         } // end try
         finally
         {
-            await context.CloseAsync();
-            if (browser != null)
-            {
-                await browser.CloseAsync();
-            }
+            // Close the borrowed page only; the shared context + profile persist.
+            try { await page.CloseAsync(); } catch (Exception ex) { logger.LogDebug(ex, "Error closing scrape page"); }
         }
     }
 

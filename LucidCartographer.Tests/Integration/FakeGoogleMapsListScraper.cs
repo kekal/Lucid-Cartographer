@@ -27,7 +27,7 @@ public class FakeGoogleMapsListScraper : IGoogleMapsListScraper
 
     public bool HasBrowserProfile => false;
 
-    public void ResetBrowserProfile() { }
+    public Task ResetBrowserProfileAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
     public Task<IReadOnlyList<SavedListInfo>> FetchSavedListsAsync(CancellationToken cancellationToken = default)
     {

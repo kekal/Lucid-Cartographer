@@ -400,11 +400,11 @@ public sealed class DataSourcesPageViewModel(
         SavedLists = null;
     }
 
-    public void HandleResetProfile()
+    public async Task HandleResetProfile()
     {
         try
         {
-            scraper.ResetBrowserProfile();
+            await scraper.ResetBrowserProfileAsync(_cts.Token);
             SavedLists = null;
             FetchListsError = null;
         }

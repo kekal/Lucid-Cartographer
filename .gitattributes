@@ -1,0 +1,4 @@
+# Shell scripts must keep LF endings — they run inside the Linux container, and a
+# CRLF shebang (#!/bin/sh\r) breaks the entrypoint. Force LF on checkout everywhere.
+*.sh text eol=lf
+docker-entrypoint.sh text eol=lf
