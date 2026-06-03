@@ -29,6 +29,9 @@ public class GoogleMapsListExporter(
 {
     // "Saved"/"Сохранено" (past tense) is what the button reads once the place is
     // already in ANY list; "Save"/"Сохранить" before. Match all four.
+    // List rows in the Save picker render as either role; match both.
+    private const string ListItemsSelector = "[role=menuitemradio], [role=menuitemcheckbox]";
+
     private static readonly string[] SaveLabels = ["Save", "Saved", "Сохранить", "Сохранено"];
     private static readonly string[] NewListLabels = ["New list", "Create list", "New", "Новый список", "Создать список"];
     private static readonly string[] ConfirmLabels = ["Create", "Save", "Done", "Создать", "Сохранить", "Готово"];
@@ -153,16 +156,24 @@ public class GoogleMapsListExporter(
         logger.LogInformation("Shared session is signed in. URL: {Url}", page.Url);
     }
 
-    /// <summary>Length of the shared leading run of two strings (ordinal).</summary>
-    private static int CommonPrefixLength(string a, string b)
+    /// <summary>
+    /// Longest prefix of <paramref name="listName"/> (down to <paramref name="threshold"/>)
+    /// that occurs as a substring of <paramref name="candidate"/>; -1 if none reaches
+    /// the threshold. Matching a prefix as a substring — rather than anchored at index 0 —
+    /// tolerates BOTH a truncated list name AND leading icon/ligature text that Google
+    /// prepends to a Save-menu row's accessible name (which otherwise made every place
+    /// create a fresh duplicate list).
+    /// </summary>
+    private static int MatchScore(string candidate, string listName, int threshold)
     {
-        var n = Math.Min(a.Length, b.Length);
-        var i = 0;
-        while (i < n && a[i] == b[i])
+        for (var len = listName.Length; len >= threshold; len--)
         {
-            i++;
+            if (candidate.Contains(listName[..len], StringComparison.Ordinal))
+            {
+                return len;
+            }
         }
-        return i;
+        return -1;
     }
 
     /// <summary>Force the Maps UI into English via the hl query param.</summary>
@@ -296,30 +307,36 @@ public class GoogleMapsListExporter(
         // or a fixed-length prefix (misses hard-truncated names). Instead choose
         // the radio whose longest-common-prefix with listName is largest and meets
         // a threshold — robust to truncation AND to unrelated similarly-named lists.
+        // List rows render as menuitemradio OR menuitemcheckbox depending on the
+        // Maps build/locale, so capture both (in DOM order).
         var radios = await page.EvaluateAsync<string[]>(@"
-            () => Array.from(document.querySelectorAll('[role=menuitemradio]')).map(e =>
+            () => Array.from(document.querySelectorAll('" + ListItemsSelector + @"')).map(e =>
                 (e.getAttribute('aria-checked') === 'true' ? '1' : '0') +
                 ((e.getAttribute('aria-label') || e.textContent || '').replace(/\s+/g, ' ').trim()))");
 
+        // Log what the Save menu actually offered — the single most useful signal
+        // when a place unexpectedly creates a new list instead of reusing one.
+        logger.LogInformation("Save-menu list candidates for '{List}' ({Count}): {Items}",
+            listName, radios.Length, string.Join(" | ", radios));
+
         var threshold = Math.Min(listName.Length, 16);
         var bestIndex = -1;
-        var bestLcp = -1;
+        var bestScore = -1;
         for (var i = 0; i < radios.Length; i++)
         {
             var name = radios[i].Length > 0 ? radios[i][1..] : string.Empty;
-            var lcp = CommonPrefixLength(name, listName);
-            if (lcp < threshold)
+            var score = MatchScore(name, listName, threshold);
+            if (score < 0)
             {
                 continue;
             }
-            // Prefer the longest common prefix; tie-break to the shorter name
-            // (closest to "listName + suffix", i.e. not a longer list that merely
-            // shares the prefix).
-            if (bestIndex < 0 || lcp > bestLcp ||
-                (lcp == bestLcp && name.Length < radios[bestIndex][1..].Length))
+            // Prefer the longest matched prefix; tie-break to the shorter candidate
+            // (closest to "listName + suffix", not a longer list that shares a prefix).
+            if (bestIndex < 0 || score > bestScore ||
+                (score == bestScore && name.Length < radios[bestIndex][1..].Length))
             {
                 bestIndex = i;
-                bestLcp = lcp;
+                bestScore = score;
             }
         }
 
@@ -332,14 +349,25 @@ public class GoogleMapsListExporter(
                 return new ExportPlaceResult(placeUrl, placeName, ExportOutcome.AlreadySaved, "Already in the list.");
             }
 
-            // Click by DOM-order index — avoids accessible-name normalization
-            // mismatches between our captured string and Playwright's Name match.
-            await page.GetByRole(AriaRole.Menuitemradio).Nth(bestIndex)
-                .ClickAsync(new LocatorClickOptions { Timeout = 8000 });
+            // Click the matched row by its DOM index over the SAME selector used to
+            // capture it, so the index aligns whether the rows are radios or
+            // checkboxes (Playwright role-Nth would mismatch a mixed set).
+            var clicked = await page.EvaluateAsync<bool>(
+                @"(idx) => { const els = document.querySelectorAll('" + ListItemsSelector + @"');
+                    const el = els[idx]; if (!el) return false; el.click(); return true; }",
+                bestIndex);
+            if (!clicked)
+            {
+                await DumpMenuAsync(page, "matched list row vanished before click");
+                return new ExportPlaceResult(placeUrl, placeName, ExportOutcome.Failed, "Matched list row could not be clicked.");
+            }
             await page.WaitForTimeoutAsync(800);
             await page.Keyboard.PressAsync("Escape");
             return new ExportPlaceResult(placeUrl, placeName, ExportOutcome.Added, "Added to the list.");
         }
+
+        logger.LogInformation(
+            "No existing list matched '{List}' (threshold {Threshold}); creating it.", listName, threshold);
 
         // List absent → create it. (Normally only the first place overall hits this.)
         var newListClicked =
