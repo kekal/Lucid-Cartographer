@@ -61,18 +61,21 @@
         }
     </div>
 
-    @* Remote view (server only) *@
+    @* Remote view (server only), shown once the user opens the Google sign-in. *@
     @if (Vm.RemoteViewEnabled)
     {
-        <div class="bg-surface-container-low rounded-xl p-2">
-            <p class="text-sm text-on-surface-variant px-3 py-2">
-                Live browser view — click "Open Google sign-in" above, then complete the login here.
-            </p>
-            <iframe src="@Vm.NoVncUrl"
-                    title="Remote browser view"
-                    class="w-full rounded-lg border-0"
-                    style="height: 70vh; min-height: 480px;"></iframe>
-        </div>
+        @if (Vm.ShowRemoteView)
+        {
+            <div class="bg-surface-container-low rounded-xl p-2">
+                <p class="text-sm text-on-surface-variant px-3 py-2">
+                    Live browser view — complete the Google login here, then click "Refresh status".
+                </p>
+                <iframe src="@Vm.NoVncUrl"
+                        title="Remote browser view"
+                        class="w-full block rounded-lg border-0"
+                        style="height: 70vh; min-height: 480px;"></iframe>
+            </div>
+        }
     }
     else
     {

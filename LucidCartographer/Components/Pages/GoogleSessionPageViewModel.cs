@@ -25,10 +25,20 @@ public sealed class GoogleSessionPageViewModel(
     /// <summary>True when the embedded noVNC remote view is available (Docker/Linux).</summary>
     public bool RemoteViewEnabled => options.Value.RemoteView.Enabled;
 
-    /// <summary>Same-origin noVNC client URL (proxied + behind cookie auth).</summary>
+    /// <summary>
+    /// Same-origin noVNC client URL (proxied + behind cookie auth). resize=scale
+    /// scales the fixed remote framebuffer to fit the iframe (x11vnc can't resize
+    /// the Xvfb display, so resize=remote would overflow with scrollbars).
+    /// </summary>
     public string NoVncUrl =>
         "/google-session/novnc/vnc_lite.html" +
-        "?path=google-session/novnc/websockify&autoconnect=1&resize=remote&reconnect=1";
+        "?path=google-session/novnc/websockify&autoconnect=1&resize=scale&reconnect=1";
+
+    /// <summary>
+    /// Whether to render the embedded remote view. Hidden until the user clicks
+    /// "Open Google sign-in" so the VNC connection isn't opened until needed.
+    /// </summary>
+    public bool ShowRemoteView { get; private set; }
 
     public bool IsBusy { get; private set; }
 
@@ -64,6 +74,7 @@ public sealed class GoogleSessionPageViewModel(
     public async Task OpenSignInAsync()
     {
         IsBusy = true;
+        ShowRemoteView = true; // reveal the live view so the user can complete the login
         StatusMessage = "Opening the Google sign-in page…";
         Notify();
         try
