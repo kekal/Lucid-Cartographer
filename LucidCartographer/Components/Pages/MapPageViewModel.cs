@@ -61,6 +61,7 @@ public sealed class MapPageViewModel(
     public string? PreviousSearchQuery { get; private set; }
     public MapBounds? CurrentBounds { get; private set; }
     public int TableHeight { get; private set; } = 256;
+    public int SidebarWidth { get; private set; } = 240;
     public bool PendingSearchMapUpdate { get; private set; }
 
     /// <summary>When true, every map marker shows a permanent POI-name label.</summary>
@@ -265,6 +266,14 @@ public sealed class MapPageViewModel(
     public Task OnSplitterResizedJs(int height)
     {
         TableHeight = height;
+        Notify();
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public Task OnSidebarResizedJs(int width)
+    {
+        SidebarWidth = width;
         Notify();
         return Task.CompletedTask;
     }

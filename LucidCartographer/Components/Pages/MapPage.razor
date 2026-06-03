@@ -222,11 +222,17 @@ else
 {
     @* ===================== DESKTOP (unchanged) ===================== *@
     <div class="flex h-full">
-        @* Left Sidebar — Collections *@
-        <div class="w-60 flex-shrink-0 bg-surface-container-low flex flex-col">
+        @* Left Sidebar — Collections (width drag-resizable via _sidebarHandle) *@
+        <div @ref="_sidebarContainer"
+             style="width: @(Vm.SidebarWidth)px;"
+             class="flex-shrink-0 bg-surface-container-low flex flex-col min-w-0">
             <CollectionSidebar Collections="Vm.CollectionStates"
                               OnVisibilityToggled="Vm.HandleVisibilityToggledAsync" />
         </div>
+
+        @* Drag handle — resize the collections sidebar *@
+        <div @ref="_sidebarHandle"
+             class="flex-shrink-0 w-1.5 bg-surface-container-high hover:bg-primary/30 cursor-col-resize select-none transition-colors"></div>
 
         @* Center + Bottom *@
         <div class="flex-1 flex flex-col min-w-0">
@@ -334,6 +340,8 @@ else
     private LeafletMap? _wiredMap;
     private ElementReference _splitterHandle;
     private ElementReference _tableContainer;
+    private ElementReference _sidebarHandle;
+    private ElementReference _sidebarContainer;
     private DotNetObjectReference<MapPageViewModel>? _selfRef;
     private bool _splitterInited;
 
@@ -401,6 +409,7 @@ else
             {
                 _selfRef ??= DotNetObjectReference.Create(Vm);
                 await Js.InvokeVoidAsync("leafletInterop.initSplitter", _splitterHandle, _tableContainer, _selfRef);
+                await Js.InvokeVoidAsync("leafletInterop.initHSplitter", _sidebarHandle, _sidebarContainer, _selfRef);
                 _splitterInited = true;
             }
 

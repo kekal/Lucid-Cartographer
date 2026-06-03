@@ -557,6 +557,35 @@
         });
     };
 
+    // Horizontal twin of initSplitter: drag the handle to resize the left
+    // collections sidebar. Clamps to [160px, 50% of the viewport] and pushes
+    // the committed width back to the VM on pointer-up so it survives re-renders.
+    window.leafletInterop.initHSplitter = function (handleEl, sidebarEl, dotnetRef) {
+        if (!handleEl || !sidebarEl) return;
+        var startX, startW;
+        function onPointerMove(e) {
+            var delta = e.clientX - startX;
+            var newW = Math.max(160, Math.min(window.innerWidth * 0.5, startW + delta));
+            sidebarEl.style.width = newW + 'px';
+            if (state.map) state.map.invalidateSize();
+        }
+        function onPointerUp(e) {
+            document.removeEventListener('pointermove', onPointerMove);
+            document.removeEventListener('pointerup', onPointerUp);
+            handleEl.releasePointerCapture(e.pointerId);
+            var w = parseInt(sidebarEl.style.width, 10) || 240;
+            if (dotnetRef) dotnetRef.invokeMethodAsync('OnSidebarResizedJs', w);
+        }
+        handleEl.addEventListener('pointerdown', function (e) {
+            e.preventDefault();
+            startX = e.clientX;
+            startW = sidebarEl.offsetWidth;
+            handleEl.setPointerCapture(e.pointerId);
+            document.addEventListener('pointermove', onPointerMove);
+            document.addEventListener('pointerup', onPointerUp);
+        });
+    };
+
     // MED-08: downloadFile moved from inline script in App.razor to this module.
     // Callable via JS interop as window.LucidCartographer.downloadFile.
     window.LucidCartographer = window.LucidCartographer || {};
