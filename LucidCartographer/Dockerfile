@@ -24,7 +24,10 @@ WORKDIR /app
 # through the app's authenticated same-origin proxy. Installed as root before USER.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         xvfb x11vnc novnc websockify \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    # Xvfb runs as the non-root appuser and needs the X11 socket dir to exist
+    # with sticky/world-writable perms (it cannot create it itself when euid != 0).
+    && mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 
 # MED-02: Run as a non-root user. UID/GID are build args so the container user
 # matches the owner of the bind-mounted /data volume on the host (e.g. a NAS

@@ -71,6 +71,17 @@ public class GoogleSessionPageViewModelTests
     }
 
     [Fact]
+    public async Task DisposeAsync_IsIdempotent_NoObjectDisposedException()
+    {
+        // The Razor component disposes the VM AND the DI scope disposes the
+        // transient VM, so DisposeAsync runs twice — it must not throw.
+        var vm = CreateVm();
+        await vm.DisposeAsync();
+        var second = async () => await vm.DisposeAsync();
+        await second.Should().NotThrowAsync();
+    }
+
+    [Fact]
     public async Task ResetProfile_ClearsSignedIn_AndCallsSession()
     {
         var vm = CreateVm();

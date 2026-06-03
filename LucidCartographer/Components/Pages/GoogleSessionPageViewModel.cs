@@ -16,6 +16,7 @@ public sealed class GoogleSessionPageViewModel(
     : IAsyncDisposable
 {
     private readonly CancellationTokenSource _cts = new();
+    private bool _disposed;
 
     public event Action? StateChanged;
 
@@ -107,7 +108,15 @@ public sealed class GoogleSessionPageViewModel(
 
     public ValueTask DisposeAsync()
     {
-        _cts.Cancel();
+        // The Razor component calls this AND the DI scope disposes the transient
+        // VM, so DisposeAsync runs twice — guard the CTS against double-dispose.
+        if (_disposed)
+        {
+            return ValueTask.CompletedTask;
+        }
+        _disposed = true;
+        try { _cts.Cancel(); }
+        catch (ObjectDisposedException) { /* already disposed */ }
         _cts.Dispose();
         return ValueTask.CompletedTask;
     }

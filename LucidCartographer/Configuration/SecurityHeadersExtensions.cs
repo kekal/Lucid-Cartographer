@@ -12,6 +12,20 @@ public static class SecurityHeadersExtensions
     {
         app.Use(async (context, next) =>
         {
+            // The embedded noVNC remote view (Google session page) is trusted,
+            // localhost-proxied content framed same-origin by /google-session.
+            // The app's strict CSP + X-Frame-Options: DENY + frame-ancestors 'none'
+            // would block the iframe from rendering AND break noVNC's own inline
+            // scripts/websocket, so scope those off this subtree and allow only
+            // same-origin framing instead.
+            var path = context.Request.Path.Value ?? "";
+            if (path.StartsWith("/google-session/novnc", StringComparison.Ordinal))
+            {
+                context.Response.Headers.Append("X-Frame-Options", "SAMEORIGIN");
+                await next();
+                return;
+            }
+
             context.Response.Headers.Append("Content-Security-Policy",
                 "default-src 'self'; " +
                 "script-src 'self' 'unsafe-inline'; " +
