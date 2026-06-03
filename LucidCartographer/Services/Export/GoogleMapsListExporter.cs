@@ -87,6 +87,10 @@ public class GoogleMapsListExporter(
         IPage page, string listName, IReadOnlyList<string> placeUrls, Action<ExportProgress>? onProgress, CancellationToken ct)
     {
         var results = new List<ExportPlaceResult>(placeUrls.Count);
+        // Once the target list exists this run (created or matched), never create it
+        // again — a later place whose Save menu hasn't caught up yet retries rather
+        // than spawning a duplicate (Google propagates a new list with some lag).
+        var listEnsured = false;
         for (var i = 0; i < placeUrls.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
@@ -94,7 +98,7 @@ public class GoogleMapsListExporter(
             ExportPlaceResult result;
             try
             {
-                result = await ExportOnePlaceAsync(page, listName, url, ct);
+                result = await ExportOnePlaceAsync(page, listName, url, listEnsured, ct);
             }
             catch (OperationCanceledException)
             {
@@ -107,6 +111,10 @@ public class GoogleMapsListExporter(
             }
 
             logger.LogInformation("  {Outcome}: {Url} ({Note})", result.Outcome, url, result.Note ?? "");
+            if (result.Outcome is ExportOutcome.Created or ExportOutcome.Added or ExportOutcome.AlreadySaved)
+            {
+                listEnsured = true;
+            }
             results.Add(result);
             // Progress counts derive from the partial results — no parallel tally to drift.
             onProgress?.Invoke(new ExportProgress(
@@ -213,7 +221,7 @@ public class GoogleMapsListExporter(
     }
 
     private async Task<ExportPlaceResult> ExportOnePlaceAsync(
-        IPage page, string listName, string placeUrl, CancellationToken ct)
+        IPage page, string listName, string placeUrl, bool listEnsured, CancellationToken ct)
     {
         // hl=en forces the Maps UI into English when the account language allows;
         // localized label fallbacks cover when it doesn't. Navigate with retry:
@@ -288,7 +296,7 @@ public class GoogleMapsListExporter(
             return new ExportPlaceResult(placeUrl, placeName, ExportOutcome.Failed, "Save menu did not open.");
         }
 
-        return await ResolveAndSaveAsync(page, listName, placeUrl, placeName);
+        return await ResolveAndSaveAsync(page, listName, placeUrl, placeName, listEnsured);
     }
 
     /// <summary>
@@ -298,46 +306,72 @@ public class GoogleMapsListExporter(
     /// prevents duplicate same-named lists (spike finding).
     /// </summary>
     private async Task<ExportPlaceResult> ResolveAndSaveAsync(
-        IPage page, string listName, string placeUrl, string? placeName)
+        IPage page, string listName, string placeUrl, string? placeName, bool listEnsured)
     {
-        // Read every list radio's accessible name + checked state in ONE pass.
-        // Each name is the (often TRUNCATED) list name glued to a "{visibility} ·
-        // N place(s)" suffix. We must not match exact (truncation breaks it),
-        // substring-anywhere (picks unrelated lists that merely contain the name),
-        // or a fixed-length prefix (misses hard-truncated names). Instead choose
-        // the radio whose longest-common-prefix with listName is largest and meets
-        // a threshold — robust to truncation AND to unrelated similarly-named lists.
-        // List rows render as menuitemradio OR menuitemcheckbox depending on the
-        // Maps build/locale, so capture both (in DOM order).
-        var radios = await page.EvaluateAsync<string[]>(@"
-            () => Array.from(document.querySelectorAll('" + ListItemsSelector + @"')).map(e =>
-                (e.getAttribute('aria-checked') === 'true' ? '1' : '0') +
-                ((e.getAttribute('aria-label') || e.textContent || '').replace(/\s+/g, ' ').trim()))");
-
-        // Log what the Save menu actually offered — the single most useful signal
-        // when a place unexpectedly creates a new list instead of reusing one.
-        logger.LogInformation("Save-menu list candidates for '{List}' ({Count}): {Items}",
-            listName, radios.Length, string.Join(" | ", radios));
-
         var threshold = Math.Min(listName.Length, 16);
-        var bestIndex = -1;
-        var bestScore = -1;
-        for (var i = 0; i < radios.Length; i++)
+
+        // Read every list row's accessible name + checked state in ONE pass, then
+        // pick the row whose longest listName-prefix appears as a substring (see
+        // MatchScore) — robust to truncation AND to leading icon text. Rows render
+        // as menuitemradio OR menuitemcheckbox depending on the Maps build, so
+        // capture both (in DOM order, matching ListItemsSelector for click-by-index).
+        async Task<(int Index, string[] Rows)> ReadAndMatchAsync()
         {
-            var name = radios[i].Length > 0 ? radios[i][1..] : string.Empty;
-            var score = MatchScore(name, listName, threshold);
-            if (score < 0)
+            var rows = await page.EvaluateAsync<string[]>(@"
+                () => Array.from(document.querySelectorAll('" + ListItemsSelector + @"')).map(e =>
+                    (e.getAttribute('aria-checked') === 'true' ? '1' : '0') +
+                    ((e.getAttribute('aria-label') || e.textContent || '').replace(/\s+/g, ' ').trim()))");
+
+            // Log what the Save menu actually offered — the single most useful signal
+            // when a place unexpectedly creates a new list instead of reusing one.
+            logger.LogInformation("Save-menu list candidates for '{List}' ({Count}): {Items}",
+                listName, rows.Length, string.Join(" | ", rows));
+
+            var best = -1;
+            var bestScore = -1;
+            for (var i = 0; i < rows.Length; i++)
             {
-                continue;
+                var name = rows[i].Length > 0 ? rows[i][1..] : string.Empty;
+                var score = MatchScore(name, listName, threshold);
+                if (score < 0)
+                {
+                    continue;
+                }
+                // Prefer the longest matched prefix; tie-break to the shorter candidate
+                // (closest to "listName + suffix", not a longer list sharing a prefix).
+                if (best < 0 || score > bestScore ||
+                    (score == bestScore && name.Length < rows[best][1..].Length))
+                {
+                    best = i;
+                    bestScore = score;
+                }
             }
-            // Prefer the longest matched prefix; tie-break to the shorter candidate
-            // (closest to "listName + suffix", not a longer list that shares a prefix).
-            if (bestIndex < 0 || score > bestScore ||
-                (score == bestScore && name.Length < radios[bestIndex][1..].Length))
+            return (best, rows);
+        }
+
+        var (bestIndex, radios) = await ReadAndMatchAsync();
+
+        // We already created/matched the target list earlier this run, but it's not
+        // in THIS place's menu yet (Google propagates a new list with a few seconds'
+        // lag). Re-open the Save menu a few times rather than creating a duplicate.
+        for (var retry = 0; bestIndex < 0 && listEnsured && retry < 3; retry++)
+        {
+            logger.LogInformation(
+                "List '{List}' expected but not in the menu yet; reopening (retry {N}/3)", listName, retry + 1);
+            await page.Keyboard.PressAsync("Escape");
+            await page.WaitForTimeoutAsync(2000);
+            var reopened = await TryClickNamedAsync(
+                n => page.GetByRole(AriaRole.Button, new() { Name = n, Exact = true }), SaveLabels, 8000);
+            if (!reopened)
             {
-                bestIndex = i;
-                bestScore = score;
+                break;
             }
+            try
+            {
+                await page.GetByRole(AriaRole.Menuitemradio).First.WaitForAsync(new() { Timeout = 8000 });
+            }
+            catch (TimeoutException) { /* fall through to re-read */ }
+            (bestIndex, radios) = await ReadAndMatchAsync();
         }
 
         if (bestIndex >= 0)
@@ -364,6 +398,16 @@ public class GoogleMapsListExporter(
             await page.WaitForTimeoutAsync(800);
             await page.Keyboard.PressAsync("Escape");
             return new ExportPlaceResult(placeUrl, placeName, ExportOutcome.Added, "Added to the list.");
+        }
+
+        // The list exists this run but never surfaced in this place's menu even after
+        // retries — skip rather than create a duplicate. (Rare; logged for follow-up.)
+        if (listEnsured)
+        {
+            await DumpMenuAsync(page, $"list '{listName}' expected but absent after retries; skipping to avoid a duplicate");
+            await page.Keyboard.PressAsync("Escape");
+            return new ExportPlaceResult(placeUrl, placeName, ExportOutcome.Failed,
+                "List wasn't visible yet; skipped to avoid creating a duplicate.");
         }
 
         logger.LogInformation(
