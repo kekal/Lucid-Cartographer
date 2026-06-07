@@ -18,6 +18,9 @@ public sealed class FakeBrowserSession : IBrowserSession
     public Task<IPage> NewPageAsync(CancellationToken ct = default)
         => throw new NotSupportedException("FakeBrowserSession does not launch a real browser.");
 
+    public Task<IPage> NewMobilePageAsync(CancellationToken ct = default)
+        => throw new NotSupportedException("FakeBrowserSession does not launch a real browser.");
+
     public Task<GoogleSessionStatus> GetStatusAsync(CancellationToken ct = default)
         => Task.FromResult(new GoogleSessionStatus(SignedIn: false, Busy: false, "Not signed in (test)."));
 

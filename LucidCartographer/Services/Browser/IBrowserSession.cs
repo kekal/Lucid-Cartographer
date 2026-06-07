@@ -34,6 +34,15 @@ public interface IBrowserSession
     Task<IPage> NewPageAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Open a fresh page on the shared (signed-in) context with per-page mobile
+    /// emulation applied via CDP (iPhone UA + metrics + touch). The mobile web
+    /// Maps UI is far simpler/more stable to scrape than desktop. The context's
+    /// default (desktop) is untouched, so export keeps using <see cref="NewPageAsync"/>.
+    /// The caller owns the page and must close it.
+    /// </summary>
+    Task<IPage> NewMobilePageAsync(CancellationToken ct = default);
+
+    /// <summary>
     /// Read the current Google sign-in state without disturbing a running job
     /// (returns <see cref="GoogleSessionStatus.Busy"/> if one holds the session).
     /// </summary>

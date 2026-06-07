@@ -266,4 +266,38 @@ public static class GoogleMapsScraperScripts
 
                 return results;
             })()";
+
+    // ===================== MOBILE WEB scripts =====================
+    // The mobile web Maps UI is far simpler and more stable than desktop (no
+    // obfuscated/rotating classes). These run on a CDP-mobile-emulated page.
+
+    /// <summary>
+    /// Mobile "Your places → Saved" tab: each list row is a <c>&lt;button&gt;</c>
+    /// whose leaf text is <c>[name, visibility(, count)]</c> (visibility =
+    /// Private/Личный or Shared/В совместном доступе). Identifies rows by the
+    /// presence of a visibility leaf (topology, not classes), tags each with
+    /// <c>data-savedlist-idx</c>, and returns <c>[{ idx, name, count }]</c>.
+    /// </summary>
+    public const string DiscoverSavedListsMobile = @"
+            (() => {
+                const visRx = /^(Личный|Private|В совместном доступе|Shared|Общедоступный|Public)\b/i;
+                const countRx = /(\d[\d\s.,]*)\s*(мест|places|place)/i;
+                const results = [];
+                let idx = 0;
+                for (const btn of document.querySelectorAll('button')) {
+                    const leaves = Array.from(btn.querySelectorAll('*'))
+                        .filter(e => e.children.length === 0 && e.textContent.trim())
+                        .map(e => e.textContent.trim());
+                    if (!leaves.some(t => visRx.test(t))) continue; // not a list row
+                    const name = leaves.find(t => !visRx.test(t) && t.length > 1 && !/^[\d.,()\s·]+$/.test(t));
+                    if (!name) continue;
+                    let count = null;
+                    const cm = leaves.join(' ').match(countRx);
+                    if (cm) count = parseInt(cm[1].replace(/\D/g, ''), 10);
+                    btn.setAttribute('data-savedlist-idx', String(idx));
+                    results.push({ idx, name, count });
+                    idx++;
+                }
+                return results;
+            })()";
 }

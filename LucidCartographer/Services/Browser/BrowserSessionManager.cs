@@ -79,6 +79,45 @@ public sealed class BrowserSessionManager : IBrowserSession, IAsyncDisposable
         return await context.NewPageAsync();
     }
 
+    // A real mobile Chrome UA — the shared context is Chromium, so an Android
+    // Chrome UA is the most consistent way to get Google's (much simpler) mobile
+    // web Maps. Paired with CDP device-metrics + touch emulation per page.
+    private const string MobileUserAgent =
+        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
+
+    public async Task<IPage> NewMobilePageAsync(CancellationToken ct = default)
+    {
+        var context = await EnsureContextAsync(ct);
+        var page = await context.NewPageAsync();
+        try
+        {
+            // Per-page emulation via CDP — leaves the context's desktop default
+            // intact (so export keeps working) while this one page renders mobile.
+            var cdp = await context.NewCDPSessionAsync(page);
+            await cdp.SendAsync("Emulation.setUserAgentOverride", new Dictionary<string, object>
+            {
+                ["userAgent"] = MobileUserAgent
+            });
+            await cdp.SendAsync("Emulation.setDeviceMetricsOverride", new Dictionary<string, object>
+            {
+                ["width"] = 390,
+                ["height"] = 844,
+                ["deviceScaleFactor"] = 3,
+                ["mobile"] = true
+            });
+            await cdp.SendAsync("Emulation.setTouchEmulationEnabled", new Dictionary<string, object>
+            {
+                ["enabled"] = true,
+                ["maxTouchPoints"] = 5
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to apply mobile emulation; continuing with desktop page");
+        }
+        return page;
+    }
+
     public async Task<GoogleSessionStatus> GetStatusAsync(CancellationToken ct = default)
     {
         using var lease = await _browserLock.TryAcquireAsync(ct);
@@ -207,6 +246,7 @@ public sealed class BrowserSessionManager : IBrowserSession, IAsyncDisposable
                     ]
                 });
 
+            logger_ContextReady();
             return _context;
         }
         finally
@@ -214,6 +254,9 @@ public sealed class BrowserSessionManager : IBrowserSession, IAsyncDisposable
             _initGate.Release();
         }
     }
+
+    private void logger_ContextReady() =>
+        _logger.LogInformation("Shared Chromium context ready (pages restored: {Count})", _context?.Pages.Count ?? 0);
 
     /// <summary>
     /// Remove the Chromium profile singleton locks left behind when a previous
@@ -238,6 +281,30 @@ public sealed class BrowserSessionManager : IBrowserSession, IAsyncDisposable
             {
                 _logger.LogDebug(ex, "Could not remove profile lock {Lock}", name);
             }
+        }
+
+        // Also clear the previous session's tab-restore state. After a hard exit
+        // (container stop / killed process) Chromium tries to RESTORE the prior
+        // tabs on launch; if one was a stuck page (e.g. a mobile "open in app"
+        // interstitial) it can block LaunchPersistentContextAsync indefinitely.
+        // Cookies/login live elsewhere, so dropping these is safe and keeps sign-in.
+        var def = Path.Combine(ProfilePath, "Default");
+        foreach (var name in new[] { "Current Session", "Current Tabs", "Last Session", "Last Tabs" })
+        {
+            try { File.Delete(Path.Combine(def, name)); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Could not remove session file {File}", name); }
+        }
+        try
+        {
+            var sessions = Path.Combine(def, "Sessions");
+            if (Directory.Exists(sessions))
+            {
+                Directory.Delete(sessions, recursive: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not remove Sessions dir");
         }
     }
 

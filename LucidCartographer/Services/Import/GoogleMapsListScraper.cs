@@ -105,7 +105,9 @@ public class GoogleMapsListScraper(
             ?? throw new InvalidOperationException(
                 "A Google browser operation is already running. Please wait for it to finish, then try again.");
 
-        var page = await session.NewPageAsync(cancellationToken);
+        // Mobile web Maps: simpler, stable DOM (clean list rows) — far better to
+        // scrape than the obfuscated/rotating desktop panel.
+        var page = await session.NewMobilePageAsync(cancellationToken);
         try
         {
             return await FetchSavedListsOnPageAsync(page, cancellationToken);
@@ -116,22 +118,90 @@ public class GoogleMapsListScraper(
         }
     }
 
+    /// <summary>
+    /// Click the first <c>button</c>/<c>a</c> whose accessible name (aria-label or
+    /// trimmed text) equals one of <paramref name="labels"/> (case-insensitive),
+    /// via a JS click to avoid mobile pointer-interception. Returns false if none.
+    /// </summary>
+    private static async Task<bool> ClickByLabelAsync(IPage page, params string[] labels)
+    {
+        // Pass the array as the single evaluate arg (Playwright serialises it to a
+        // JS array). Passing a JSON *string* makes `labels.map` throw in-page.
+        return await page.EvaluateAsync<bool>(@"
+            (labels) => {
+                const want = labels.map(s => s.toLowerCase());
+                for (const el of document.querySelectorAll('button, a, [role=tab], [role=button]')) {
+                    const t = ((el.getAttribute('aria-label') || el.textContent || '').trim()).toLowerCase();
+                    if (t && want.includes(t)) { el.click(); return true; }
+                }
+                return false;
+            }", labels);
+    }
+
+    /// <summary>Log the current page URL + its top buttons/headings — so an
+    /// unexpected page (e.g. a mobile "open in app" wall) is visible in the logs.</summary>
+    private async Task DumpPageAsync(IPage page, string reason)
+    {
+        try
+        {
+            var dump = await page.EvaluateAsync<string>(@"
+                () => {
+                    const txt = els => Array.from(els).map(e => (e.getAttribute('aria-label') || e.textContent || '').replace(/\s+/g,' ').trim()).filter(Boolean).slice(0, 25).join(' | ');
+                    return 'BUTTONS: ' + txt(document.querySelectorAll('button, a, [role=tab]')) +
+                           ' || HEADINGS: ' + txt(document.querySelectorAll('h1, h2, h3'));
+                }");
+            logger.LogInformation("PAGE DUMP ({Reason}) url={Url} :: {Dump}", reason, page.Url, dump);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Page dump failed ({Reason})", reason);
+        }
+    }
+
+    /// <summary>Dismiss the mobile-web "open/continue in app" interstitial or banner
+    /// so it doesn't intercept taps. Best-effort across EN/RU label variants.</summary>
+    private async Task DismissAppInterstitialAsync(IPage page)
+    {
+        var dismissed = await ClickByLabelAsync(page,
+            "Stay in browser", "Continue in browser", "Use Google Maps in your browser",
+            "Not now", "No thanks", "Dismiss", "Close",
+            "Остаться в браузере", "Продолжить в браузере", "Не сейчас", "Нет, спасибо", "Закрыть");
+        if (dismissed)
+        {
+            logger.LogInformation("Dismissed an 'open in app' interstitial/banner");
+            await page.WaitForTimeoutAsync(600);
+        }
+    }
+
+    /// <summary>
+    /// Deterministically open the mobile "Your places → Saved" panel: navigate to
+    /// maps (hl=en), dismiss consent/app-interstitial, then hamburger Menu → Your
+    /// places → Saved. Used both initially and to RE-open between per-list clicks
+    /// (GoBack / URL-restore don't reliably return to the saved-list rows).
+    /// </summary>
+    private async Task OpenSavedTabAsync(IPage page)
+    {
+        await page.GotoAsync("https://www.google.com/maps?hl=en",
+            new PageGotoOptions { WaitUntil = WaitUntilState.Commit, Timeout = 30000 });
+        await page.WaitForTimeoutAsync(3500);
+        try { await GoogleConsent.DismissAsync(page, logger); } catch (Exception ex) { logger.LogDebug(ex, "consent"); }
+        try { await DismissAppInterstitialAsync(page); } catch (Exception ex) { logger.LogDebug(ex, "interstitial"); }
+
+        if (await ClickByLabelAsync(page, "Menu", "Меню"))
+        {
+            await page.WaitForTimeoutAsync(700);
+        }
+        await ClickByLabelAsync(page, "Your places", "Saved places", "Мои места");
+        await page.WaitForTimeoutAsync(1200);
+        await ClickByLabelAsync(page, "Saved", "Сохраненные", "Сохранённые");
+        await page.WaitForTimeoutAsync(2000);
+    }
+
     private async Task<IReadOnlyList<SavedListInfo>> FetchSavedListsOnPageAsync(IPage page, CancellationToken cancellationToken)
     {
-        // Navigate to Google Maps, then open the saved lists via the
-        // hamburger menu → "Your places" → "Lists" tab. There is no
-        // standalone /maps/lists URL; saved lists live inside the SPA.
-        await page.GotoAsync("https://www.google.com/maps",
-            new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30000 });
-        await page.WaitForTimeoutAsync(5000); // Let the SPA render
+        await OpenSavedTabAsync(page);
+        await DumpPageAsync(page, "after Saved-tab nav");
 
-        logger.LogInformation("Post-navigation URL: {Url}", page.Url);
-
-        await GoogleConsent.DismissAsync(page, logger);
-
-        // Login is no longer performed inline — the user signs in once on the
-        // Google session page (which drives this same shared browser). Fail fast
-        // with a clear message if the session isn't authenticated.
         if (!await GoogleSignIn.IsSignedInAsync(page, logger))
         {
             throw new InvalidOperationException(
@@ -139,60 +209,9 @@ public class GoogleMapsListScraper(
                 "sign in, then try Fetch My Lists again.");
         }
 
-        await page.WaitForTimeoutAsync(2000);
-
-        // Click "Saved" button — it's the 2nd item in the sidebar ul
-        // XPath: /html/body/div[1]/div[2]/div[9]/div[8]/div/div/div/div[1]/ul/li[2]/button
-        try
-        {
-            var savedBtn = page.Locator("ul > li:nth-child(2) > button").First;
-            await savedBtn.ClickAsync(new LocatorClickOptions { Timeout = 5000 });
-            logger.LogInformation("Clicked 'Saved' button in sidebar");
-            await page.WaitForTimeoutAsync(3000);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to click 'Saved' button");
-        }
-
-        logger.LogInformation("After Saved click, URL: {Url}", page.Url);
-
-        // Clicking "Saved" may redirect to sign-in if session expired.
-        // If so, wait for the user to log in, then navigate back to Maps.
-        if (page.Url.Contains("accounts.google.com") || page.Url.Contains("signin"))
-        {
-            logger.LogInformation("Redirected to sign-in after clicking Saved — waiting for login...");
-            var loginDeadline2 = DateTime.UtcNow.AddMinutes(5);
-            while (page.Url.Contains("accounts.google.com") || page.Url.Contains("signin"))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (DateTime.UtcNow > loginDeadline2)
-                {
-                    throw new TimeoutException("Sign-in was not completed within 5 minutes.");
-                }
-
-                await page.WaitForTimeoutAsync(2000);
-            }
-            logger.LogInformation("Login completed, URL: {Url}", page.Url);
-
-            // After login we land back on Maps — re-click "Saved"
-            await page.WaitForTimeoutAsync(3000);
-            try
-            {
-                var savedBtn2 = page.Locator("ul > li:nth-child(2) > button").First;
-                await savedBtn2.ClickAsync(new LocatorClickOptions { Timeout = 5000 });
-                logger.LogInformation("Re-clicked 'Saved' button after login");
-                await page.WaitForTimeoutAsync(3000);
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Failed to re-click 'Saved' button after login");
-            }
-        }
-
-        // Extract saved lists using JS (button.CsEnBe cards)
+        // Extract saved-list rows from the mobile Saved tab (topology, not classes).
         var listsJson = await page.EvaluateAsync<System.Text.Json.JsonElement>(
-            GoogleMapsScraperScripts.DiscoverSavedLists);
+            GoogleMapsScraperScripts.DiscoverSavedListsMobile);
 
         // Parse discovered cards (name + count, no URLs yet)
         var discovered = new List<(int Idx, string Name, int? Count)>();
@@ -250,12 +269,10 @@ public class GoogleMapsListScraper(
                     logger.LogWarning("Card '{Name}' click did not navigate, skipping", cardName);
                 }
 
-                // Go back to the saved lists panel
-                await page.GoBackAsync(new PageGoBackOptions { Timeout = 10000 });
-                await page.WaitForTimeoutAsync(2500);
-
-                // Re-tag cards (DOM may have been rebuilt after navigation)
-                await page.EvaluateAsync(GoogleMapsScraperScripts.DiscoverSavedLists);
+                // Re-open the Saved tab via the full menu nav (GoBack / URL-restore
+                // don't reliably return to the saved-list rows), then re-tag.
+                await OpenSavedTabAsync(page);
+                await page.EvaluateAsync(GoogleMapsScraperScripts.DiscoverSavedListsMobile);
             }
             catch (Exception ex)
             {
@@ -666,6 +683,7 @@ public class GoogleMapsListScraper(
             try { await page.CloseAsync(); } catch (Exception ex) { logger.LogDebug(ex, "Error closing scrape page"); }
         }
     }
+
 
     /// <summary>
     /// IE-14: Delegates to shared PoiUrlHelper.ExtractCoordinatesFromUrl to eliminate
