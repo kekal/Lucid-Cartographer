@@ -113,7 +113,9 @@ public sealed class BrowserSessionManager : IBrowserSession, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to apply mobile emulation; continuing with desktop page");
+            _logger.LogWarning(ex, "Failed to apply mobile emulation; aborting mobile page");
+            try { await page.CloseAsync(); } catch (Exception closeEx) { _logger.LogDebug(closeEx, "Error closing page after mobile-emulation failure"); }
+            throw new InvalidOperationException("Failed to apply mobile emulation to the page; mobile Maps requires it.", ex);
         }
         return page;
     }
