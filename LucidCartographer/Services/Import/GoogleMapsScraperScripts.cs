@@ -227,46 +227,6 @@ public static class GoogleMapsScraperScripts
                 });
             })()";
 
-    /// <summary>
-    /// Extracts saved list cards from the Google Maps "Saved → Lists" panel.
-    /// Uses stable DOM structure: each list card is a <c>button</c> whose
-    /// inner <c>div > div:nth-child(2) > div:first-child</c> holds the name
-    /// and <c>div > div:nth-child(2) > div:nth-child(3)</c> holds the count text.
-    /// Tags each card with <c>data-savedlist-idx</c> for click-through.
-    /// Returns a JSON array of { idx, name, count }.
-    /// </summary>
-    public const string DiscoverSavedLists = @"
-            (() => {
-                const results = [];
-                const placeRx = /(\d+)/;
-
-                // List card buttons have class 'CsEnBe' in current Google Maps DOM.
-                // Each contains: div > div:nth-child(2) > div:first-child (name)
-                //                div > div:nth-child(2) > div:nth-child(3) (count text)
-                const buttons = document.querySelectorAll('button.CsEnBe');
-                let idx = 0;
-
-                for (const btn of buttons) {
-                    const nameEl = btn.querySelector('div > div:nth-child(2) > div:first-child');
-                    const countEl = btn.querySelector('div > div:nth-child(2) > div:nth-child(3)');
-
-                    const name = nameEl ? nameEl.innerText.trim() : '';
-                    if (!name) continue;
-
-                    let count = null;
-                    if (countEl) {
-                        const m = countEl.innerText.match(placeRx);
-                        if (m) count = parseInt(m[1]);
-                    }
-
-                    btn.setAttribute('data-savedlist-idx', String(idx));
-                    results.push({ idx, name, count });
-                    idx++;
-                }
-
-                return results;
-            })()";
-
     // ===================== MOBILE WEB scripts =====================
     // The mobile web Maps UI is far simpler and more stable than desktop (no
     // obfuscated/rotating classes). These run on a CDP-mobile-emulated page.
@@ -280,7 +240,9 @@ public static class GoogleMapsScraperScripts
     /// </summary>
     public const string DiscoverSavedListsMobile = @"
             (() => {
-                const visRx = /^(Личный|Private|В совместном доступе|Shared|Общедоступный|Public)\b/i;
+                const visRx = /^(Личный|Private|В совместном доступе|Shared|Общедоступный|Public)(?![\p{L}\p{N}])/iu;
+                const VIS = ['личный','private','в совместном доступе','shared','общедоступный','public'];
+                const isVis = t => VIS.includes(t.trim().toLowerCase());
                 const countRx = /(\d[\d\s.,]*)\s*(мест|places|place)/i;
                 const results = [];
                 let idx = 0;
@@ -289,7 +251,9 @@ public static class GoogleMapsScraperScripts
                         .filter(e => e.children.length === 0 && e.textContent.trim())
                         .map(e => e.textContent.trim());
                     if (!leaves.some(t => visRx.test(t))) continue; // not a list row
-                    const name = leaves.find(t => !visRx.test(t) && t.length > 1 && !/^[\d.,()\s·]+$/.test(t));
+                    const name = (leaves[0] && leaves[0].length > 1 && !isVis(leaves[0]) && !/^[\d.,()\s·]+$/.test(leaves[0]))
+                        ? leaves[0]
+                        : leaves.find(t => t.length > 1 && !isVis(t) && !/^[\d.,()\s·]+$/.test(t));
                     if (!name) continue;
                     let count = null;
                     const cm = leaves.join(' ').match(countRx);
