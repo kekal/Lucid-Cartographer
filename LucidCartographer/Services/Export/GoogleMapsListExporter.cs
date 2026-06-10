@@ -166,17 +166,29 @@ public class GoogleMapsListExporter(
 
     /// <summary>
     /// Longest prefix of <paramref name="listName"/> (down to <paramref name="threshold"/>)
-    /// that occurs as a substring of <paramref name="candidate"/>; -1 if none reaches
-    /// the threshold. Matching a prefix as a substring — rather than anchored at index 0 —
-    /// tolerates BOTH a truncated list name AND leading icon/ligature text that Google
-    /// prepends to a Save-menu row's accessible name (which otherwise made every place
-    /// create a fresh duplicate list).
+    /// that appears at the START of <paramref name="candidate"/> after stripping any
+    /// leading icon/ligature/punctuation glyphs Google may prepend to a Save-menu row's
+    /// accessible name; -1 if none reaches the threshold.
+    /// Using StartsWith (anchored) rather than Contains prevents a list whose name
+    /// contains the target as a mid-string substring (e.g. "Best Cafes Berlin" vs
+    /// target "Cafes") from falsely winning a match.
     /// </summary>
     private static int MatchScore(string candidate, string listName, int threshold)
     {
+        // Strip a leading run of non-alphanumeric characters (icon glyphs, bullets,
+        // Material-icon ligatures rendered as PUA code-points, leading spaces).
+        // Stop at the first letter or digit so a name that genuinely starts with
+        // punctuation is not over-trimmed beyond that first run.
+        var start = 0;
+        while (start < candidate.Length && !char.IsLetterOrDigit(candidate[start]))
+        {
+            start++;
+        }
+        var trimmed = start > 0 ? candidate[start..] : candidate;
+
         for (var len = listName.Length; len >= threshold; len--)
         {
-            if (candidate.Contains(listName[..len], StringComparison.Ordinal))
+            if (trimmed.StartsWith(listName[..len], StringComparison.Ordinal))
             {
                 return len;
             }
@@ -296,7 +308,7 @@ public class GoogleMapsListExporter(
             return new ExportPlaceResult(placeUrl, placeName, ExportOutcome.Failed, "Save menu did not open.");
         }
 
-        return await ResolveAndSaveAsync(page, listName, placeUrl, placeName, listEnsured);
+        return await ResolveAndSaveAsync(page, listName, placeUrl, placeName, listEnsured, ct);
     }
 
     /// <summary>
@@ -306,7 +318,7 @@ public class GoogleMapsListExporter(
     /// prevents duplicate same-named lists (spike finding).
     /// </summary>
     private async Task<ExportPlaceResult> ResolveAndSaveAsync(
-        IPage page, string listName, string placeUrl, string? placeName, bool listEnsured)
+        IPage page, string listName, string placeUrl, string? placeName, bool listEnsured, CancellationToken ct)
     {
         var threshold = Math.Min(listName.Length, 16);
 
@@ -356,14 +368,15 @@ public class GoogleMapsListExporter(
         // and a freshly-created list won't appear until the page is reloaded —
         // reopening the menu alone never refreshes it. So RELOAD the place (refetch
         // the account's lists) and reopen Save, rather than creating a duplicate.
-        for (var retry = 0; bestIndex < 0 && listEnsured && retry < 4; retry++)
+        for (var retry = 0; bestIndex < 0 && listEnsured && retry < 2; retry++)
         {
+            ct.ThrowIfCancellationRequested();
             logger.LogInformation(
-                "List '{List}' not in this menu; reloading place to refresh lists (retry {N}/4)", listName, retry + 1);
+                "List '{List}' not in this menu; reloading place to refresh lists (retry {N}/2)", listName, retry + 1);
             await page.Keyboard.PressAsync("Escape");
             try
             {
-                await page.ReloadAsync(new PageReloadOptions { WaitUntil = WaitUntilState.Commit, Timeout = 30000 });
+                await page.ReloadAsync(new PageReloadOptions { WaitUntil = WaitUntilState.Commit, Timeout = 8000 });
             }
             catch (Exception ex) when (ex is TimeoutException or PlaywrightException)
             {
@@ -371,10 +384,10 @@ public class GoogleMapsListExporter(
             }
             try
             {
-                await page.GetByRole(AriaRole.Heading).First.WaitForAsync(new() { Timeout = 20000 });
+                await page.GetByRole(AriaRole.Heading).First.WaitForAsync(new() { Timeout = 6000 });
             }
             catch (TimeoutException) { /* best effort */ }
-            await page.WaitForTimeoutAsync(2500);
+            await page.WaitForTimeoutAsync(1500);
 
             var reopened = await TryClickNamedAsync(
                 n => page.GetByRole(AriaRole.Button, new() { Name = n, Exact = true }), SaveLabels, 8000);
@@ -384,7 +397,7 @@ public class GoogleMapsListExporter(
             }
             try
             {
-                await page.GetByRole(AriaRole.Menuitemradio).First.WaitForAsync(new() { Timeout = 8000 });
+                await page.GetByRole(AriaRole.Menuitemradio).First.WaitForAsync(new() { Timeout = 5000 });
             }
             catch (TimeoutException) { /* fall through to re-read */ }
             (bestIndex, radios) = await ReadAndMatchAsync();
