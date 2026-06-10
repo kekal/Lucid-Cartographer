@@ -122,20 +122,31 @@ public class GoogleMapsListScraper(
     /// Click the first <c>button</c>/<c>a</c> whose accessible name (aria-label or
     /// trimmed text) equals one of <paramref name="labels"/> (case-insensitive),
     /// via a JS click to avoid mobile pointer-interception. Returns false if none.
+    /// When <paramref name="preferSelector"/> is supplied, elements matching that
+    /// CSS selector are scanned first before falling back to the generic scan.
     /// </summary>
-    private static async Task<bool> ClickByLabelAsync(IPage page, params string[] labels)
+    private static async Task<bool> ClickByLabelAsync(IPage page, string[] labels, string? preferSelector = null)
     {
         // Pass the array as the single evaluate arg (Playwright serialises it to a
         // JS array). Passing a JSON *string* makes `labels.map` throw in-page.
         return await page.EvaluateAsync<bool>(@"
-            (labels) => {
+            ([labels, preferSelector]) => {
                 const want = labels.map(s => s.toLowerCase());
-                for (const el of document.querySelectorAll('button, a, [role=tab], [role=button]')) {
+                const check = (el) => {
                     const t = ((el.getAttribute('aria-label') || el.textContent || '').trim()).toLowerCase();
                     if (t && want.includes(t)) { el.click(); return true; }
+                    return false;
+                };
+                if (preferSelector) {
+                    for (const el of document.querySelectorAll(preferSelector)) {
+                        if (check(el)) return true;
+                    }
+                }
+                for (const el of document.querySelectorAll('button, a, [role=tab], [role=button]')) {
+                    if (check(el)) return true;
                 }
                 return false;
-            }", labels);
+            }", new object[] { labels, preferSelector! });
     }
 
     /// <summary>Log the current page URL + its top buttons/headings — so an
@@ -150,7 +161,7 @@ public class GoogleMapsListScraper(
                     return 'BUTTONS: ' + txt(document.querySelectorAll('button, a, [role=tab]')) +
                            ' || HEADINGS: ' + txt(document.querySelectorAll('h1, h2, h3'));
                 }");
-            logger.LogInformation("PAGE DUMP ({Reason}) url={Url} :: {Dump}", reason, page.Url, dump);
+            logger.LogDebug("PAGE DUMP ({Reason}) url={Url} :: {Dump}", reason, page.Url, dump);
         }
         catch (Exception ex)
         {
@@ -163,9 +174,9 @@ public class GoogleMapsListScraper(
     private async Task DismissAppInterstitialAsync(IPage page)
     {
         var dismissed = await ClickByLabelAsync(page,
-            "Stay in browser", "Continue in browser", "Use Google Maps in your browser",
+            ["Stay in browser", "Continue in browser", "Use Google Maps in your browser",
             "Not now", "No thanks", "Dismiss", "Close",
-            "Остаться в браузере", "Продолжить в браузере", "Не сейчас", "Нет, спасибо", "Закрыть");
+            "Остаться в браузере", "Продолжить в браузере", "Не сейчас", "Нет, спасибо", "Закрыть"]);
         if (dismissed)
         {
             logger.LogInformation("Dismissed an 'open in app' interstitial/banner");
@@ -179,27 +190,34 @@ public class GoogleMapsListScraper(
     /// places → Saved. Used both initially and to RE-open between per-list clicks
     /// (GoBack / URL-restore don't reliably return to the saved-list rows).
     /// </summary>
-    private async Task OpenSavedTabAsync(IPage page)
+    private async Task OpenSavedTabAsync(IPage page, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         await page.GotoAsync("https://www.google.com/maps?hl=en",
             new PageGotoOptions { WaitUntil = WaitUntilState.Commit, Timeout = 30000 });
         await page.WaitForTimeoutAsync(3500);
         try { await GoogleConsent.DismissAsync(page, logger); } catch (Exception ex) { logger.LogDebug(ex, "consent"); }
         try { await DismissAppInterstitialAsync(page); } catch (Exception ex) { logger.LogDebug(ex, "interstitial"); }
 
-        if (await ClickByLabelAsync(page, "Menu", "Меню"))
+        if (await ClickByLabelAsync(page, ["Menu", "Меню"]))
         {
             await page.WaitForTimeoutAsync(700);
         }
-        await ClickByLabelAsync(page, "Your places", "Saved places", "Мои места");
+        if (!await ClickByLabelAsync(page, ["Your places", "Saved places", "Мои места"]))
+        {
+            logger.LogWarning("'Your places' control not found on Saved-tab nav (url={Url})", page.Url);
+        }
         await page.WaitForTimeoutAsync(1200);
-        await ClickByLabelAsync(page, "Saved", "Сохраненные", "Сохранённые");
+        if (!await ClickByLabelAsync(page, ["Saved", "Сохраненные", "Сохранённые"], preferSelector: "[role=tab]"))
+        {
+            logger.LogWarning("'Saved' tab control not found on Saved-tab nav (url={Url})", page.Url);
+        }
         await page.WaitForTimeoutAsync(2000);
     }
 
     private async Task<IReadOnlyList<SavedListInfo>> FetchSavedListsOnPageAsync(IPage page, CancellationToken cancellationToken)
     {
-        await OpenSavedTabAsync(page);
+        await OpenSavedTabAsync(page, cancellationToken);
         await DumpPageAsync(page, "after Saved-tab nav");
 
         if (!await GoogleSignIn.IsSignedInAsync(page, logger))
@@ -213,37 +231,41 @@ public class GoogleMapsListScraper(
         var listsJson = await page.EvaluateAsync<System.Text.Json.JsonElement>(
             GoogleMapsScraperScripts.DiscoverSavedListsMobile);
 
-        // Parse discovered cards (name + count, no URLs yet)
-        var discovered = new List<(int Idx, string Name, int? Count)>();
-        foreach (var item in listsJson.EnumerateArray())
-        {
-            var name = item.TryGetProperty("name", out var nEl) && nEl.ValueKind == System.Text.Json.JsonValueKind.String
-                ? nEl.GetString() : null;
-            var idx = item.TryGetProperty("idx", out var iEl) && iEl.ValueKind == System.Text.Json.JsonValueKind.Number
-                ? iEl.GetInt32() : -1;
-            int? count = item.TryGetProperty("count", out var cEl) && cEl.ValueKind == System.Text.Json.JsonValueKind.Number
-                ? cEl.GetInt32() : null;
-
-            if (!string.IsNullOrWhiteSpace(name) && idx >= 0)
-            {
-                discovered.Add((idx, name, count));
-            }
-        }
+        // Parse the discovered cards (name + count, no URLs yet). The list of
+        // NAMES is our stable work-list; the per-row data-savedlist-idx is only
+        // valid for the CURRENT DOM and must be re-resolved by name on each pass.
+        var discovered = ParseDiscoveredLists(listsJson);
 
         logger.LogInformation("Discovered {Count} saved list cards, clicking each to capture URLs", discovered.Count);
 
-        // Click-through: click each card, capture the navigated URL, go back
+        // Click-through: click each card, capture the navigated URL, re-open the tab.
         var results = new List<SavedListInfo>();
         var savedPanelUrl = page.Url;
 
-        foreach (var (cardIdx, cardName, cardCount) in discovered)
+        // Tags reflecting the CURRENT (freshly re-tagged) Saved-tab DOM. Starts as
+        // the initial discovery and is replaced after every OpenSavedTabAsync.
+        var currentTags = discovered;
+
+        foreach (var (_, cardName, cardCount) in discovered)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
+                // F7: never trust the initial positional index across re-opens.
+                // Re-resolve the row to click by NAME against the CURRENT DOM tags;
+                // if Google reordered the rows, this still clicks the right list,
+                // so the captured URL can never be paired with the wrong name.
+                var match = currentTags.FirstOrDefault(t => string.Equals(t.Name, cardName, StringComparison.Ordinal));
+                if (match.Name is null)
+                {
+                    logger.LogWarning("List '{Name}' not present in the current Saved tab, skipping", cardName);
+                    continue;
+                }
+
                 // Use JS click to avoid pointer-interception issues
                 var clicked = await page.EvaluateAsync<bool>($@"
                         (() => {{
-                            const el = document.querySelector('[data-savedlist-idx=""{cardIdx}""]');
+                            const el = document.querySelector('[data-savedlist-idx=""{match.Idx}""]');
                             if (!el) return false;
                             el.click();
                             return true;
@@ -251,7 +273,7 @@ public class GoogleMapsListScraper(
 
                 if (!clicked)
                 {
-                    logger.LogWarning("Card {Idx} '{Name}' not found in DOM, skipping", cardIdx, cardName);
+                    logger.LogWarning("Card {Idx} '{Name}' not found in DOM, skipping", match.Idx, cardName);
                     continue;
                 }
 
@@ -270,9 +292,16 @@ public class GoogleMapsListScraper(
                 }
 
                 // Re-open the Saved tab via the full menu nav (GoBack / URL-restore
-                // don't reliably return to the saved-list rows), then re-tag.
-                await OpenSavedTabAsync(page);
-                await page.EvaluateAsync(GoogleMapsScraperScripts.DiscoverSavedListsMobile);
+                // don't reliably return to the saved-list rows), then re-tag so the
+                // next iteration re-resolves its target against the fresh DOM.
+                cancellationToken.ThrowIfCancellationRequested();
+                await OpenSavedTabAsync(page, cancellationToken);
+                var retagJson = await page.EvaluateAsync<System.Text.Json.JsonElement>(GoogleMapsScraperScripts.DiscoverSavedListsMobile);
+                currentTags = ParseDiscoveredLists(retagJson);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -284,6 +313,30 @@ public class GoogleMapsListScraper(
 
         // Page is closed by the caller; the shared context + profile persist.
         return results;
+    }
+
+    /// <summary>Parse the <c>DiscoverSavedListsMobile</c> result into
+    /// <c>(idx, name, count)</c> rows, keeping only entries with a usable name and
+    /// a current DOM index. The <c>idx</c> is only valid for the DOM state that
+    /// produced it, so callers must re-parse after every re-tag.</summary>
+    private static List<(int Idx, string Name, int? Count)> ParseDiscoveredLists(System.Text.Json.JsonElement arr)
+    {
+        var parsed = new List<(int Idx, string Name, int? Count)>();
+        foreach (var item in arr.EnumerateArray())
+        {
+            var name = item.TryGetProperty("name", out var nEl) && nEl.ValueKind == System.Text.Json.JsonValueKind.String
+                ? nEl.GetString() : null;
+            var idx = item.TryGetProperty("idx", out var iEl) && iEl.ValueKind == System.Text.Json.JsonValueKind.Number
+                ? iEl.GetInt32() : -1;
+            int? count = item.TryGetProperty("count", out var cEl) && cEl.ValueKind == System.Text.Json.JsonValueKind.Number
+                ? cEl.GetInt32() : null;
+
+            if (!string.IsNullOrWhiteSpace(name) && idx >= 0)
+            {
+                parsed.Add((idx, name!, count));
+            }
+        }
+        return parsed;
     }
 
     private async Task<ScrapeResult> ScrapeInternalAsync(string trimmedUrl, Action<int>? onProgress, CancellationToken cancellationToken)
@@ -683,7 +736,6 @@ public class GoogleMapsListScraper(
             try { await page.CloseAsync(); } catch (Exception ex) { logger.LogDebug(ex, "Error closing scrape page"); }
         }
     }
-
 
     /// <summary>
     /// IE-14: Delegates to shared PoiUrlHelper.ExtractCoordinatesFromUrl to eliminate
