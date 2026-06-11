@@ -1,0 +1,30 @@
+{
+  "workflow_version": "1.2.0",
+  "timestamps": { "started": "2026-06-11T11:21:02+0200", "last_updated": "2026-06-11T11:30:00+0200", "completed": "2026-06-11T11:30:00+0200" },
+  "mode": "initial_scan",
+  "scan_level": "deep",
+  "project_root": "C:/backup/maps_editor",
+  "project_knowledge": "C:/backup/maps_editor/docs",
+  "completed_steps": [
+    { "step": "step_1", "status": "completed", "timestamp": "2026-06-11T11:21:02+0200", "summary": "Classified as monolith, 1 part, web (Blazor Server / .NET 8)" },
+    { "step": "step_2-4", "status": "completed", "timestamp": "2026-06-11T11:28:00+0200", "summary": "Deep-scanned Services, Data+Migrations, Components, Endpoints/Configuration via parallel explorers" },
+    { "step": "step_5-9", "status": "completed", "timestamp": "2026-06-11T11:29:30+0200", "summary": "Wrote project-overview, architecture, data-models, api-contracts, component-inventory, source-tree-analysis, development-guide, deployment-guide" },
+    { "step": "step_10", "status": "completed", "timestamp": "2026-06-11T11:30:00+0200", "summary": "Master index.md generated; no incomplete markers" },
+    { "step": "step_12", "status": "completed", "timestamp": "2026-06-11T11:30:00+0200", "summary": "Workflow complete" }
+  ],
+  "current_step": "completed",
+  "findings": {
+    "project_classification": "monolith; web; Blazor Server .NET 8 + EF Core SQLite",
+    "technology_stack": "Blazor Server, EF Core 8 + SQLite, Tailwind 3.4.17, Coravel, Polly, Playwright, OpenIddict, MCP",
+    "data": "8 app entities + OpenIddict; 11 migrations",
+    "endpoints": "auth, oauth (connect/*), poi-image, novnc proxy, health, /mcp",
+    "ci_cd": "none (manual build/deploy)"
+  },
+  "project_types": [ { "part_id": "app", "project_type_id": "web", "display_name": "Blazor Server web app" } ],
+  "outputs_generated": [
+    "project-scan-report.json", "index.md", "project-overview.md", "architecture.md",
+    "data-models.md", "api-contracts.md", "component-inventory.md", "source-tree-analysis.md",
+    "development-guide.md", "deployment-guide.md"
+  ],
+  "resume_instructions": "Workflow complete"
+}
