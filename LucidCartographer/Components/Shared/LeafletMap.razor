@@ -114,24 +114,24 @@
         await MapService.SetLabelsVisibleAsync(visible);
     }
 
-    public async Task SetStopOrdersAsync(IReadOnlyDictionary<int, int>? orders)
+    public async Task SetStopOrdersAsync(IReadOnlyDictionary<int, int>? orders, TripMarkerRolesDto? roles = null)
     {
         if (!IsInitialized)
         {
             return;
         }
 
-        await MapService.SetStopOrdersAsync(orders);
+        await MapService.SetStopOrdersAsync(orders, roles);
     }
 
-    public async Task DrawTripLegsAsync(IReadOnlyList<TripLegDto> legs)
+    public async Task DrawTripLegsAsync(IReadOnlyList<TripLegDto> legs, bool isRoundtrip = false)
     {
         if (!IsInitialized)
         {
             return;
         }
 
-        await MapService.DrawTripLegsAsync(legs);
+        await MapService.DrawTripLegsAsync(legs, isRoundtrip);
     }
 
     public async Task ClearTripAsync()

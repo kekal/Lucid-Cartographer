@@ -404,9 +404,14 @@ else
     private bool _tripScopeInit;
     private int? _tripCollectionId;
     private IReadOnlyDictionary<int, int>? _pushedStopOrders;
+    // TRIP-STARTFINISH-06: last Start/Finish marker roles pushed alongside the
+    // Stop Orders (record equality — dedup like the orders themselves).
+    private TripMarkerRolesDto? _pushedMarkerRoles;
     // Last leg geometry pushed to the JS map (dedup so an unrelated state notify
     // doesn't re-issue an identical incremental redraw).
     private IReadOnlyList<TripLeg>? _pushedLegs;
+    // TRIP-STARTFINISH-06: last roundtrip flag pushed with the legs.
+    private bool? _pushedRoundtrip;
     // Last selected Stop pushed to the map (emphasis + pan/scroll). -1 is a
     // "force re-push" sentinel (no real poiId is negative) used on map re-wire.
     private int? _pushedSelectedStopId = -1;
@@ -441,7 +446,9 @@ else
             // re-applies the badges + legs to the fresh map (e.g. after a
             // desktop<->mobile viewport flip). [Review][Patch]
             _pushedStopOrders = null;
+            _pushedMarkerRoles = null;
             _pushedLegs = null;
+            _pushedRoundtrip = null;
             _pushedSelectedStopId = -1;
             _pushedSelectionTick = -1;
             try
@@ -665,12 +672,31 @@ else
             return;
         }
         var orders = TripVm.IsTripViewEnabled ? TripVm.StopOrders : null;
-        if (OrdersEqual(orders, _pushedStopOrders))
+        // TRIP-STARTFINISH-06: the pinned Start/Finish markers render a distinct
+        // glyph/ring with a localized accessible name. The roles ride along with
+        // the Stop Orders (one re-skin pass JS-side); pure wiring — the roles are
+        // derived entirely from the VM's projections.
+        TripMarkerRolesDto? roles = null;
+        if (TripVm.IsTripViewEnabled)
+        {
+            var start = TripVm.OrderedStops.FirstOrDefault(s => s.IsStart);
+            var finish = TripVm.OrderedStops.FirstOrDefault(s => s.IsFinish);
+            if (start is not null || finish is not null)
+            {
+                roles = new TripMarkerRolesDto(
+                    start?.PoiId,
+                    finish?.PoiId,
+                    start is null ? string.Empty : string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripStartMarkerAria, start.Name),
+                    finish is null ? string.Empty : string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripFinishMarkerAria, finish.Name));
+            }
+        }
+        if (OrdersEqual(orders, _pushedStopOrders) && roles == _pushedMarkerRoles)
         {
             return;
         }
         _pushedStopOrders = orders;
-        await _leafletMap.SetStopOrdersAsync(orders);
+        _pushedMarkerRoles = roles;
+        await _leafletMap.SetStopOrdersAsync(orders, roles);
     }
 
     // Incremental leg redraw (AC3 / NFR1): on a Stop-Order/Start/Finish/membership
@@ -684,17 +710,22 @@ else
             return;
         }
         var legs = TripVm.IsTripViewEnabled ? TripVm.OrderedLegs : null;
-        if (LegsEqual(legs, _pushedLegs))
+        // TRIP-STARTFINISH-06: the roundtrip flag rides the same draw call so the
+        // interop can tag the closing leg; the leg list itself already toggles
+        // between N (roundtrip) and N−1 (open path) in TripViewModel.BuildLegs.
+        var roundtrip = TripVm.IsTripViewEnabled && TripVm.IsRoundtrip;
+        if (LegsEqual(legs, _pushedLegs) && roundtrip == _pushedRoundtrip)
         {
             return;
         }
         _pushedLegs = legs;
+        _pushedRoundtrip = roundtrip;
         if (legs is { Count: > 0 })
         {
             var dtos = legs
                 .Select(l => new TripLegDto(l.FromLat, l.FromLon, l.ToLat, l.ToLon, l.IsMeasured))
                 .ToList();
-            await _leafletMap.DrawTripLegsAsync(dtos);
+            await _leafletMap.DrawTripLegsAsync(dtos, roundtrip);
         }
         else
         {

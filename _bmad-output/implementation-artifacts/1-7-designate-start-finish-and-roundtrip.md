@@ -1,6 +1,10 @@
+---
+baseline_commit: 7a1fe590269371b7a6fbe9328fcf5e6e382a75e2
+---
+
 # Story 1.7: Designate Start, Finish and roundtrip
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -21,35 +25,35 @@ This story is the Start/Finish designation layer of Epic 1. It is an **additive 
 
 ## Tasks / Subtasks
 
-- [ ] **Extend `TripViewModel` with Start/Finish intent and derived shape** (AC: 1, 2, 3, 6)
-  - [ ] Add `SetStartAsync(int poiId)`, `ClearStartAsync()`, `SetFinishAsync(int poiId)`, `ClearFinishAsync()` to the sealed Transient `TripViewModel` (from 1.2), each calling the single `TripOrderingService` pin method (do not write `OrderIndex` from the ViewModel directly).
-  - [ ] Expose derived read state for the UI: `StartPoiId`, `FinishPoiId`, `IsRoundtrip` (`FinishPoiId is null`), and a per-stop role accessor (`StopRole(poiId) => None | Start | Finish`) used by both surfaces to pick the badge/marker glyph.
-  - [ ] After any pin change, raise `StateChanged` (via the existing `Notify()`); trigger the same incremental redraw + closing-leg-presence recompute path 1.3 uses (no full reload). Honor the existing `CancellationTokenSource`/`IAsyncDisposable` pattern; no `ConfigureAwait(false)`.
-  - [ ] Tag new ViewModel logic with a `TRIP-*` comment code (e.g. `TRIP-STARTFINISH-01`).
-- [ ] **Implement pin/unpin logic in `TripOrderingService`** (AC: 1, 3, 5, 6)
-  - [ ] Add the canonical pin method(s) that set/clear `PoiCollection.StartPoiId` / `FinishPoiId` (schema from 1.1) **and** rewrite the placeable stops' 1-based `OrderIndex` so Start → 1 and Finish → N, interior stops compacted to fill 2..N−1 in their existing relative order (reuse 1.2's contiguous-1..N seed/compaction helper — do **not** re-implement seed or reorder).
-  - [ ] Guarantee invariants in one place: after the write, assert/produce a contiguous, gap-free, unique 1..N `OrderIndex` set over placeable stops with no stop holding two values; reject setting Finish == current Start (and vice versa) — a stop cannot be both Start and Finish.
-  - [ ] Re-designation path: when a new Start/Finish replaces an existing one, release the old pin first, then re-validate 1..N (the old endpoint becomes an interior stop). Unset path: clearing Finish restores Roundtrip (closing leg present); clearing Start leaves order contiguous with no pinned first.
-  - [ ] Respect existing write discipline: `IDbContextFactory<AppDbContext>`, `SqliteWriteLock` single-writer, `Version` optimistic concurrency on `PoiCollection`; this is the same method all four ordering paths funnel through (AR-11). Tag with `TRIP-*`.
-- [ ] **Closing-leg presence by roundtrip vs. open path** (AC: 2, 3, 6)
-  - [ ] Drive 1.3's leg rendering from the derived `IsRoundtrip` state: `FinishPoiId is null` ⇒ closing leg from Order N back to Start (N legs); distinct Finish ⇒ no closing leg (N−1 legs). Do not re-implement leg drawing — pass the roundtrip flag into the existing `drawTripLegs` interop call path (`LeafletMapService` → `leafletInterop.js`).
-  - [ ] Ensure the closing leg uses the same dashed+muted Phase-1 styling as all other legs (only Measured is solid — out of scope here, but don't regress 1.3's styling).
-- [ ] **Distinct Start/Finish glyphs on the stop-list badge (`TripStopList.razor` + mobile)** (AC: 1, 3, 4)
-  - [ ] In `Components/Shared/Trip/TripStopList.razor`, render the Start stop's order badge with a distinct Start glyph/ring and the Finish stop's badge with a distinct Finish glyph (UX-DR2: `primary` fill, `on-primary` numeral, `text-xs` weight 700, distinct ring/glyph for Start, distinct glyph for Finish). Use Material Symbols Outlined per DESIGN.md icon spec; keep the numeral readable.
-  - [ ] Add per-row **Set as Start / Set as Finish** controls (and **Unset** when already pinned), each `aria-label`led via `UiStrings`, ≥44px touch target. Disable "Set as Finish" on the current Start row and vice versa (AC-6 rejection surfaced as a disabled control, not an error).
-  - [ ] Mirror all of the above on the mobile render path (the mobile Trip stop list / bottom-panel variant from 1.3) — both surfaces are distinct render paths and must both carry the controls and glyphs (UX-DR12).
-- [ ] **Distinct Start/Finish marker glyphs on the map (`LeafletMap.razor` / interop)** (AC: 1, 3)
-  - [ ] Give the Start and Finish map markers distinct glyphs/rings (UX-DR2) so the loop visibly anchors on the Start and terminates on the Finish, distinct from numbered interior stops. Route through the existing `IMapService`/`LeafletMapService` → `leafletInterop.js` marker-rendering path that 1.3 added; `LeafletMap.razor` delegates rendering to the service (it holds no marker markup itself), so extend the service/interop call with Start/Finish role info, not the component.
-  - [ ] Marker `aria-label`/title reflects Start/Finish role (a glyph alone is meaningless to a screen reader) — copy via `UiStrings`.
-- [ ] **`UiStrings` additions** (AC: 4)
-  - [ ] Add a Trip View string block: e.g. `TripSetAsStart`, `TripSetAsFinish`, `TripUnsetStart`, `TripUnsetFinish`, `TripStartBadgeAria` ("Start — stop 1 of {0}"), `TripFinishBadgeAria` ("Finish — stop {0} of {0}"), `TripStartMarkerAria`, `TripFinishMarkerAria`, `TripRoundtripAnnounce` ("Roundtrip — returns to start"), `TripOpenPathAnnounce` ("Open path — ends at {0}"). No hardcoded UI text anywhere in this story.
-- [ ] **Unit tests — pin invariants** (AC: 1, 2, 3, 5, 6)
-  - [ ] `TripOrderingService` (or `TripViewModel`) unit tests asserting: Start → `OrderIndex` 1; Finish → `OrderIndex` N; after set, the placeable `OrderIndex` set is exactly `{1..N}` contiguous & unique (no stop holds two values); re-designating Start moves the old Start to an interior slot without a gap/duplicate; setting Finish == Start is rejected; clearing Finish flips `IsRoundtrip` back to true; the method funnels through the single ordering write path (AR-11) under `SqliteWriteLock`.
-  - [ ] Property-style check over a few stop counts (N = 2, 3, 10) that no permutation of Start/Finish operations produces a duplicate or gap in `OrderIndex`.
-- [ ] **Component tests (bUnit) — glyphs & controls** (AC: 1, 3, 4)
-  - [ ] `TripStopList` bUnit tests: the Start row badge renders the Start glyph/ring, the Finish row badge renders the Finish glyph; Set/Unset Start and Finish controls render with `aria-label`s from `UiStrings`; "Set as Finish" is disabled on the current Start row (and vice versa); clicking a control invokes the corresponding `TripViewModel` method.
-- [ ] **Integration tests — both surfaces** (AC: 1, 2, 3, 4)
-  - [ ] Desktop (`IntegrationTestBase`) and mobile (`MobileTestBase`): with Trip View on, designate a Start → it becomes stop 1 with the Start glyph and the loop anchors on it; leave Finish unset → roundtrip closing leg is drawn (N legs); set a distinct Finish → open path, no closing leg (N−1 legs), Finish is stop N with the Finish glyph; verify the controls exist and are operable on the mobile render path; verify the `aria-live` announcement fires on roundtrip↔open-path transitions.
+- [x] **Extend `TripViewModel` with Start/Finish intent and derived shape** (AC: 1, 2, 3, 6)
+  - [x] Add `SetStartAsync(int poiId)`, `ClearStartAsync()`, `SetFinishAsync(int poiId)`, `ClearFinishAsync()` to the sealed Transient `TripViewModel` (from 1.2), each calling the single `TripOrderingService` pin method (do not write `OrderIndex` from the ViewModel directly).
+  - [x] Expose derived read state for the UI: `StartPoiId`, `FinishPoiId`, `IsRoundtrip` (`FinishPoiId is null`), and a per-stop role accessor (`StopRole(poiId) => None | Start | Finish`) used by both surfaces to pick the badge/marker glyph.
+  - [x] After any pin change, raise `StateChanged` (via the existing `Notify()`); trigger the same incremental redraw + closing-leg-presence recompute path 1.3 uses (no full reload). Honor the existing `CancellationTokenSource`/`IAsyncDisposable` pattern; no `ConfigureAwait(false)`.
+  - [x] Tag new ViewModel logic with a `TRIP-*` comment code (e.g. `TRIP-STARTFINISH-01`).
+- [x] **Implement pin/unpin logic in `TripOrderingService`** (AC: 1, 3, 5, 6)
+  - [x] Add the canonical pin method(s) that set/clear `PoiCollection.StartPoiId` / `FinishPoiId` (schema from 1.1) **and** rewrite the placeable stops' 1-based `OrderIndex` so Start → 1 and Finish → N, interior stops compacted to fill 2..N−1 in their existing relative order (reuse 1.2's contiguous-1..N seed/compaction helper — do **not** re-implement seed or reorder).
+  - [x] Guarantee invariants in one place: after the write, assert/produce a contiguous, gap-free, unique 1..N `OrderIndex` set over placeable stops with no stop holding two values; reject setting Finish == current Start (and vice versa) — a stop cannot be both Start and Finish.
+  - [x] Re-designation path: when a new Start/Finish replaces an existing one, release the old pin first, then re-validate 1..N (the old endpoint becomes an interior stop). Unset path: clearing Finish restores Roundtrip (closing leg present); clearing Start leaves order contiguous with no pinned first.
+  - [x] Respect existing write discipline: `IDbContextFactory<AppDbContext>`, `SqliteWriteLock` single-writer, `Version` optimistic concurrency on `PoiCollection`; this is the same method all four ordering paths funnel through (AR-11). Tag with `TRIP-*`.
+- [x] **Closing-leg presence by roundtrip vs. open path** (AC: 2, 3, 6)
+  - [x] Drive 1.3's leg rendering from the derived `IsRoundtrip` state: `FinishPoiId is null` ⇒ closing leg from Order N back to Start (N legs); distinct Finish ⇒ no closing leg (N−1 legs). Do not re-implement leg drawing — pass the roundtrip flag into the existing `drawTripLegs` interop call path (`LeafletMapService` → `leafletInterop.js`).
+  - [x] Ensure the closing leg uses the same dashed+muted Phase-1 styling as all other legs (only Measured is solid — out of scope here, but don't regress 1.3's styling).
+- [x] **Distinct Start/Finish glyphs on the stop-list badge (`TripStopList.razor` + mobile)** (AC: 1, 3, 4)
+  - [x] In `Components/Shared/Trip/TripStopList.razor`, render the Start stop's order badge with a distinct Start glyph/ring and the Finish stop's badge with a distinct Finish glyph (UX-DR2: `primary` fill, `on-primary` numeral, `text-xs` weight 700, distinct ring/glyph for Start, distinct glyph for Finish). Use Material Symbols Outlined per DESIGN.md icon spec; keep the numeral readable.
+  - [x] Add per-row **Set as Start / Set as Finish** controls (and **Unset** when already pinned), each `aria-label`led via `UiStrings`, ≥44px touch target. Disable "Set as Finish" on the current Start row and vice versa (AC-6 rejection surfaced as a disabled control, not an error).
+  - [x] Mirror all of the above on the mobile render path (the mobile Trip stop list / bottom-panel variant from 1.3) — both surfaces are distinct render paths and must both carry the controls and glyphs (UX-DR12).
+- [x] **Distinct Start/Finish marker glyphs on the map (`LeafletMap.razor` / interop)** (AC: 1, 3)
+  - [x] Give the Start and Finish map markers distinct glyphs/rings (UX-DR2) so the loop visibly anchors on the Start and terminates on the Finish, distinct from numbered interior stops. Route through the existing `IMapService`/`LeafletMapService` → `leafletInterop.js` marker-rendering path that 1.3 added; `LeafletMap.razor` delegates rendering to the service (it holds no marker markup itself), so extend the service/interop call with Start/Finish role info, not the component.
+  - [x] Marker `aria-label`/title reflects Start/Finish role (a glyph alone is meaningless to a screen reader) — copy via `UiStrings`.
+- [x] **`UiStrings` additions** (AC: 4)
+  - [x] Add a Trip View string block: e.g. `TripSetAsStart`, `TripSetAsFinish`, `TripUnsetStart`, `TripUnsetFinish`, `TripStartBadgeAria` ("Start — stop 1 of {0}"), `TripFinishBadgeAria` ("Finish — stop {0} of {0}"), `TripStartMarkerAria`, `TripFinishMarkerAria`, `TripRoundtripAnnounce` ("Roundtrip — returns to start"), `TripOpenPathAnnounce` ("Open path — ends at {0}"). No hardcoded UI text anywhere in this story.
+- [x] **Unit tests — pin invariants** (AC: 1, 2, 3, 5, 6)
+  - [x] `TripOrderingService` (or `TripViewModel`) unit tests asserting: Start → `OrderIndex` 1; Finish → `OrderIndex` N; after set, the placeable `OrderIndex` set is exactly `{1..N}` contiguous & unique (no stop holds two values); re-designating Start moves the old Start to an interior slot without a gap/duplicate; setting Finish == Start is rejected; clearing Finish flips `IsRoundtrip` back to true; the method funnels through the single ordering write path (AR-11) under `SqliteWriteLock`.
+  - [x] Property-style check over a few stop counts (N = 2, 3, 10) that no permutation of Start/Finish operations produces a duplicate or gap in `OrderIndex`.
+- [x] **Component tests (bUnit) — glyphs & controls** (AC: 1, 3, 4)
+  - [x] `TripStopList` bUnit tests: the Start row badge renders the Start glyph/ring, the Finish row badge renders the Finish glyph; Set/Unset Start and Finish controls render with `aria-label`s from `UiStrings`; "Set as Finish" is disabled on the current Start row (and vice versa); clicking a control invokes the corresponding `TripViewModel` method.
+- [x] **Integration tests — both surfaces** (AC: 1, 2, 3, 4)
+  - [x] Desktop (`IntegrationTestBase`) and mobile (`MobileTestBase`): with Trip View on, designate a Start → it becomes stop 1 with the Start glyph and the loop anchors on it; leave Finish unset → roundtrip closing leg is drawn (N legs); set a distinct Finish → open path, no closing leg (N−1 legs), Finish is stop N with the Finish glyph; verify the controls exist and are operable on the mobile render path; verify the `aria-live` announcement fires on roundtrip↔open-path transitions.
 
 ## Dev Notes
 
@@ -106,8 +110,50 @@ This story is the Start/Finish designation layer of Epic 1. It is an **additive 
 
 ### Agent Model Used
 
+claude-fable-5
+
 ### Debug Log References
+
+- `dotnet build` — 0 warnings / 0 errors (TreatWarningsAsErrors on).
+- Trip-scoped suites green: TripOrderingServiceTests + TripViewModelTests + TripStopListTests (94), TripViewIntegrationTests + MobileTripViewTests + TripStopListTests (46).
+- Full `dotnet test` run executed from the worktree root (see Completion Notes for flake handling).
+- One analyzer iteration: MA0069 on the StubMapService trip-overlay recording fields → converted to static properties with private setters.
+- One layout iteration: the first cut placed four inline 44px controls per row, which regressed three pre-existing 1.4 selection/visibility integration tests (row click-centre landed on a stopPropagation button; the desktop w-64 panel starved the POI name's flex space). Fixed by stacking move and Set/Unset controls into two narrow columns; desktop Set/Unset keeps a ≥44px hit target via padding + negative margin around a 24px visual.
 
 ### Completion Notes List
 
+- TRIP-STARTFINISH-01 (TripViewModel): SetStartAsync/ClearStartAsync/SetFinishAsync/ClearFinishAsync funnel through one private ChangePinAsync; derived `StartPoiId`/`FinishPoiId`/`IsRoundtrip` (FinishPoiId is null)/`StopRole(poiId)`/`CanSetStart`/`CanSetFinish`; `StartFinishAnnouncement` feeds a new aria-live region on both surfaces; every change re-reads the projections (BuildLegs recomputes closing-leg presence) and raises StateChanged — the host page's existing incremental redraw path does the rest, no full reload.
+- TRIP-STARTFINISH-02 (TripOrderingService): SetStartAsync/ClearStartAsync/SetFinishAsync/ClearFinishAsync write `StartPoiId`/`FinishPoiId` under SqliteWriteLock (Version is bumped centrally by AppDbContext.SaveChanges for modified PoiCollections) and renumber via the EXISTING `Renumber` + `SetOrderAsync` single write path (AR-11): pinned Start first, interior stops in current relative order, pinned Finish last ⇒ contiguous unique 1..N by construction. Finish == current Start (and vice versa) throws InvalidOperationException; unplaceable/unknown/unordered POIs are no-ops; re-designating the same stop is an idempotent no-write.
+- TRIP-STARTFINISH-03/04/05 (UI): distinct Start ring + `trip_origin` glyph and Finish ring + `sports_score` glyph (Material Symbols Outlined) on the badge of BOTH TripStopList and MobileTripPanel; per-row Set/Unset Start & Finish buttons with UiStrings aria-labels + aria-pressed; cross-pinning surfaced as disabled controls; new Trip View — Start/Finish UiStrings block; designation + roundtrip↔open-path announcements via dedicated polite live regions.
+- TRIP-STARTFINISH-06 (map): `IMapService.SetStopOrdersAsync` extended with a `TripMarkerRolesDto` (start/finish PoiIds + localized marker aria/titles) and `DrawTripLegsAsync` with an `isRoundtrip` flag; leafletInterop renders the Start/Finish marker ring + glyph with role="img"/aria-label/title baked into buildMarkerIcon (survives re-skins) and tags the closing leg `trip-leg-closing` (same dashed+muted styling); LeafletMap.razor stays a thin pass-through wrapper.
+- Touch-target note: mobile Set/Unset controls are real 44×44px buttons; desktop Set/Unset controls render a 24px visual (matching the 1.5 move controls in the compact w-64 panel) extended to a 44×44px hit box via padding + negative margin — the ≥44px target spec is honored on both surfaces without starving the row layout (first attempt with full-size inline buttons broke pre-existing 1.4 row-selection tests).
+- Reorder (1.5) and unplaceable handling (1.6) untouched: ReorderStopAsync still never writes pins; unplaceable stops (OrderIndex 0) are rejected as pin candidates at both VM and service level.
+- StubMapService records the latest trip-leg count / roundtrip flag / marker roles (static, private-set properties) so the Playwright integration tests can assert N vs N−1 legs at the IMapService boundary (Leaflet itself is stubbed in integration).
+- Known pre-existing flakes under parallel load (not regressions; pass in isolation): ScrapeProgress_ShowsIndicator, OperationsExtendedTests.Union_ShowsAllUniquePois.
+
 ### File List
+
+- LucidCartographer/Services/UiStrings.cs
+- LucidCartographer/Services/Trip/ITripOrderingService.cs
+- LucidCartographer/Services/Trip/TripOrderingService.cs
+- LucidCartographer/Services/IMapService.cs
+- LucidCartographer/Services/LeafletMapService.cs
+- LucidCartographer/Components/Shared/Trip/TripProjections.cs
+- LucidCartographer/Components/Shared/Trip/TripViewModel.cs
+- LucidCartographer/Components/Shared/Trip/TripStopList.razor
+- LucidCartographer/Components/Shared/Trip/MobileTripPanel.razor
+- LucidCartographer/Components/Shared/LeafletMap.razor
+- LucidCartographer/Components/Pages/MapPage.razor
+- LucidCartographer/wwwroot/js/leafletInterop.js
+- LucidCartographer/wwwroot/css/base.css
+- LucidCartographer.Tests/Services/TripOrderingServiceTests.cs
+- LucidCartographer.Tests/ViewModels/TripViewModelTests.cs
+- LucidCartographer.Tests/Components/Trip/TripStopListTests.cs
+- LucidCartographer.Tests/Integration/TripViewIntegrationTests.cs
+- LucidCartographer.Tests/Integration/MobileTripViewTests.cs
+- LucidCartographer.Tests/Integration/StubMapService.cs
+- _bmad-output/implementation-artifacts/1-7-designate-start-finish-and-roundtrip.md
+
+## Change Log
+
+- 2026-06-12: Story 1.7 implemented — Start/Finish designation through the single TripOrderingService write path (pin to Order 1/N, contiguous unique 1..N, Finish==Start rejected, re-designation releases the old pin); TripViewModel intents + derived IsRoundtrip/StopRole; Set/Unset controls + distinct badge glyphs on desktop and mobile stop lists with aria-live announcements; Start/Finish marker roles + roundtrip flag through LeafletMapService → leafletInterop; UiStrings Start/Finish block; unit + bUnit + desktop/mobile Playwright integration coverage. Status → review.

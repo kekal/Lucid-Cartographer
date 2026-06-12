@@ -8,6 +8,15 @@ public record MapBounds(double South, double West, double North, double East)
         lat >= South && lat <= North && lon >= West && lon <= East;
 }
 
+/// <summary>
+/// TRIP-STARTFINISH-06: Start/Finish marker-role DTO for the JS interop layer.
+/// Carries which POI markers render the distinct Start/Finish glyph/ring and the
+/// localized accessible names (the glyph alone is meaningless to a screen
+/// reader, so the marker badge gets a role/aria-label/title). Serializes to
+/// camelCase to match leafletInterop.setStopOrders.
+/// </summary>
+public record TripMarkerRolesDto(int? StartPoiId, int? FinishPoiId, string StartAria, string FinishAria);
+
 public interface IMapService
 {
     Task InitMapAsync(string elementId);
@@ -25,17 +34,23 @@ public interface IMapService
     /// Apply Trip View Stop Order badges to markers. When <paramref name="orders"/>
     /// has entries, the matching POI markers render their Stop number; passing
     /// null or an empty map reverts every marker to its plain dot.
+    /// <paramref name="roles"/> (TRIP-STARTFINISH-06) marks the pinned Start and
+    /// Finish markers with their distinct glyph/ring and accessible name; null
+    /// clears any prior role marking.
     /// </summary>
-    Task SetStopOrdersAsync(IReadOnlyDictionary<int, int>? orders);
+    Task SetStopOrdersAsync(IReadOnlyDictionary<int, int>? orders, TripMarkerRolesDto? roles = null);
 
     /// <summary>
     /// Draw (or incrementally redraw) the Trip View connecting legs — straight,
     /// non-Measured (dashed + muted) polylines between consecutive Stops plus the
     /// Roundtrip closing leg. Replaces only the prior trip-leg layer; an empty
     /// list clears it. The numbered Stop markers are applied separately via
-    /// <see cref="SetStopOrdersAsync"/>.
+    /// <see cref="SetStopOrdersAsync"/>. <paramref name="isRoundtrip"/>
+    /// (TRIP-STARTFINISH-06) flags the Roundtrip shape so the interop can tag the
+    /// closing leg; the leg list itself already carries N legs (roundtrip) or
+    /// N−1 (open path) as computed by the ViewModel.
     /// </summary>
-    Task DrawTripLegsAsync(IReadOnlyList<TripLegDto> legs);
+    Task DrawTripLegsAsync(IReadOnlyList<TripLegDto> legs, bool isRoundtrip = false);
 
     /// <summary>Remove the Trip View connecting legs (Trip View off / collection hide).</summary>
     Task ClearTripAsync();

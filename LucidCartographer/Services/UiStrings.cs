@@ -97,6 +97,29 @@ public static class UiStrings
     // Drag-handle accessible name. {0} = POI name.
     public const string TripDragHandle = "Drag to reorder {0}";
 
+    // Trip View — Start/Finish designation (Story 1.7, [TRIP-STARTFINISH-05]).
+    // Set/unset control labels ({0} = POI name), the distinct badge/marker
+    // accessible names, and the aria-live announcements for designation and
+    // roundtrip ↔ open-path shape transitions.
+    public const string TripSetAsStart = "Set {0} as start";
+    public const string TripSetAsFinish = "Set {0} as finish";
+    public const string TripUnsetStart = "Unset {0} as start";
+    public const string TripUnsetFinish = "Unset {0} as finish";
+    // {0} = total stops. The Start badge's screen-reader label (Start is always stop 1).
+    public const string TripStartBadgeAria = "Start — stop 1 of {0}";
+    // {0} = total stops (the Finish is always the last stop, N of N).
+    public const string TripFinishBadgeAria = "Finish — stop {0} of {0}";
+    // {0} = POI name. Map-marker accessible name/title for the pinned roles.
+    public const string TripStartMarkerAria = "Start: {0}";
+    public const string TripFinishMarkerAria = "Finish: {0}";
+    // {0} = POI name. Announced after a Start designation / when it is cleared.
+    public const string TripStartSetAnnouncement = "{0} set as start — stop 1";
+    public const string TripStartClearedAnnouncement = "Start cleared";
+    // Shape announcements: clearing the Finish restores the Roundtrip; a
+    // distinct Finish ({0} = POI name) opens the path.
+    public const string TripRoundtripAnnounce = "Roundtrip — returns to start";
+    public const string TripOpenPathAnnounce = "Open path — ends at {0}";
+
     // Trip View — unplaceable stops (Story 1.6, [TRIP-PLACE-05]). Honest,
     // factual, provenance-aware copy (UX-DR11): the POI is kept in the
     // collection, excluded from the route — never silently dropped (UX-DR10).

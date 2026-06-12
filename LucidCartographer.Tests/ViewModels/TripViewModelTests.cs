@@ -406,6 +406,147 @@ public class TripViewModelTests
         vm.SelectedStopPoiId.Should().BeNull("a removed stop can no longer be the selection");
     }
 
+    // === Story 1.7: Start/Finish designation (TRIP-STARTFINISH-01) ===
+
+    [Fact]
+    public async Task SetStartAsync_PinsStopOne_SetsRole_Announces_RaisesStateChanged()
+    {
+        await using var vm = await EnabledVmAsync(SeedFactory(placeable: 3), 3);
+        var fired = 0;
+        vm.StateChanged += () => fired++;
+
+        await vm.SetStartAsync(2);
+
+        vm.StartPoiId.Should().Be(2);
+        vm.StopRole(2).Should().Be(TripStopRole.Start);
+        vm.StopRole(1).Should().Be(TripStopRole.None);
+        vm.OrderedStops[0].PoiId.Should().Be(2, "the Start anchors the stop list at Order 1");
+        vm.OrderedStops[0].IsStart.Should().BeTrue();
+        vm.IsRoundtrip.Should().BeTrue("a Start with no Finish keeps the default Roundtrip shape");
+        vm.OrderedLegs.Should().HaveCount(3, "the Roundtrip closing leg stays");
+        vm.StartFinishAnnouncement.Should().Be(
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripStartSetAnnouncement, "P2"));
+        fired.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task SetFinishAsync_FlipsToOpenPath_DropsClosingLeg_Announces()
+    {
+        await using var vm = await EnabledVmAsync(SeedFactory(placeable: 3), 3);
+
+        await vm.SetFinishAsync(1);
+
+        vm.FinishPoiId.Should().Be(1);
+        vm.IsRoundtrip.Should().BeFalse("a distinct Finish makes the Trip an open path");
+        vm.StopRole(1).Should().Be(TripStopRole.Finish);
+        vm.OrderedStops[^1].PoiId.Should().Be(1, "the Finish is pinned to Order N");
+        vm.OrderedStops[^1].IsFinish.Should().BeTrue();
+        vm.OrderedLegs.Should().HaveCount(2, "an open path over 3 stops has N−1 legs and no closing leg");
+        vm.StartFinishAnnouncement.Should().Be(
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripOpenPathAnnounce, "P1"));
+    }
+
+    [Fact]
+    public async Task ClearFinishAsync_RestoresRoundtrip_WithClosingLeg_AndAnnounces()
+    {
+        await using var vm = await EnabledVmAsync(SeedFactory(placeable: 3), 3);
+        await vm.SetFinishAsync(2);
+        vm.OrderedLegs.Should().HaveCount(2);
+
+        await vm.ClearFinishAsync();
+
+        vm.FinishPoiId.Should().BeNull();
+        vm.IsRoundtrip.Should().BeTrue("clearing the Finish returns the Trip to a Roundtrip");
+        vm.OrderedLegs.Should().HaveCount(3, "the closing leg is restored (N legs)");
+        vm.StartFinishAnnouncement.Should().Be(UiStrings.TripRoundtripAnnounce);
+    }
+
+    [Fact]
+    public async Task ClearStartAsync_ReleasesPin_AndAnnounces()
+    {
+        await using var vm = await EnabledVmAsync(SeedFactory(placeable: 3), 3);
+        await vm.SetStartAsync(3);
+
+        await vm.ClearStartAsync();
+
+        vm.StartPoiId.Should().BeNull();
+        vm.StopRole(3).Should().Be(TripStopRole.None);
+        vm.StartFinishAnnouncement.Should().Be(UiStrings.TripStartClearedAnnouncement);
+    }
+
+    [Fact]
+    public async Task SetFinishAsync_OnCurrentStart_IsGuardedNoOp()
+    {
+        await using var vm = await EnabledVmAsync(SeedFactory(placeable: 3), 3);
+        await vm.SetStartAsync(1);
+        var announcementBefore = vm.StartFinishAnnouncement;
+
+        vm.CanSetFinish(1).Should().BeFalse("the current Start row's finish control is disabled");
+        await vm.SetFinishAsync(1);
+
+        vm.FinishPoiId.Should().BeNull("a stop cannot be both Start and Finish");
+        vm.IsRoundtrip.Should().BeTrue();
+        vm.StartFinishAnnouncement.Should().Be(announcementBefore, "a rejected designation announces nothing new");
+    }
+
+    [Fact]
+    public async Task SetStartAsync_OnCurrentFinish_IsGuardedNoOp()
+    {
+        await using var vm = await EnabledVmAsync(SeedFactory(placeable: 3), 3);
+        await vm.SetFinishAsync(3);
+
+        vm.CanSetStart(3).Should().BeFalse();
+        await vm.SetStartAsync(3);
+
+        vm.StartPoiId.Should().BeNull();
+        vm.FinishPoiId.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task SetStartAsync_IsNoOp_WhenTripViewOff_OrStopUnknown()
+    {
+        var factory = SeedFactory(placeable: 2);
+        await using var vm = CreateVm(factory);
+        await vm.LoadAsync(CollectionId, 2); // Trip View off
+
+        await vm.SetStartAsync(1);
+        vm.StartPoiId.Should().BeNull("designation is meaningless while Trip View is off");
+
+        await vm.ToggleAsync();
+        await vm.SetStartAsync(999); // not a stop of this collection
+        vm.StartPoiId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Redesignation_MovesStartPin_AndOldStartBecomesInterior()
+    {
+        await using var vm = await EnabledVmAsync(SeedFactory(placeable: 3), 3);
+        await vm.SetStartAsync(2);
+
+        await vm.SetStartAsync(3);
+
+        vm.StartPoiId.Should().Be(3);
+        vm.StopRole(2).Should().Be(TripStopRole.None, "the prior pin is released");
+        vm.OrderedStops.Select(s => s.OrderIndex).Should().BeEquivalentTo(new[] { 1, 2, 3 },
+            "the order stays contiguous and unique through re-designation");
+        vm.OrderedStops[0].PoiId.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task Pins_ClearFromVmState_WhenTripViewTurnsOff()
+    {
+        await using var vm = await EnabledVmAsync(SeedFactory(placeable: 3), 3);
+        await vm.SetStartAsync(1);
+        await vm.SetFinishAsync(3);
+
+        await vm.ToggleAsync(); // off
+
+        vm.StartPoiId.Should().BeNull();
+        vm.FinishPoiId.Should().BeNull();
+        vm.StartFinishAnnouncement.Should().BeNull();
+        vm.StopRole(1).Should().Be(TripStopRole.None);
+    }
+
     [Fact]
     public async Task SelectStop_DoesNotDisturbStopProjections()
     {

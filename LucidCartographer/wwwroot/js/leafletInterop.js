@@ -15,6 +15,11 @@
         // every marker reverts to its plain dot. Survives collection re-shows
         // (enrichment refresh) the same way labelsVisible does.
         stopOrders: {},
+        // TRIP-STARTFINISH-06: Start/Finish marker roles — {startPoiId,
+        // finishPoiId, startAria, finishAria} or null. Folded into
+        // buildMarkerIcon (like stopOrders/selectedStopId) so the distinct
+        // Start/Finish glyph/ring + accessible name survive marker re-skins.
+        tripRoles: null,
         // TRIP-MAP-01: Trip View connecting legs. A dedicated L.layerGroup of
         // straight polylines between consecutive Stops (plus the Roundtrip
         // closing leg), kept SEPARATE from layerGroups/markers so trip overlays
@@ -214,9 +219,30 @@
         var selected = state.selectedStopId != null && poiId === state.selectedStopId;
         var stop = state.stopOrders[poiId];
         if (stop != null) {
+            // TRIP-STARTFINISH-06: the pinned Start/Finish markers carry a
+            // distinct ring (CSS class) + a small role glyph, and the badge gets
+            // role="img" with the localized aria-label/title — a glyph alone is
+            // meaningless to a screen reader. Baked in here so the role survives
+            // setStopOrders / addCollectionMarkers / emphasizeStop re-skins.
+            var roleClass = '';
+            var roleAria = null;
+            var roleGlyph = '';
+            var roles = state.tripRoles;
+            if (roles && roles.startPoiId != null && poiId === roles.startPoiId) {
+                roleClass = ' stop-order-start';
+                roleAria = roles.startAria;
+                roleGlyph = '<span class="stop-order-role-glyph material-symbols-outlined" aria-hidden="true">trip_origin</span>';
+            } else if (roles && roles.finishPoiId != null && poiId === roles.finishPoiId) {
+                roleClass = ' stop-order-finish';
+                roleAria = roles.finishAria;
+                roleGlyph = '<span class="stop-order-role-glyph material-symbols-outlined" aria-hidden="true">sports_score</span>';
+            }
+            var ariaAttrs = roleAria
+                ? ' role="img" aria-label="' + escapeHtml(roleAria) + '" title="' + escapeHtml(roleAria) + '"'
+                : '';
             return L.divIcon({
-                className: 'stop-order-marker' + (selected ? ' trip-stop-selected' : ''),
-                html: '<div class="stop-order-badge">' + escapeHtml(String(stop)) + '</div>',
+                className: 'stop-order-marker' + roleClass + (selected ? ' trip-stop-selected' : ''),
+                html: '<div class="stop-order-badge"' + ariaAttrs + '>' + escapeHtml(String(stop)) + roleGlyph + '</div>',
                 iconSize: [24, 24],
                 iconAnchor: [12, 12]
             });
@@ -263,6 +289,7 @@
             // transient MapPageViewModel (whose ShowPoiLabels defaults to false).
             state.labelsVisible = false;
             state.stopOrders = {};
+            state.tripRoles = null;
             state.selectedStopId = null;
             // Prior map removed above took its overlay layers with it; drop the
             // stale trip-leg group handle so a fresh draw starts clean.
@@ -318,6 +345,7 @@
             state.layerGroups = {};
             state.markers = {};
             state.stopOrders = {};
+            state.tripRoles = null;
             state.selectedStopId = null;
             state.tripLegLayer = null;
             state.userMarker = null;
@@ -396,8 +424,12 @@
         // marker to its plain colour dot. Re-skins existing markers in place
         // (rebuilds each icon) so no collection re-show is needed; new markers
         // added later read state.stopOrders in addCollectionMarkers.
-        setStopOrders: function (orders) {
+        // `roles` (TRIP-STARTFINISH-06) optionally marks the pinned Start/Finish
+        // markers: {startPoiId, finishPoiId, startAria, finishAria}; absent/null
+        // clears any prior role marking.
+        setStopOrders: function (orders, roles) {
             state.stopOrders = orders || {};
+            state.tripRoles = roles || null;
             for (var id in state.markers) {
                 if (!Object.prototype.hasOwnProperty.call(state.markers, id)) continue;
                 var marker = state.markers[id];
@@ -452,7 +484,11 @@
         // an INCREMENTAL redraw: only the prior trip-leg layer is removed and the
         // new one added — no initMap, no addCollectionMarkers rebuild of unrelated
         // collections (satisfies NFR1 / AC3). An empty/absent array clears the legs.
-        drawTripLegs: function (legs) {
+        // `roundtrip` (TRIP-STARTFINISH-06) flags the Roundtrip shape — the leg
+        // list then ends with the closing leg (Order N back to the Start), which
+        // gets the identifying `trip-leg-closing` class. Same dashed + muted
+        // Phase-1 styling as every other non-Measured leg (no visual fork).
+        drawTripLegs: function (legs, roundtrip) {
             if (!state.map) return;
             if (state.tripLegLayer) {
                 state.map.removeLayer(state.tripLegLayer);
@@ -461,7 +497,8 @@
             if (!legs || !legs.length) return;
 
             var group = L.layerGroup();
-            legs.forEach(function (leg) {
+            legs.forEach(function (leg, idx) {
+                var closing = !!roundtrip && idx === legs.length - 1;
                 // Line-solidity = geometric fidelity: only a Measured leg renders
                 // solid/full-weight; every Phase-1 leg is non-Measured → dashed +
                 // muted. The stroke colour comes from the .trip-leg-line CSS class
@@ -471,7 +508,7 @@
                 L.polyline(
                     [[leg.fromLat, leg.fromLon], [leg.toLat, leg.toLon]],
                     {
-                        className: measured ? 'trip-leg-line trip-leg-measured' : 'trip-leg-line',
+                        className: (measured ? 'trip-leg-line trip-leg-measured' : 'trip-leg-line') + (closing ? ' trip-leg-closing' : ''),
                         dashArray: measured ? null : '6 6',
                         weight: measured ? 4 : 2,
                         opacity: measured ? 1 : 0.7,

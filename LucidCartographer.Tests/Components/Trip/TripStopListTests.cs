@@ -356,6 +356,174 @@ public class TripStopListTests : BunitTestContext
         });
     }
 
+    // === Story 1.7: Start/Finish designation controls + glyphs ===
+
+    private static string SetStartLabel(string name) =>
+        string.Format(CultureInfo.CurrentCulture, UiStrings.TripSetAsStart, name);
+
+    private static string UnsetStartLabel(string name) =>
+        string.Format(CultureInfo.CurrentCulture, UiStrings.TripUnsetStart, name);
+
+    private static string SetFinishLabel(string name) =>
+        string.Format(CultureInfo.CurrentCulture, UiStrings.TripSetAsFinish, name);
+
+    private static string UnsetFinishLabel(string name) =>
+        string.Format(CultureInfo.CurrentCulture, UiStrings.TripUnsetFinish, name);
+
+    [Fact]
+    public async Task TripStopList_StartFinishControls_RenderPerRow_WithAriaLabels()
+    {
+        await using var vm = await EnabledVmAsync(placeable: 3);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        foreach (var name in new[] { "P1", "P2", "P3" })
+        {
+            var start = cut.Find($"button[aria-label=\"{SetStartLabel(name)}\"]");
+            var finish = cut.Find($"button[aria-label=\"{SetFinishLabel(name)}\"]");
+            start.GetAttribute("type").Should().Be("button");
+            finish.GetAttribute("type").Should().Be("button");
+            start.GetAttribute("aria-pressed").Should().Be("false");
+            finish.GetAttribute("aria-pressed").Should().Be("false");
+        }
+    }
+
+    [Fact]
+    public async Task TripStopList_SetStart_PinsRowToTop_ShowsStartBadgeGlyph_AndAnnounces()
+    {
+        await using var vm = await EnabledVmAsync(placeable: 3);
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        cut.Find($"button[aria-label=\"{SetStartLabel("P2")}\"]").Click();
+
+        var startBadgeAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripStartBadgeAria, 3);
+        var expected = string.Format(CultureInfo.CurrentCulture, UiStrings.TripStartSetAnnouncement, "P2");
+        cut.WaitForAssertion(() =>
+        {
+            var rows = cut.FindAll("li");
+            rows[0].TextContent.Should().Contain("P2", "the Start anchors the list at stop 1");
+            // Distinct Start badge aria + glyph on the Start row.
+            var badge = cut.Find($"[aria-label=\"{startBadgeAria}\"]");
+            badge.TextContent.Trim().Should().Be("1", "the numeral stays readable");
+            rows[0].QuerySelectorAll(".material-symbols-outlined")
+                .Should().Contain(e => e.TextContent.Trim() == "trip_origin");
+            // The control flips to Unset with aria-pressed=true.
+            var unset = cut.Find($"button[aria-label=\"{UnsetStartLabel("P2")}\"]");
+            unset.GetAttribute("aria-pressed").Should().Be("true");
+            // aria-live region announces the designation.
+            cut.FindAll("[aria-live='polite']")
+                .Should().Contain(r => r.TextContent.Contains(expected, StringComparison.Ordinal));
+        });
+
+        vm.StartPoiId.Should().Be(2, "the click wired through the VM to the service");
+    }
+
+    [Fact]
+    public async Task TripStopList_SetFinish_PinsRowToBottom_ShowsFinishGlyph_AnnouncesOpenPath()
+    {
+        await using var vm = await EnabledVmAsync(placeable: 3);
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        cut.Find($"button[aria-label=\"{SetFinishLabel("P1")}\"]").Click();
+
+        var finishBadgeAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripFinishBadgeAria, 3);
+        var expected = string.Format(CultureInfo.CurrentCulture, UiStrings.TripOpenPathAnnounce, "P1");
+        cut.WaitForAssertion(() =>
+        {
+            var rows = cut.FindAll("li");
+            rows[2].TextContent.Should().Contain("P1", "the Finish is pinned to stop N");
+            cut.Find($"[aria-label=\"{finishBadgeAria}\"]").TextContent.Trim().Should().Be("3");
+            rows[2].QuerySelectorAll(".material-symbols-outlined")
+                .Should().Contain(e => e.TextContent.Trim() == "sports_score");
+            cut.FindAll("[aria-live='polite']")
+                .Should().Contain(r => r.TextContent.Contains(expected, StringComparison.Ordinal));
+        });
+
+        vm.FinishPoiId.Should().Be(1);
+        vm.IsRoundtrip.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task TripStopList_CrossPinning_IsDisabled_StartRowCannotBeFinish_AndViceVersa()
+    {
+        await using var vm = await EnabledVmAsync(placeable: 4, startPoiId: 1, finishPoiId: 4);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        // "Set as Finish" is disabled on the current Start row and vice versa.
+        cut.Find($"button[aria-label=\"{SetFinishLabel("P1")}\"]").HasAttribute("disabled").Should().BeTrue();
+        cut.Find($"button[aria-label=\"{SetStartLabel("P4")}\"]").HasAttribute("disabled").Should().BeTrue();
+        // The pinned rows' own role controls stay enabled (they unset).
+        cut.Find($"button[aria-label=\"{UnsetStartLabel("P1")}\"]").HasAttribute("disabled").Should().BeFalse();
+        cut.Find($"button[aria-label=\"{UnsetFinishLabel("P4")}\"]").HasAttribute("disabled").Should().BeFalse();
+        // Interior rows can take either role.
+        cut.Find($"button[aria-label=\"{SetStartLabel("P2")}\"]").HasAttribute("disabled").Should().BeFalse();
+        cut.Find($"button[aria-label=\"{SetFinishLabel("P2")}\"]").HasAttribute("disabled").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task TripStopList_UnsetFinish_RestoresRoundtrip_AndAnnounces()
+    {
+        await using var vm = await EnabledVmAsync(placeable: 3, finishPoiId: 3);
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        cut.Find($"button[aria-label=\"{UnsetFinishLabel("P3")}\"]").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.FindAll("[aria-live='polite']")
+                .Should().Contain(r => r.TextContent.Contains(UiStrings.TripRoundtripAnnounce, StringComparison.Ordinal));
+            cut.Find($"button[aria-label=\"{SetFinishLabel("P3")}\"]").GetAttribute("aria-pressed").Should().Be("false");
+        });
+
+        vm.FinishPoiId.Should().BeNull();
+        vm.IsRoundtrip.Should().BeTrue("clearing the Finish returns the Trip to a Roundtrip");
+        vm.OrderedLegs.Should().HaveCount(3, "the closing leg is restored");
+    }
+
+    [Fact]
+    public async Task MobileTripPanel_StartFinishControls_Operate_WithGlyphsAnd44pxTargets()
+    {
+        await using var vm = await EnabledVmAsync(placeable: 3);
+        var cut = RenderComponent<MobileTripPanel>(p => p.Add(x => x.Vm, vm));
+
+        // Same aria-labels as desktop (shared UiStrings + shared VM), ≥44px targets.
+        var setStart = cut.Find($"button[aria-label=\"{SetStartLabel("P2")}\"]");
+        setStart.GetAttribute("style").Should().Contain("min-width:44px").And.Contain("min-height:44px");
+
+        setStart.Click();
+
+        var startBadgeAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripStartBadgeAria, 3);
+        var expected = string.Format(CultureInfo.CurrentCulture, UiStrings.TripStartSetAnnouncement, "P2");
+        cut.WaitForAssertion(() =>
+        {
+            var rows = cut.FindAll(".row");
+            rows[0].TextContent.Should().Contain("P2");
+            // The mobile Start row carries the role glyph with its accessible name.
+            var glyph = cut.Find($"[aria-label=\"{startBadgeAria}\"]");
+            glyph.TextContent.Trim().Should().Be("trip_origin");
+            cut.Find($"button[aria-label=\"{UnsetStartLabel("P2")}\"]").GetAttribute("aria-pressed").Should().Be("true");
+            cut.FindAll("[aria-live='polite']")
+                .Should().Contain(r => r.TextContent.Contains(expected, StringComparison.Ordinal));
+        });
+
+        vm.StartPoiId.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task MobileTripPanel_CrossPinning_Disabled_AndFinishGlyphRenders()
+    {
+        await using var vm = await EnabledVmAsync(placeable: 3, startPoiId: 1, finishPoiId: 3);
+
+        var cut = RenderComponent<MobileTripPanel>(p => p.Add(x => x.Vm, vm));
+
+        cut.Find($"button[aria-label=\"{SetFinishLabel("P1")}\"]").HasAttribute("disabled").Should().BeTrue();
+        cut.Find($"button[aria-label=\"{SetStartLabel("P3")}\"]").HasAttribute("disabled").Should().BeTrue();
+
+        var finishBadgeAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripFinishBadgeAria, 3);
+        cut.Find($"[aria-label=\"{finishBadgeAria}\"]").TextContent.Trim().Should().Be("sports_score");
+    }
+
     // === Story 1.6: "Not placeable" row treatment ([TRIP-PLACE-04/05]) ===
 
     /// <summary>

@@ -117,6 +117,92 @@ public class MobileTripViewTests : MobileTestBase
         Assert.Equal(before[0], after[1]);
     }
 
+    // === Story 1.7: Start/Finish designation on the mobile render path ===
+
+    private static string Fmt(string template, params object[] args) =>
+        string.Format(System.Globalization.CultureInfo.CurrentCulture, template, args);
+
+    private async Task<bool> WaitForLegCountAsync(int expected, int timeoutMs = 10000)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (StubMapService.LastTripLegCount == expected)
+            {
+                return true;
+            }
+            await Page.WaitForTimeoutAsync(100);
+        }
+        return StubMapService.LastTripLegCount == expected;
+    }
+
+    [Fact]
+    public async Task MobileDesignateStart_PinsToStopOne_ShowsGlyph_AndAnnounces()
+    {
+        await ImportTestFileAsync("sample.gpx", "Test Places", "#005bbf");
+        await MobileNavigateAndWaitForAppAsync("/");
+        await Page.Locator(ToggleSelector).ClickAsync();
+        await Page.Locator(ListSelector).WaitForAsync(new() { Timeout = 10000 });
+
+        var names = await StopNamesAsync();
+        Assert.True(names.Count >= 3);
+
+        // The Set-as-Start control is present, ≥44px, and operable on mobile.
+        var setStart = Page.Locator($"{ListSelector} button[aria-label=\"{Fmt(UiStrings.TripSetAsStart, names[1])}\"]");
+        var box = await setStart.BoundingBoxAsync();
+        Assert.NotNull(box);
+        Assert.True(box!.Width >= 44 && box.Height >= 44, $"start control is {box.Width}x{box.Height}, expected >=44px");
+
+        await setStart.ClickAsync();
+
+        // Pinned to stop 1 with the distinct Start glyph (role img + aria) and
+        // the aria-live announcement — identical UiStrings text to desktop.
+        await Page.Locator($"{ListSelector} .row[data-poi-id] >> nth=0").Filter(new() { HasText = names[1] })
+            .WaitForAsync(new() { Timeout = 10000 });
+        await Page.Locator($"{ListSelector} [aria-label=\"{Fmt(UiStrings.TripStartBadgeAria, names.Count)}\"]")
+            .WaitForAsync(new() { Timeout = 10000 });
+        await Page.Locator($"span[aria-live='polite']:has-text(\"{Fmt(UiStrings.TripStartSetAnnouncement, names[1])}\")")
+            .WaitForAsync(new() { Timeout = 10000 });
+        Assert.Equal("true", await Page
+            .Locator($"{ListSelector} button[aria-label=\"{Fmt(UiStrings.TripUnsetStart, names[1])}\"]")
+            .GetAttributeAsync("aria-pressed"));
+    }
+
+    [Fact]
+    public async Task MobileSetFinish_OpensPath_DisablesCrossPin_AndClearRestoresRoundtrip()
+    {
+        StubMapService.ResetTripRecording();
+        await ImportTestFileAsync("sample.gpx", "Test Places", "#005bbf");
+        await MobileNavigateAndWaitForAppAsync("/");
+        await Page.Locator(ToggleSelector).ClickAsync();
+        await Page.Locator(ListSelector).WaitForAsync(new() { Timeout = 10000 });
+
+        var names = await StopNamesAsync();
+        var n = names.Count;
+        Assert.True(n >= 3);
+
+        // Roundtrip by default: N legs incl. the closing leg.
+        Assert.True(await WaitForLegCountAsync(n), $"expected {n} roundtrip legs, saw {StubMapService.LastTripLegCount}");
+
+        // Designate a distinct Finish ⇒ open path: stop N, glyph, announcement,
+        // N−1 legs, and the cross-pin control disables.
+        await Page.Locator($"{ListSelector} button[aria-label=\"{Fmt(UiStrings.TripSetAsFinish, names[0])}\"]").ClickAsync();
+        await Page.Locator($"{ListSelector} .row[data-poi-id] >> nth={n - 1}").Filter(new() { HasText = names[0] })
+            .WaitForAsync(new() { Timeout = 10000 });
+        await Page.Locator($"{ListSelector} [aria-label=\"{Fmt(UiStrings.TripFinishBadgeAria, n)}\"]")
+            .WaitForAsync(new() { Timeout = 10000 });
+        await Page.Locator($"span[aria-live='polite']:has-text(\"{Fmt(UiStrings.TripOpenPathAnnounce, names[0])}\")")
+            .WaitForAsync(new() { Timeout = 10000 });
+        Assert.True(await WaitForLegCountAsync(n - 1), $"expected {n - 1} open-path legs, saw {StubMapService.LastTripLegCount}");
+        Assert.True(await Page.Locator($"{ListSelector} button[aria-label=\"{Fmt(UiStrings.TripSetAsStart, names[0])}\"]").IsDisabledAsync());
+
+        // Clearing the Finish restores the Roundtrip (closing leg + announcement).
+        await Page.Locator($"{ListSelector} button[aria-label=\"{Fmt(UiStrings.TripUnsetFinish, names[0])}\"]").ClickAsync();
+        await Page.Locator($"span[aria-live='polite']:has-text(\"{UiStrings.TripRoundtripAnnounce}\")")
+            .WaitForAsync(new() { Timeout = 10000 });
+        Assert.True(await WaitForLegCountAsync(n), $"expected the closing leg back ({n} legs), saw {StubMapService.LastTripLegCount}");
+    }
+
     [Fact]
     public async Task MobileMoveEdges_AreDisabledGuards()
     {

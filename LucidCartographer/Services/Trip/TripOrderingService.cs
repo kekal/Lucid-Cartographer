@@ -193,6 +193,156 @@ public sealed class TripOrderingService(
         await SetOrderAsync(collectionId, Renumber(stops), ct);
     }
 
+    // === Start/Finish designation (Story 1.7) ===
+
+    public Task SetStartAsync(int collectionId, int poiId, CancellationToken ct = default) =>
+        SetPinAsync(collectionId, poiId, pinIsStart: true, ct);
+
+    public Task ClearStartAsync(int collectionId, CancellationToken ct = default) =>
+        ClearPinAsync(collectionId, pinIsStart: true, ct);
+
+    public Task SetFinishAsync(int collectionId, int poiId, CancellationToken ct = default) =>
+        SetPinAsync(collectionId, poiId, pinIsStart: false, ct);
+
+    public Task ClearFinishAsync(int collectionId, CancellationToken ct = default) =>
+        ClearPinAsync(collectionId, pinIsStart: false, ct);
+
+    // TRIP-STARTFINISH-02 (AR-11 single writer): all four designation paths land
+    // here. The pin fields (StartPoiId/FinishPoiId) are written first, then the
+    // placeable Stop sequence is rebuilt — pinned Start first, interior Stops in
+    // their existing relative order, pinned Finish last — and renumbered through
+    // the SAME Renumber + SetOrderAsync the seed/compaction/reorder paths use, so
+    // the result is contiguous, gap-free and unique 1..N by construction and no
+    // stop can ever hold two Stop Order values.
+    private async Task SetPinAsync(int collectionId, int poiId, bool pinIsStart, CancellationToken ct)
+    {
+        var (startPoiId, finishPoiId) = await ReadPinsAsync(collectionId, ct);
+
+        // A stop cannot be both Start and Finish — reject the cross-designation
+        // (the UI surfaces this as a disabled control; the service stays the
+        // authoritative guard for any other caller, e.g. MCP).
+        if (pinIsStart && poiId == finishPoiId)
+        {
+            throw new InvalidOperationException(
+                $"POI {poiId} is the current Finish of collection {collectionId}; a stop cannot be both Start and Finish.");
+        }
+        if (!pinIsStart && poiId == startPoiId)
+        {
+            throw new InvalidOperationException(
+                $"POI {poiId} is the current Start of collection {collectionId}; a stop cannot be both Start and Finish.");
+        }
+
+        if ((pinIsStart ? startPoiId : finishPoiId) == poiId)
+        {
+            // Already designated — idempotent no-op, nothing to write.
+            return;
+        }
+
+        var rows = await ReadAsync(collectionId, ct);
+        var target = rows.FirstOrDefault(r => r.PoiId == poiId);
+        if (target is null || !target.Placeable || target.Order <= 0)
+        {
+            // Absent, unplaceable (OrderIndex 0, excluded from routing) or
+            // unordered — not a Start/Finish candidate ([TRIP-PLACE-01] guard).
+            return;
+        }
+
+        var newStart = pinIsStart ? poiId : startPoiId;
+        var newFinish = pinIsStart ? finishPoiId : poiId;
+
+        // Re-designation releases the old pin implicitly: the prior endpoint is
+        // simply no longer first/last in the rebuilt sequence and renumbers into
+        // an interior slot — no gap, no duplicate.
+        await WritePinsAsync(collectionId, newStart, newFinish, ct);
+        await RenumberWithPinsAsync(collectionId, rows, newStart, newFinish, ct);
+    }
+
+    private async Task ClearPinAsync(int collectionId, bool pinIsStart, CancellationToken ct)
+    {
+        var (startPoiId, finishPoiId) = await ReadPinsAsync(collectionId, ct);
+        if ((pinIsStart ? startPoiId : finishPoiId) is null)
+        {
+            return;
+        }
+
+        var newStart = pinIsStart ? null : startPoiId;
+        var newFinish = pinIsStart ? finishPoiId : null;
+        await WritePinsAsync(collectionId, newStart, newFinish, ct);
+
+        // Clearing a pin never reshuffles the order — the former endpoint stays
+        // where it is, the sequence is already contiguous 1..N. Re-validate
+        // through the same path anyway (idempotent: SetOrderAsync writes nothing
+        // when the desired order equals the stored one).
+        var rows = await ReadAsync(collectionId, ct);
+        await RenumberWithPinsAsync(collectionId, rows, newStart, newFinish, ct);
+    }
+
+    /// <summary>
+    /// Rebuilds the placeable Stop sequence with the pinned endpoints in their
+    /// slots (Start → 1, Finish → N, interior compacted to fill the middle in
+    /// existing relative order) and commits via the one OrderIndex writer.
+    /// Pins only count when the designated POI actually is a Stop (defensive —
+    /// mirrors ReorderStopAsync).
+    /// </summary>
+    private async Task RenumberWithPinsAsync(
+        int collectionId, List<ItemRow> rows, int? startPoiId, int? finishPoiId, CancellationToken ct)
+    {
+        var stops = rows.Where(r => r.Placeable && r.Order > 0)
+            .OrderBy(r => r.Order)
+            .ThenBy(r => r.AddedDate)
+            .ThenBy(r => r.PoiId)
+            .ToList();
+
+        var start = startPoiId is { } sid ? stops.FirstOrDefault(s => s.PoiId == sid) : null;
+        var finish = finishPoiId is { } fid ? stops.FirstOrDefault(s => s.PoiId == fid) : null;
+
+        var sequence = new List<ItemRow>(stops.Count);
+        if (start is not null)
+        {
+            sequence.Add(start);
+        }
+        sequence.AddRange(stops.Where(s => s != start && s != finish));
+        if (finish is not null)
+        {
+            sequence.Add(finish);
+        }
+
+        await SetOrderAsync(collectionId, Renumber(sequence), ct);
+    }
+
+    /// <summary>
+    /// Writes StartPoiId/FinishPoiId on the tracked PoiCollection under the
+    /// shared write gate. The Version concurrency token is bumped centrally by
+    /// AppDbContext.SaveChanges for every modified PoiCollection, so a concurrent
+    /// editor of the same collection surfaces as a DbUpdateConcurrencyException
+    /// rather than a silent lost update.
+    /// </summary>
+    private async Task WritePinsAsync(int collectionId, int? startPoiId, int? finishPoiId, CancellationToken ct)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var collection = await db.PoiCollections.FirstOrDefaultAsync(c => c.Id == collectionId, ct);
+        if (collection is null || (collection.StartPoiId == startPoiId && collection.FinishPoiId == finishPoiId))
+        {
+            return;
+        }
+
+        collection.StartPoiId = startPoiId;
+        collection.FinishPoiId = finishPoiId;
+
+        await writeLock.Gate.WaitAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        finally
+        {
+            writeLock.Gate.Release();
+        }
+
+        logger.LogDebug("Start/Finish pins written for collection {CollectionId} (Start {StartPoiId}, Finish {FinishPoiId})",
+            collectionId, startPoiId, finishPoiId);
+    }
+
     private async Task<(int? StartPoiId, int? FinishPoiId)> ReadPinsAsync(int collectionId, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);

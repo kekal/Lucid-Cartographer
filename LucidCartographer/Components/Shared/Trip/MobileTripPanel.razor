@@ -16,6 +16,10 @@
    desktop surface, so the announcement behaviour is identical (NFR4 / AR-9). *@
 <span class="sr-only" role="status" aria-live="polite">@Vm.LastReorderAnnouncement</span>
 
+@* TRIP-STARTFINISH-05: announces Start/Finish designation changes and the
+   roundtrip ↔ open-path shape transitions — same VM-backed text as desktop. *@
+<span class="sr-only" role="status" aria-live="polite">@Vm.StartFinishAnnouncement</span>
+
 <div class="scroll" style="flex:1">
     @* `trip-stop-list` scopes the JS scroll-into-view helper (TRIP-SELECT-05). *@
     <div class="list trip-stop-list" aria-label="@UiStrings.TripStopListAria">
@@ -55,6 +59,7 @@
                     var stop = Vm.OrderedStops.First(s => s.PoiId == row.PoiId);
                     var selected = Vm.SelectedStopPoiId == row.PoiId;
                     var number = row.DisplayOrder!.Value;
+                    var role = Vm.StopRole(row.PoiId);
                     @* data-poi-id mirrors the plain POI list rows so the scroll helper
                        (TRIP-SELECT-05) can locate a row. Tap / Enter / Space select the
                        stop (list→map). Selected rows tint with the primary-soft token
@@ -80,9 +85,22 @@
                               style="display:inline-flex;align-items:center;justify-content:center;min-width:24px;color:var(--text-2);touch-action:none">
                             <span class="ms" aria-hidden="true">drag_indicator</span>
                         </span>
-                        <div class="avatar" style="background:var(--primary)">
+                        @* TRIP-STARTFINISH-03: pinned Start gets a distinct primary
+                           ring on the badge avatar; pinned Finish a distinct muted
+                           ring. Tokens only, no raw hex (dark mode first-class). *@
+                        <div class="avatar" style="background:var(--primary)@(role == TripStopRole.Start ? ";box-shadow:0 0 0 2px var(--bg-elev-1),0 0 0 4px var(--primary)" : role == TripStopRole.Finish ? ";box-shadow:0 0 0 2px var(--bg-elev-1),0 0 0 4px var(--text-2)" : "")">
                             <StopOrderBadge Number="number" />
                         </div>
+                        @* TRIP-STARTFINISH-03: distinct Start/Finish glyph (Material
+                           Symbols Outlined) carrying the role's accessible name —
+                           "Start — stop 1 of N" / "Finish — stop N of N". *@
+                        @if (role != TripStopRole.None)
+                        {
+                            <span class="ms" role="img"
+                                  aria-label="@BadgeAria(role, number)"
+                                  title="@BadgeAria(role, number)"
+                                  style="min-width:20px;text-align:center;color:@(role == TripStopRole.Start ? "var(--primary)" : "var(--text-2)")">@(role == TripStopRole.Start ? "trip_origin" : "sports_score")</span>
+                        }
                         <div class="meta">
                             <div class="name">@row.Name</div>
                             @* Inert timeline placeholder (Epic 2 computes arrival time). *@
@@ -92,25 +110,57 @@
                         <div class="trailing" aria-label="@UiStrings.TripDwellAria">@UiStrings.TripDwellPlaceholder</div>
                         @* TRIP-ORDER-03: keyboard/touch move controls — identical
                            semantics to the desktop surface (same VM methods, same
-                           aria-labels), ≥44px touch targets (NFR4 / UX-DR12). *@
-                        <button type="button"
-                                aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopUp, row.Name)"
-                                disabled="@(!Vm.CanMoveUp(stop))"
-                                style="min-width:44px;min-height:44px;background:transparent;border:none;color:var(--text-2);@(Vm.CanMoveUp(stop) ? "" : "opacity:.4")"
-                                @onclick="() => Vm.MoveStopUpAsync(row.PoiId)"
-                                @onclick:stopPropagation
-                                @onkeydown:stopPropagation>
-                            <span class="ms" aria-hidden="true">arrow_upward</span>
-                        </button>
-                        <button type="button"
-                                aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopDown, row.Name)"
-                                disabled="@(!Vm.CanMoveDown(stop))"
-                                style="min-width:44px;min-height:44px;background:transparent;border:none;color:var(--text-2);@(Vm.CanMoveDown(stop) ? "" : "opacity:.4")"
-                                @onclick="() => Vm.MoveStopDownAsync(row.PoiId)"
-                                @onclick:stopPropagation
-                                @onkeydown:stopPropagation>
-                            <span class="ms" aria-hidden="true">arrow_downward</span>
-                        </button>
+                           aria-labels), ≥44px touch targets (NFR4 / UX-DR12).
+                           Stacked into a narrow column (Story 1.7) so the Start/
+                           Finish controls beside them fit a 390px row without
+                           pushing the row's tap centre off the selectable area. *@
+                        <span style="display:inline-flex;flex-direction:column;flex-shrink:0">
+                            <button type="button"
+                                    aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopUp, row.Name)"
+                                    disabled="@(!Vm.CanMoveUp(stop))"
+                                    style="min-width:44px;min-height:44px;background:transparent;border:none;color:var(--text-2);@(Vm.CanMoveUp(stop) ? "" : "opacity:.4")"
+                                    @onclick="() => Vm.MoveStopUpAsync(row.PoiId)"
+                                    @onclick:stopPropagation
+                                    @onkeydown:stopPropagation>
+                                <span class="ms" aria-hidden="true">arrow_upward</span>
+                            </button>
+                            <button type="button"
+                                    aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopDown, row.Name)"
+                                    disabled="@(!Vm.CanMoveDown(stop))"
+                                    style="min-width:44px;min-height:44px;background:transparent;border:none;color:var(--text-2);@(Vm.CanMoveDown(stop) ? "" : "opacity:.4")"
+                                    @onclick="() => Vm.MoveStopDownAsync(row.PoiId)"
+                                    @onclick:stopPropagation
+                                    @onkeydown:stopPropagation>
+                                <span class="ms" aria-hidden="true">arrow_downward</span>
+                            </button>
+                        </span>
+                        @* TRIP-STARTFINISH-04: Set/Unset Start & Finish controls —
+                           identical semantics + UiStrings aria-labels to the desktop
+                           surface (UX-DR12), ≥44px touch targets. "Set as Finish" is
+                           disabled on the current Start row and vice versa (AC-6 as
+                           a disabled control, not an error). *@
+                        <span style="display:inline-flex;flex-direction:column;flex-shrink:0">
+                            <button type="button"
+                                    aria-label="@StartControlAria(role, row.Name)"
+                                    aria-pressed="@(role == TripStopRole.Start ? "true" : "false")"
+                                    disabled="@(!Vm.CanSetStart(row.PoiId))"
+                                    style="min-width:44px;min-height:44px;background:transparent;border:none;color:@(role == TripStopRole.Start ? "var(--primary)" : "var(--text-2)");@(Vm.CanSetStart(row.PoiId) ? "" : "opacity:.4")"
+                                    @onclick="() => OnStartClickAsync(row.PoiId, role)"
+                                    @onclick:stopPropagation
+                                    @onkeydown:stopPropagation>
+                                <span class="ms" aria-hidden="true">trip_origin</span>
+                            </button>
+                            <button type="button"
+                                    aria-label="@FinishControlAria(role, row.Name)"
+                                    aria-pressed="@(role == TripStopRole.Finish ? "true" : "false")"
+                                    disabled="@(!Vm.CanSetFinish(row.PoiId))"
+                                    style="min-width:44px;min-height:44px;background:transparent;border:none;color:@(role == TripStopRole.Finish ? "var(--primary)" : "var(--text-2)");@(Vm.CanSetFinish(row.PoiId) ? "" : "opacity:.4")"
+                                    @onclick="() => OnFinishClickAsync(row.PoiId, role)"
+                                    @onclick:stopPropagation
+                                    @onkeydown:stopPropagation>
+                                <span class="ms" aria-hidden="true">sports_score</span>
+                            </button>
+                        </span>
                     </div>
                 }
             }
@@ -153,6 +203,29 @@
         _draggedPoiId = null;
         await Vm.MoveStopToAsync(poiId, targetOrderIndex);
     }
+
+    // TRIP-STARTFINISH-04: thin bridges — identical to the desktop surface; all
+    // designation logic lives in the VM → service.
+    private Task OnStartClickAsync(int poiId, TripStopRole role) =>
+        role == TripStopRole.Start ? Vm.ClearStartAsync() : Vm.SetStartAsync(poiId);
+
+    private Task OnFinishClickAsync(int poiId, TripStopRole role) =>
+        role == TripStopRole.Finish ? Vm.ClearFinishAsync() : Vm.SetFinishAsync(poiId);
+
+    private string BadgeAria(TripStopRole role, int number) => role switch
+    {
+        TripStopRole.Start => string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripStartBadgeAria, Vm.OrderedStops.Count),
+        TripStopRole.Finish => string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripFinishBadgeAria, Vm.OrderedStops.Count),
+        _ => string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripStopBadgeAria, number, Vm.OrderedStops.Count),
+    };
+
+    private static string StartControlAria(TripStopRole role, string name) =>
+        string.Format(System.Globalization.CultureInfo.CurrentCulture,
+            role == TripStopRole.Start ? UiStrings.TripUnsetStart : UiStrings.TripSetAsStart, name);
+
+    private static string FinishControlAria(TripStopRole role, string name) =>
+        string.Format(System.Globalization.CultureInfo.CurrentCulture,
+            role == TripStopRole.Finish ? UiStrings.TripUnsetFinish : UiStrings.TripSetAsFinish, name);
 
     public void Dispose() => Vm.StateChanged -= OnVmChanged;
 }

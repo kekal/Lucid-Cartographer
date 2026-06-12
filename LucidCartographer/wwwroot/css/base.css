@@ -77,6 +77,44 @@ nav a, .nav-link-no-underline {
     line-height: 1;
 }
 
+/* Trip View Start/Finish marker roles (TRIP-STARTFINISH-06, UX-DR2). The pinned
+   Start marker badge carries a distinct primary ring + a small trip_origin
+   glyph; the pinned Finish a distinct muted ring + a sports_score glyph — both
+   on top of the numbered badge so the numeral stays readable, mirroring the
+   in-list badge treatment. Token-driven so a re-theme keeps them in step. */
+.stop-order-marker .stop-order-badge {
+    position: relative;
+}
+
+.stop-order-marker.stop-order-start .stop-order-badge {
+    box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--primary, #005bbf), 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.stop-order-marker.stop-order-finish .stop-order-badge {
+    box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--trip-leg-muted, #727785), 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.stop-order-role-glyph {
+    position: absolute;
+    top: -10px;
+    right: -10px;
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    line-height: 1;
+    color: var(--primary, #005bbf);
+    background: #fff;
+    border-radius: 50%;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.stop-order-marker.stop-order-finish .stop-order-role-glyph {
+    color: var(--trip-leg-muted, #727785);
+}
+
 /* Trip View selected-Stop marker emphasis (TRIP-SELECT-02). Applied to the
    selected marker's divIcon (plain dot or numbered badge) on top of its normal
    styling — a primary-token ring + slight scale so exactly one marker reads as

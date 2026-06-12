@@ -70,12 +70,14 @@ public class LeafletMapService(IJSRuntime js) : IMapService, IAsyncDisposable
     // already coordinate-filtered by PoiService), so a null-coordinate POI can
     // never reach this interop — no marker, no leg endpoint, and the loop is
     // built over consecutive placeable stops so it is never severed.
-    public async Task SetStopOrdersAsync(IReadOnlyDictionary<int, int>? orders) =>
+    // TRIP-STARTFINISH-06: the optional roles mark the pinned Start/Finish
+    // markers (distinct glyph/ring + accessible name); null clears them JS-side.
+    public async Task SetStopOrdersAsync(IReadOnlyDictionary<int, int>? orders, TripMarkerRolesDto? roles = null) =>
         // Pass an empty object (not null) so the JS side can clear unconditionally.
-        await InvokeJsVoidAsync("leafletInterop.setStopOrders", orders ?? new Dictionary<int, int>());
+        await InvokeJsVoidAsync("leafletInterop.setStopOrders", orders ?? new Dictionary<int, int>(), roles);
 
-    public async Task DrawTripLegsAsync(IReadOnlyList<TripLegDto> legs) =>
-        await InvokeJsVoidAsync("leafletInterop.drawTripLegs", legs);
+    public async Task DrawTripLegsAsync(IReadOnlyList<TripLegDto> legs, bool isRoundtrip = false) =>
+        await InvokeJsVoidAsync("leafletInterop.drawTripLegs", legs, isRoundtrip);
 
     public async Task ClearTripAsync() => await InvokeJsVoidAsync("leafletInterop.clearTripLegs");
 

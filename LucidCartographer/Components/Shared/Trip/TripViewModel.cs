@@ -256,6 +256,121 @@ public sealed class TripViewModel(
         Notify();
     }
 
+    // --- Start/Finish designation (Story 1.7) ---
+
+    // TRIP-STARTFINISH-01: the four designation intents delegate to the single
+    // ordering write path (ITripOrderingService.Set/Clear Start/Finish, AR-11) —
+    // the VM never writes StartPoiId/FinishPoiId or OrderIndex itself. After a
+    // successful change it re-reads the projections (stops, rows, legs — the
+    // closing-leg presence recomputes in BuildLegs) and raises StateChanged, which
+    // the host page turns into the existing incremental Story-1.3 redraw.
+
+    /// <summary>The PoiId pinned as Start (Order 1), or null. Read in RefreshProjections.</summary>
+    public int? StartPoiId { get; private set; }
+
+    /// <summary>The PoiId pinned as Finish (Order N), or null ⇒ Roundtrip.</summary>
+    public int? FinishPoiId { get; private set; }
+
+    /// <summary>
+    /// Roundtrip is the default Trip shape: no distinct Finish ⇒ the closing leg
+    /// returns from Order N to the Start (N legs). A distinct Finish opens the
+    /// path (N−1 legs).
+    /// </summary>
+    public bool IsRoundtrip => FinishPoiId is null;
+
+    /// <summary>Per-stop Start/Finish role — both surfaces pick badge/marker glyphs from this.</summary>
+    public TripStopRole StopRole(int poiId) =>
+        poiId == StartPoiId ? TripStopRole.Start
+        : poiId == FinishPoiId ? TripStopRole.Finish
+        : TripStopRole.None;
+
+    /// <summary>
+    /// Whether the Stop may be designated Start. False on the current Finish —
+    /// a stop cannot be both (AC-6 rejection surfaced as a disabled control).
+    /// </summary>
+    public bool CanSetStart(int poiId) => poiId != FinishPoiId;
+
+    /// <summary>Whether the Stop may be designated Finish. False on the current Start.</summary>
+    public bool CanSetFinish(int poiId) => poiId != StartPoiId;
+
+    /// <summary>
+    /// Localized designation/shape announcement for the aria-live region
+    /// ("X set as start", "Open path — ends at X", "Roundtrip — returns to
+    /// start"); null until the first designation change.
+    /// </summary>
+    public string? StartFinishAnnouncement { get; private set; }
+
+    /// <summary>Designates the Stop as Start (pinned to Order 1).</summary>
+    public Task SetStartAsync(int poiId) => ChangePinAsync(poiId, setStart: true);
+
+    /// <summary>Designates the Stop as Finish (pinned to Order N — open path).</summary>
+    public Task SetFinishAsync(int poiId) => ChangePinAsync(poiId, setStart: false);
+
+    /// <summary>Clears the Start designation (order stays contiguous, no pinned first).</summary>
+    public Task ClearStartAsync() => ChangePinAsync(poiId: null, setStart: true);
+
+    /// <summary>Clears the Finish designation — the Trip returns to a Roundtrip.</summary>
+    public Task ClearFinishAsync() => ChangePinAsync(poiId: null, setStart: false);
+
+    private async Task ChangePinAsync(int? poiId, bool setStart)
+    {
+        if (ActiveCollectionId is not { } collectionId || !IsTripViewEnabled)
+        {
+            return;
+        }
+
+        // Designating: the target must be a placeable, ordered Stop (unplaceable
+        // POIs hold OrderIndex 0 and are excluded from routing — never a
+        // Start/Finish candidate) and must not be the opposite endpoint.
+        TripStop? stop = null;
+        if (poiId is { } id)
+        {
+            stop = OrderedStops.FirstOrDefault(s => s.PoiId == id);
+            if (stop is null || (setStart ? !CanSetStart(id) : !CanSetFinish(id)))
+            {
+                return;
+            }
+        }
+        else if ((setStart ? StartPoiId : FinishPoiId) is null)
+        {
+            // Clearing an already-clear pin — nothing to do, no announcement.
+            return;
+        }
+
+        try
+        {
+            var task = (poiId, setStart) switch
+            {
+                ({ } pin, true) => ordering.SetStartAsync(collectionId, pin, _cts.Token),
+                ({ } pin, false) => ordering.SetFinishAsync(collectionId, pin, _cts.Token),
+                (null, true) => ordering.ClearStartAsync(collectionId, _cts.Token),
+                (null, false) => ordering.ClearFinishAsync(collectionId, _cts.Token),
+            };
+            await task;
+            await RefreshProjectionsAsync(collectionId);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to change Start/Finish designation for collection {CollectionId}", collectionId);
+            return;
+        }
+
+        StartFinishAnnouncement = (stop, setStart) switch
+        {
+            ({ } s, true) => string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                UiStrings.TripStartSetAnnouncement, s.Name),
+            ({ } s, false) => string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                UiStrings.TripOpenPathAnnounce, s.Name),
+            (null, true) => UiStrings.TripStartClearedAnnouncement,
+            (null, false) => UiStrings.TripRoundtripAnnounce,
+        };
+        Notify();
+    }
+
     // --- Lifecycle / loading ---
 
     /// <summary>
@@ -430,6 +545,12 @@ public sealed class TripViewModel(
         SelectedStopPoiId = null;
         SelectedStop = null;
         SelectionAnnouncement = null;
+        // TRIP-STARTFINISH-01: the pins are read state scoped to an enabled Trip
+        // (the persisted StartPoiId/FinishPoiId are untouched) — clear the
+        // surfaced values and the stale announcement alongside the projections.
+        StartPoiId = null;
+        FinishPoiId = null;
+        StartFinishAnnouncement = null;
     }
 
     /// <summary>
@@ -440,6 +561,10 @@ public sealed class TripViewModel(
     private async Task RefreshProjectionsAsync(int collectionId)
     {
         var (startPoiId, finishPoiId) = await ReadStartFinishAsync(collectionId);
+        // TRIP-STARTFINISH-01: surface the pins so the UI can derive per-stop
+        // roles (StopRole) and the Roundtrip/open-path shape (IsRoundtrip).
+        StartPoiId = startPoiId;
+        FinishPoiId = finishPoiId;
         var (stops, rows) = await ReadStopsAndRowsAsync(collectionId, startPoiId, finishPoiId);
 
         OrderedStops = stops;

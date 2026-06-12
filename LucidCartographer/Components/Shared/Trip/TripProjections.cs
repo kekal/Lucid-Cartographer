@@ -11,6 +11,19 @@ public enum TripSelectionSource
     Map,
 }
 
+/// <summary>
+/// The Start/Finish role a stop holds in the Trip (Story 1.7,
+/// [TRIP-STARTFINISH-01]). Derived per-stop by <see cref="TripViewModel.StopRole"/>
+/// from the collection's <c>StartPoiId</c>/<c>FinishPoiId</c>; both surfaces use
+/// it to pick the badge/marker glyph and the set/unset control state.
+/// </summary>
+public enum TripStopRole
+{
+    None,
+    Start,
+    Finish,
+}
+
 // TRIP-LEG-01: Phase 1 — all legs straight + non-Measured. These immutable
 // projections are computed on the fly by TripViewModel from the seeded Stop
 // Order; nothing here is persisted (the RouteSegment cache is an Epic 2/4

@@ -473,6 +473,255 @@ public class TripOrderingServiceTests
         order.Values.Should().BeEquivalentTo(new[] { 1, 2, 3, 4 });
     }
 
+    // === Story 1.7: Start/Finish designation (TRIP-STARTFINISH-02) ===
+
+    // Asserts the canonical pin invariant: the placeable OrderIndex set is
+    // exactly {1..N} (contiguous, gap-free, unique — no stop holds two values)
+    // with the pinned Start at 1 and the pinned Finish at N.
+    private static async Task AssertPinInvariantAsync(
+        IDbContextFactory<AppDbContext> factory, int n, int? expectedStart, int? expectedFinish)
+    {
+        var order = await ReadOrderAsync(factory);
+        order.Values.Should().BeEquivalentTo(Enumerable.Range(1, n),
+            "the placeable OrderIndex set must stay contiguous, gap-free and unique 1..N");
+        var pins = await ReadPinsAsync(factory);
+        pins.Should().Be((expectedStart, expectedFinish));
+        if (expectedStart is { } s)
+        {
+            order[s].Should().Be(1, "the pinned Start holds Order 1");
+        }
+        if (expectedFinish is { } f)
+        {
+            order[f].Should().Be(n, "the pinned Finish holds Order N");
+        }
+    }
+
+    [Fact]
+    public async Task SetStart_PinsToOrderOne_AndRenumbersContiguously()
+    {
+        var (factory, service) = await SeededFourAsync();
+
+        await service.SetStartAsync(CollectionId, 3);
+
+        var order = await ReadOrderAsync(factory);
+        order[3].Should().Be(1, "the designated Start is pinned to Order 1");
+        order[1].Should().Be(2);
+        order[2].Should().Be(3);
+        order[4].Should().Be(4, "interior stops keep their relative order");
+        await AssertPinInvariantAsync(factory, 4, expectedStart: 3, expectedFinish: null);
+    }
+
+    [Fact]
+    public async Task SetFinish_PinsToOrderN_AndRenumbersContiguously()
+    {
+        var (factory, service) = await SeededFourAsync();
+
+        await service.SetFinishAsync(CollectionId, 2);
+
+        var order = await ReadOrderAsync(factory);
+        order[2].Should().Be(4, "the designated Finish is pinned to Order N");
+        order[1].Should().Be(1);
+        order[3].Should().Be(2);
+        order[4].Should().Be(3);
+        await AssertPinInvariantAsync(factory, 4, expectedStart: null, expectedFinish: 2);
+    }
+
+    [Fact]
+    public async Task SetStart_Redesignation_ReleasesOldPin_NoGapNoDuplicate()
+    {
+        var (factory, service) = await SeededFourAsync();
+
+        await service.SetStartAsync(CollectionId, 3);
+        await service.SetStartAsync(CollectionId, 2);
+
+        var order = await ReadOrderAsync(factory);
+        order[2].Should().Be(1, "the new Start takes Order 1");
+        order[3].Should().Be(2, "the released old Start becomes an interior stop without a gap");
+        await AssertPinInvariantAsync(factory, 4, expectedStart: 2, expectedFinish: null);
+    }
+
+    [Fact]
+    public async Task SetFinish_Redesignation_ReleasesOldPin_NoGapNoDuplicate()
+    {
+        var (factory, service) = await SeededFourAsync();
+
+        await service.SetFinishAsync(CollectionId, 1);
+        await service.SetFinishAsync(CollectionId, 2);
+
+        var order = await ReadOrderAsync(factory);
+        order[2].Should().Be(4);
+        order[1].Should().Be(3, "the released old Finish becomes an interior stop");
+        await AssertPinInvariantAsync(factory, 4, expectedStart: null, expectedFinish: 2);
+    }
+
+    [Fact]
+    public async Task SetFinish_EqualToCurrentStart_IsRejected_OrderUntouched()
+    {
+        var (factory, service) = await SeededFourAsync();
+        await service.SetStartAsync(CollectionId, 2);
+
+        var act = () => service.SetFinishAsync(CollectionId, 2);
+
+        await act.Should().ThrowAsync<InvalidOperationException>(
+            "a stop cannot be both Start and Finish");
+        await AssertPinInvariantAsync(factory, 4, expectedStart: 2, expectedFinish: null);
+    }
+
+    [Fact]
+    public async Task SetStart_EqualToCurrentFinish_IsRejected_OrderUntouched()
+    {
+        var (factory, service) = await SeededFourAsync();
+        await service.SetFinishAsync(CollectionId, 3);
+
+        var act = () => service.SetStartAsync(CollectionId, 3);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        await AssertPinInvariantAsync(factory, 4, expectedStart: null, expectedFinish: 3);
+    }
+
+    [Fact]
+    public async Task ClearFinish_RemovesPin_OrderStaysContiguous()
+    {
+        var (factory, service) = await SeededFourAsync();
+        await service.SetFinishAsync(CollectionId, 1); // 2,3,4,1
+
+        await service.ClearFinishAsync(CollectionId);
+
+        var order = await ReadOrderAsync(factory);
+        order[1].Should().Be(4, "clearing a pin never reshuffles the order");
+        await AssertPinInvariantAsync(factory, 4, expectedStart: null, expectedFinish: null);
+    }
+
+    [Fact]
+    public async Task ClearStart_RemovesPin_OrderStaysContiguous()
+    {
+        var (factory, service) = await SeededFourAsync();
+        await service.SetStartAsync(CollectionId, 4); // 4,1,2,3
+
+        await service.ClearStartAsync(CollectionId);
+
+        var order = await ReadOrderAsync(factory);
+        order[4].Should().Be(1, "the former Start keeps its slot, just unpinned");
+        await AssertPinInvariantAsync(factory, 4, expectedStart: null, expectedFinish: null);
+    }
+
+    [Fact]
+    public async Task SetStart_IsNoOp_ForUnplaceableOrUnknownPoi()
+    {
+        var factory = await SeedAsync(
+            (1, new DateTime(2025, 1, 1), true),
+            (2, new DateTime(2025, 1, 2), true),
+            (3, new DateTime(2025, 1, 3), false));
+        var service = CreateService(factory);
+        await service.SeedOrderAsync(CollectionId);
+
+        // Unplaceable stops hold OrderIndex 0 and are excluded from routing —
+        // never Start/Finish candidates. Unknown POIs are equally ignored.
+        await service.SetStartAsync(CollectionId, 3);
+        await service.SetFinishAsync(CollectionId, 3);
+        await service.SetStartAsync(CollectionId, 999);
+
+        (await ReadPinsAsync(factory)).Should().Be(((int?)null, (int?)null));
+        var order = await ReadOrderAsync(factory);
+        order[3].Should().Be(0);
+        order[1].Should().Be(1);
+        order[2].Should().Be(2);
+    }
+
+    [Fact]
+    public async Task SetStart_SameStopTwice_IsIdempotentNoOp()
+    {
+        var (factory, service0) = await SeededFourAsync();
+        await service0.SetStartAsync(CollectionId, 2);
+
+        var counting = new CountingDbContextFactory(factory);
+        var service = CreateService(counting);
+        await service.SetStartAsync(CollectionId, 2);
+
+        counting.SaveCount.Should().Be(0, "re-designating the current Start writes nothing");
+        await AssertPinInvariantAsync(factory, 4, expectedStart: 2, expectedFinish: null);
+    }
+
+    [Fact]
+    public async Task SetStartAndFinish_Together_PinBothEndpoints()
+    {
+        var (factory, service) = await SeededFourAsync();
+
+        await service.SetStartAsync(CollectionId, 4);
+        await service.SetFinishAsync(CollectionId, 1);
+
+        var order = await ReadOrderAsync(factory);
+        order[4].Should().Be(1);
+        order[1].Should().Be(4);
+        order[2].Should().Be(2);
+        order[3].Should().Be(3);
+        await AssertPinInvariantAsync(factory, 4, expectedStart: 4, expectedFinish: 1);
+    }
+
+    [Fact]
+    public async Task Pins_SurviveReorder_AndReorderRespectsThem()
+    {
+        // Cross-story guard: designating via 1.7 then reordering via 1.5 keeps
+        // both pins in their slots and the order contiguous.
+        var (factory, service) = await SeededFourAsync();
+        await service.SetStartAsync(CollectionId, 2);
+        await service.SetFinishAsync(CollectionId, 3);
+
+        await service.ReorderStopAsync(CollectionId, 1, 99); // clamps into interior
+        await service.ReorderStopAsync(CollectionId, 2, 4);  // pinned Start: no-op
+
+        await AssertPinInvariantAsync(factory, 4, expectedStart: 2, expectedFinish: 3);
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(10)]
+    public async Task PinPermutations_NeverProduceGapOrDuplicate(int n)
+    {
+        // Property-style sweep: every distinct (start, finish) pair, set in both
+        // orders, then cleared — the placeable OrderIndex set must be exactly
+        // {1..N} after every operation and no stop may ever hold two values.
+        var members = Enumerable.Range(1, n)
+            .Select(i => (PoiId: i, Added: new DateTime(2025, 1, 1).AddDays(i), Placeable: true))
+            .ToArray();
+        var factory = await SeedAsync(members);
+        var service = CreateService(factory);
+        await service.SeedOrderAsync(CollectionId);
+
+        for (var s = 1; s <= n; s++)
+        {
+            // Release any prior Finish first so the new Start is never the
+            // pinned Finish (that designation is rejected by design).
+            await service.ClearFinishAsync(CollectionId);
+            await AssertPinInvariantAsync(factory, n, expectedStart: await CurrentStartAsync(factory), expectedFinish: null);
+            await service.SetStartAsync(CollectionId, s);
+            await AssertPinInvariantAsync(factory, n, expectedStart: s, expectedFinish: null);
+
+            for (var f = 1; f <= n; f++)
+            {
+                if (s == f)
+                {
+                    continue;
+                }
+
+                await service.SetFinishAsync(CollectionId, f);
+                await AssertPinInvariantAsync(factory, n, expectedStart: s, expectedFinish: f);
+            }
+        }
+
+        await service.ClearStartAsync(CollectionId);
+        await AssertPinInvariantAsync(factory, n, expectedStart: null, expectedFinish: await CurrentFinishAsync(factory));
+        await service.ClearFinishAsync(CollectionId);
+        await AssertPinInvariantAsync(factory, n, expectedStart: null, expectedFinish: null);
+    }
+
+    private static async Task<int?> CurrentStartAsync(IDbContextFactory<AppDbContext> factory) =>
+        (await ReadPinsAsync(factory)).Start;
+
+    private static async Task<int?> CurrentFinishAsync(IDbContextFactory<AppDbContext> factory) =>
+        (await ReadPinsAsync(factory)).Finish;
+
     [Fact]
     public async Task GetStopOrder_ReturnsOnlyOrderedPlaceableItems()
     {

@@ -74,6 +74,44 @@ public interface ITripOrderingService
     Task ReorderStopAsync(int collectionId, int poiId, int targetOrderIndex, CancellationToken ct = default);
 
     /// <summary>
+    /// Designates the Stop as the Trip's Start (Story 1.7, [TRIP-STARTFINISH-02]):
+    /// writes <see cref="Data.Entities.PoiCollection.StartPoiId"/> and pins the
+    /// Stop to <c>OrderIndex</c> 1 through the single ordering write path (AR-11),
+    /// renumbering the remaining placeable Stops to fill 2..N in their existing
+    /// relative order. Re-designation releases the prior Start (it becomes an
+    /// interior Stop). No-op when the POI is not a placeable, ordered Stop of the
+    /// collection or is already the Start. Throws
+    /// <see cref="InvalidOperationException"/> when the POI is the current Finish
+    /// (a stop cannot be both Start and Finish).
+    /// </summary>
+    Task SetStartAsync(int collectionId, int poiId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Clears the Start designation (<c>StartPoiId = null</c>). The order stays
+    /// contiguous 1..N with no pinned first Stop. No-op when no Start is set.
+    /// </summary>
+    Task ClearStartAsync(int collectionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Designates the Stop as the Trip's Finish ([TRIP-STARTFINISH-02]): writes
+    /// <see cref="Data.Entities.PoiCollection.FinishPoiId"/> and pins the Stop to
+    /// <c>OrderIndex</c> N through the single ordering write path (AR-11),
+    /// renumbering interior Stops as needed. A distinct Finish makes the Trip an
+    /// open path (no closing leg). Re-designation releases the prior Finish.
+    /// No-op when the POI is not a placeable, ordered Stop or is already the
+    /// Finish. Throws <see cref="InvalidOperationException"/> when the POI is the
+    /// current Start (Finish == Start is rejected).
+    /// </summary>
+    Task SetFinishAsync(int collectionId, int poiId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Clears the Finish designation (<c>FinishPoiId = null</c>), returning the
+    /// Trip to a Roundtrip (the closing leg is restored). No-op when no Finish
+    /// is set.
+    /// </summary>
+    Task ClearFinishAsync(int collectionId, CancellationToken ct = default);
+
+    /// <summary>
     /// Re-compacts the order so the remaining placeable Stops are contiguous
     /// 1..N with no gap or duplicate, preserving their relative order.
     /// </summary>

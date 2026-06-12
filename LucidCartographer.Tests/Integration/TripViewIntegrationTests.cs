@@ -216,6 +216,133 @@ public class TripViewIntegrationTests : IntegrationTestBase
         Assert.True(await Page.Locator($"{StopPanelSelector} button[aria-label=\"{downLabel}\"]").IsDisabledAsync());
     }
 
+    // === Story 1.7: Start/Finish designation + roundtrip vs open path ===
+
+    private static string Fmt(string template, params object[] args) =>
+        string.Format(System.Globalization.CultureInfo.CurrentCulture, template, args);
+
+    // Polls the StubMapService trip-leg recording (the integration host stubs
+    // IMapService, so leg presence is observed at the service boundary instead
+    // of Leaflet DOM). Returns true when the expected count lands in time.
+    private async Task<bool> WaitForLegCountAsync(int expected, int timeoutMs = 10000)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (StubMapService.LastTripLegCount == expected)
+            {
+                return true;
+            }
+            await Page.WaitForTimeoutAsync(100);
+        }
+        return StubMapService.LastTripLegCount == expected;
+    }
+
+    [Fact]
+    public async Task DesignateStart_PinsToStopOne_ShowsStartBadge_AndAnnounces()
+    {
+        await EnableTripViewAsync();
+        var before = await StopNamesAsync();
+        Assert.True(before.Count >= 3);
+
+        // Designate the SECOND stop as Start via its per-row control.
+        await Page.Locator($"{StopPanelSelector} button[aria-label=\"{Fmt(UiStrings.TripSetAsStart, before[1])}\"]").ClickAsync();
+
+        // It is pinned to stop 1, with the distinct Start badge aria, and the
+        // designation is announced via the aria-live region.
+        await Page.Locator($"{StopPanelSelector} li[data-poi-id] >> nth=0").Filter(new() { HasText = before[1] })
+            .WaitForAsync(new() { Timeout = 10000 });
+        await Page.Locator($"{StopPanelSelector} [aria-label=\"{Fmt(UiStrings.TripStartBadgeAria, before.Count)}\"]")
+            .WaitForAsync(new() { Timeout = 10000 });
+        await Page.Locator($"span[aria-live='polite']:has-text(\"{Fmt(UiStrings.TripStartSetAnnouncement, before[1])}\")")
+            .WaitForAsync(new() { Timeout = 10000 });
+
+        // The control flipped to Unset (aria-pressed true).
+        var unset = Page.Locator($"{StopPanelSelector} button[aria-label=\"{Fmt(UiStrings.TripUnsetStart, before[1])}\"]");
+        Assert.Equal("true", await unset.GetAttributeAsync("aria-pressed"));
+
+        // The order stays contiguous: every row still numbered 1..N.
+        var after = await StopNamesAsync();
+        Assert.Equal(before.Count, after.Count);
+    }
+
+    [Fact]
+    public async Task FinishUnset_DrawsRoundtripClosingLeg_SetFinish_OpensPath_ClearRestores()
+    {
+        StubMapService.ResetTripRecording();
+        await EnableTripViewAsync();
+        var names = await StopNamesAsync();
+        var n = names.Count;
+        Assert.True(n >= 3);
+
+        // Finish unset ⇒ Roundtrip: N legs incl. the closing leg.
+        Assert.True(await WaitForLegCountAsync(n), $"expected {n} roundtrip legs, saw {StubMapService.LastTripLegCount}");
+        Assert.True(StubMapService.LastTripLegsRoundtrip, "the roundtrip flag rides the draw call");
+
+        // Designate the FIRST stop as Finish ⇒ open path: it pins to stop N,
+        // the closing leg disappears (N−1 legs), and the shape change announces.
+        await Page.Locator($"{StopPanelSelector} button[aria-label=\"{Fmt(UiStrings.TripSetAsFinish, names[0])}\"]").ClickAsync();
+        await Page.Locator($"{StopPanelSelector} li[data-poi-id] >> nth={n - 1}").Filter(new() { HasText = names[0] })
+            .WaitForAsync(new() { Timeout = 10000 });
+        await Page.Locator($"{StopPanelSelector} [aria-label=\"{Fmt(UiStrings.TripFinishBadgeAria, n)}\"]")
+            .WaitForAsync(new() { Timeout = 10000 });
+        await Page.Locator($"span[aria-live='polite']:has-text(\"{Fmt(UiStrings.TripOpenPathAnnounce, names[0])}\")")
+            .WaitForAsync(new() { Timeout = 10000 });
+        Assert.True(await WaitForLegCountAsync(n - 1), $"expected {n - 1} open-path legs, saw {StubMapService.LastTripLegCount}");
+        Assert.False(StubMapService.LastTripLegsRoundtrip);
+
+        // The Finish marker role reached the map layer with its accessible name.
+        Assert.NotNull(StubMapService.LastTripMarkerRoles);
+        Assert.Equal(Fmt(UiStrings.TripFinishMarkerAria, names[0]), StubMapService.LastTripMarkerRoles!.FinishAria);
+
+        // Clear the Finish ⇒ Roundtrip restored: N legs + roundtrip announcement.
+        await Page.Locator($"{StopPanelSelector} button[aria-label=\"{Fmt(UiStrings.TripUnsetFinish, names[0])}\"]").ClickAsync();
+        await Page.Locator($"span[aria-live='polite']:has-text(\"{UiStrings.TripRoundtripAnnounce}\")")
+            .WaitForAsync(new() { Timeout = 10000 });
+        Assert.True(await WaitForLegCountAsync(n), $"expected the closing leg back ({n} legs), saw {StubMapService.LastTripLegCount}");
+        Assert.True(StubMapService.LastTripLegsRoundtrip);
+    }
+
+    [Fact]
+    public async Task SetAsFinish_IsDisabledOnStartRow_AndViceVersa()
+    {
+        await EnableTripViewAsync();
+        var names = await StopNamesAsync();
+
+        await Page.Locator($"{StopPanelSelector} button[aria-label=\"{Fmt(UiStrings.TripSetAsStart, names[0])}\"]").ClickAsync();
+        await Page.Locator($"{StopPanelSelector} button[aria-label=\"{Fmt(UiStrings.TripUnsetStart, names[0])}\"]")
+            .WaitForAsync(new() { Timeout = 10000 });
+
+        // AC-6 rejection surfaced as a disabled control: the Start row cannot be Finish.
+        Assert.True(await Page.Locator($"{StopPanelSelector} button[aria-label=\"{Fmt(UiStrings.TripSetAsFinish, names[0])}\"]").IsDisabledAsync());
+
+        // Designate another stop as Finish — its Set-as-Start control disables.
+        await Page.Locator($"{StopPanelSelector} button[aria-label=\"{Fmt(UiStrings.TripSetAsFinish, names[1])}\"]").ClickAsync();
+        await Page.Locator($"{StopPanelSelector} button[aria-label=\"{Fmt(UiStrings.TripUnsetFinish, names[1])}\"]")
+            .WaitForAsync(new() { Timeout = 10000 });
+        Assert.True(await Page.Locator($"{StopPanelSelector} button[aria-label=\"{Fmt(UiStrings.TripSetAsStart, names[1])}\"]").IsDisabledAsync());
+    }
+
+    [Fact]
+    public async Task StartFinishDesignation_PersistsAcrossReopen()
+    {
+        await EnableTripViewAsync();
+        var names = await StopNamesAsync();
+
+        await Page.Locator($"{StopPanelSelector} button[aria-label=\"{Fmt(UiStrings.TripSetAsStart, names[1])}\"]").ClickAsync();
+        await Page.Locator($"{StopPanelSelector} li[data-poi-id] >> nth=0").Filter(new() { HasText = names[1] })
+            .WaitForAsync(new() { Timeout = 10000 });
+
+        // Leave the Map page and come back — the Start pin and order are restored.
+        await ClickDataSourcesTabAsync();
+        await ClickMapTabAsync();
+        await Page.WaitForSelectorAsync(StopPanelSelector, new() { Timeout = 10000 });
+        await Page.Locator($"{StopPanelSelector} [aria-label=\"{Fmt(UiStrings.TripStartBadgeAria, names.Count)}\"]")
+            .WaitForAsync(new() { Timeout = 10000 });
+        var restored = await StopNamesAsync();
+        Assert.Equal(names[1], restored[0]);
+    }
+
     [Fact]
     public async Task TripViewState_PersistsAcrossReopen()
     {
