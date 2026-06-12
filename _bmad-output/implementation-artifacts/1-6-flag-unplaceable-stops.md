@@ -1,6 +1,10 @@
+---
+baseline_commit: 979180b38b60d38ab0052b1afe25a15c12239406
+---
+
 # Story 1.6: Flag unplaceable stops
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -65,91 +69,91 @@ reorder UI (Story 1.5), or Start/Finish designation (Story 1.7).
 
 ## Tasks / Subtasks
 
-- [ ] **Define the `IsPlaceable` exclusion contract** (AC1, AC2, AC3) — `[TRIP-PLACE-01]`
-  - [ ] Add a single canonical placeable predicate that matches the **existing codebase convention**
+- [x] **Define the `IsPlaceable` exclusion contract** (AC1, AC2, AC3) — `[TRIP-PLACE-01]`
+  - [x] Add a single canonical placeable predicate that matches the **existing codebase convention**
         `Poi.Latitude != null && Poi.Longitude != null` (used today in `Services/PoiService.cs`
         lines ~42/65/360/372, `Services/StartupCleanupService.cs` ~148,
         `Services/Enrichment/PoiEnrichmentBackgroundService.cs` ~569). Do **not** invent a different
         rule (e.g. `(0,0)` sentinel) — a stop is placeable iff **both** coordinates are non-null.
-  - [ ] Expose it where the Trip layer reads it. Preferred: an `internal static bool
+  - [x] Expose it where the Trip layer reads it. Preferred: an `internal static bool
         IsPlaceable(this Poi poi)` helper (or a `Stop`/membership-level equivalent) on the
         `Services/Trip/` slice, so leg-drawing, the Distance Matrix, and the ViewModel all call the
         **same** predicate (single source of truth). `InternalsVisibleTo("LucidCartographer.Tests")`
         is already set — keep it internal and test it directly.
-  - [ ] Add `[TRIP-PLACE-01]` comment on the predicate documenting that null lat **or** null lon ⇒
+  - [x] Add `[TRIP-PLACE-01]` comment on the predicate documenting that null lat **or** null lon ⇒
         unplaceable, excluded from map/legs/matrix, kept in collection.
 
-- [ ] **Apply exclusion to leg drawing / map markers** (AC2, AC6) — `[TRIP-PLACE-02]`
-  - [ ] In the trip leg/marker rendering path (the Trip extension to `Components/Shared/LeafletMap.razor`
+- [x] **Apply exclusion to leg drawing / map markers** (AC2, AC6) — `[TRIP-PLACE-02]`
+  - [x] In the trip leg/marker rendering path (the Trip extension to `Components/Shared/LeafletMap.razor`
         + `Services/LeafletMapService.cs` + `leafletInterop.js`, introduced by Story 1.3), build the
         ordered list of stops to draw from the **placeable subset only** so that legs connect
         consecutive *placeable* stops and the loop is not severed by an interleaved unplaceable stop.
-  - [ ] Ensure an unplaceable stop produces **no marker** and is **not** an endpoint of any leg
+  - [x] Ensure an unplaceable stop produces **no marker** and is **not** an endpoint of any leg
         (including the closing roundtrip leg). Do not pass null-coordinate POIs into the marker/leg
         interop.
-  - [ ] Confirm both desktop and `Mobile*Screen` map paths route through this same filtered list.
+  - [x] Confirm both desktop and `Mobile*Screen` map paths route through this same filtered list.
 
-- [ ] **Apply exclusion to the all-pairs routing candidate set** (AC3) — `[TRIP-PLACE-03]`
-  - [ ] Where Trip 1.2/1.3 expose the ordered stop set consumed by routing (and where Epic 3's
+- [x] **Apply exclusion to the all-pairs routing candidate set** (AC3) — `[TRIP-PLACE-03]`
+  - [x] Where Trip 1.2/1.3 expose the ordered stop set consumed by routing (and where Epic 3's
         `DistanceMatrixService` / `TripOrderingService` will read candidates), filter to the
         placeable subset using the **same** `IsPlaceable` predicate before any all-pairs work.
-  - [ ] If `TripOrderingService` (from Story 1.2) already exposes a stops accessor, add/confirm a
+  - [x] If `TripOrderingService` (from Story 1.2) already exposes a stops accessor, add/confirm a
         placeable-only accessor (e.g. `GetPlaceableStops(...)`) that callers use for routing; leave
         the full-membership accessor intact for the stop **list**. Do **not** implement matrix/TSP
         math here — only the filter the future matrix consumes.
 
-- [ ] **Preserve numbering integrity over the placeable subset** (AC4) — `[TRIP-ORDER-UNPLACE-01]`
-  - [ ] Establish and document (per epics.md Story 1.6 AC2 and AR-11 "`OrderIndex` 1-based,
+- [x] **Preserve numbering integrity over the placeable subset** (AC4) — `[TRIP-ORDER-UNPLACE-01]`
+  - [x] Establish and document (per epics.md Story 1.6 AC2 and AR-11 "`OrderIndex` 1-based,
         contiguous, gap-free") that **`OrderIndex` is stored over the full membership by Stories
         1.2/1.5**, but the **user-facing routed Stop Order** the badge displays must read contiguous
         across placeable stops. Implement the display rule in the ViewModel / row component:
         placeable stops are numbered `1..M` in their relative order; unplaceable rows do **not**
         display a routed Stop Order badge number (they show the "Not placeable" treatment instead),
         so the user never sees a gap in placeable badge numbers.
-  - [ ] Verify that toggling a POI placeable↔unplaceable (e.g. enrichment fills coordinates) does
+  - [x] Verify that toggling a POI placeable↔unplaceable (e.g. enrichment fills coordinates) does
         not corrupt the stored `OrderIndex` and that placeable numbering stays contiguous to the
         user across the change.
-  - [ ] Add `[TRIP-ORDER-UNPLACE-01]` comment explaining the relationship: stored `OrderIndex`
+  - [x] Add `[TRIP-ORDER-UNPLACE-01]` comment explaining the relationship: stored `OrderIndex`
         (full set, owned by 1.2/1.5) vs. presented routed number (placeable subset, this story).
 
-- [ ] **"Not placeable" stop-list row treatment** (AC1, AC5, AC6) — `[TRIP-PLACE-04]`
-  - [ ] In the stop-list row component (the `TripStopList` / `StopListRow` from Story 1.3) add the
+- [x] **"Not placeable" stop-list row treatment** (AC1, AC5, AC6) — `[TRIP-PLACE-04]`
+  - [x] In the stop-list row component (the `TripStopList` / `StopListRow` from Story 1.3) add the
         "Not placeable" visual treatment per UX-DR10: the row replaces its order badge with the
         not-placeable marker, shows the not-placeable copy, and uses `on-surface-muted` /
         de-emphasized styling (per DESIGN.md "explicit empty markers are first-class"). Keep the row
         present — never hide or drop it.
-  - [ ] Add `aria-label` describing the not-placeable state for the row (the badge slot otherwise
+  - [x] Add `aria-label` describing the not-placeable state for the row (the badge slot otherwise
         carries a meaningless number to a screen reader — see Accessibility Floor).
-  - [ ] Mirror the treatment on the mobile row path (`MobileTripPanel`).
+  - [x] Mirror the treatment on the mobile row path (`MobileTripPanel`).
 
-- [ ] **`UiStrings` additions** (AC1, AC5, AC7) — `[TRIP-PLACE-05]`
-  - [ ] Add to `Services/UiStrings.cs` (no hardcoded text anywhere in markup):
+- [x] **`UiStrings` additions** (AC1, AC5, AC7) — `[TRIP-PLACE-05]`
+  - [x] Add to `Services/UiStrings.cs` (no hardcoded text anywhere in markup):
         - `TripStopNotPlaceable = "Not placeable"` (short row label)
         - `TripStopNotPlaceableDetail = "Not placeable — no coordinates. Kept in the collection, excluded from the route."` (full provenance-aware sentence, UX-DR11)
         - `TripStopNotPlaceableAria = "Not placeable: this stop has no coordinates and is excluded from the route, but kept in the collection."` (screen-reader label)
-  - [ ] Use the `Trip*`-prefixed naming consistent with other `UiStrings` groupings; place under a
+  - [x] Use the `Trip*`-prefixed naming consistent with other `UiStrings` groupings; place under a
         `// Trip View` section.
 
-- [ ] **Tests** (AC1–AC4, AC6, AC7)
-  - [ ] **Unit — `IsPlaceable` predicate** (`LucidCartographer.Tests/Services/TripPlaceableTests.cs`):
+- [x] **Tests** (AC1–AC4, AC6, AC7)
+  - [x] **Unit — `IsPlaceable` predicate** (`LucidCartographer.Tests/Services/TripPlaceableTests.cs`):
         null `Latitude` ⇒ unplaceable; null `Longitude` ⇒ unplaceable; null both ⇒ unplaceable;
         both present (incl. `0,0`) ⇒ placeable. Assert it matches the existing `Latitude != null &&
         Longitude != null` convention. (AC1)
-  - [ ] **Unit — exclusion from the routing candidate set** (Distance-Matrix / ordering candidate
+  - [x] **Unit — exclusion from the routing candidate set** (Distance-Matrix / ordering candidate
         accessor): given a mixed set, the placeable-only accessor returns only placeable stops; an
         all-pairs candidate list built from it contains no unplaceable POI. (AC3)
-  - [ ] **Unit — exclusion from legs**: given an interleaved unplaceable stop, the ordered
+  - [x] **Unit — exclusion from legs**: given an interleaved unplaceable stop, the ordered
         leg-drawing list connects only consecutive placeable stops (no leg has an unplaceable
         endpoint; the loop is not severed). (AC2)
-  - [ ] **Unit — numbering integrity**: given placeable stops with unplaceable stops interleaved,
+  - [x] **Unit — numbering integrity**: given placeable stops with unplaceable stops interleaved,
         the presented routed Stop Order for placeable stops is contiguous `1..M` with no gap, and
         unplaceable stops carry no routed number. (AC4)
-  - [ ] **bUnit — "Not placeable" label**: rendering the stop list with an unplaceable stop shows
+  - [x] **bUnit — "Not placeable" label**: rendering the stop list with an unplaceable stop shows
         the `UiStrings.TripStopNotPlaceable` copy, no routed order badge number on that row, the
         not-placeable `aria-label`, and the row is still present (not dropped). (AC1, AC5)
-  - [ ] **bUnit / dual-surface**: assert the not-placeable treatment renders on **both** the desktop
+  - [x] **bUnit / dual-surface**: assert the not-placeable treatment renders on **both** the desktop
         stop-list and the mobile panel paths (mirror existing `Mobile*Tests` pattern). (AC6)
-  - [ ] Ensure `dotnet build` and `dotnet test` pass with warnings-as-errors and no group-B
+  - [x] Ensure `dotnet build` and `dotnet test` pass with warnings-as-errors and no group-B
         analyzer violations. (AC7)
 
 ## Dev Notes
@@ -288,16 +292,74 @@ placeable *candidate set* for routing. `[TRIP-ORDER-UNPLACE-01]`
 
 ### Agent Model Used
 
-_(to be filled by the dev agent)_
+claude-fable-5
 
 ### Debug Log References
 
-_(to be filled by the dev agent)_
+- `dotnet build`: 0 warnings / 0 errors (TreatWarningsAsErrors=true).
+- `dotnet test` (full suite): 647 passed, 0 failed, 0 skipped (the known
+  ScrapeProgress_ShowsIndicator flake passed in-run; no isolation rerun needed).
+- One bUnit iteration: clicking the unplaceable row throws bUnit's
+  `MissingEventHandlerException` (the row has no handler at all) — the test now
+  asserts that exception plus the VM-level guard, which is stronger proof of
+  non-selectability than a no-op click.
 
 ### Completion Notes List
 
-_(to be filled by the dev agent)_
+- `[TRIP-PLACE-01]` Canonical predicate lives in NEW `Services/Trip/StopPlaceability.cs`
+  (`internal static`, entity + raw-value overloads, `(0,0)` placeable). The
+  TripOrderingService row reader and the TripViewModel projection both route
+  through it; the two EF `Where` clauses that must stay SQL-translatable
+  (`HasOrderAsync`/`GetStopOrderAsync`) carry a lockstep comment.
+- `[TRIP-PLACE-03]` NEW `ITripOrderingService.GetPlaceableStopsAsync` +
+  `PlaceableStop` record — the ordered placeable-only routing candidate set for
+  the Epic 3 Distance Matrix. Read-only; no matrix/TSP math implemented. The
+  ordering write-path (seed/append/compact/reconcile, `SetOrderAsync`) is
+  untouched.
+- `[TRIP-PLACE-02]` No functional map change was needed: markers (PoiService
+  filter + `StopOrders`) and legs (`OrderedLegs`) already flow exclusively from
+  the ViewModel's placeable projection, now via the canonical predicate; legs
+  connect consecutive placeable stops so the loop is never severed. Contract
+  documented at the `LeafletMapService` interop boundary. Both desktop and
+  Mobile*Screen map paths share this single MapPage→LeafletMap path.
+- `[TRIP-ORDER-UNPLACE-01]` Reconciliation with the on-disk 1.2 reality: the
+  stored `OrderIndex` covers the placeable membership (unplaceable items hold
+  0 = "not a stop", per TripOrderingService) and is never written by this
+  story. The presented routed number is recomputed contiguously 1..M over the
+  placeable subset in `ReadStopsAndRowsAsync`, so badges can never show a gap.
+- `[TRIP-PLACE-04]` NEW `TripStopRow` projection (full membership) +
+  `TripViewModel.StopRows`; unplaceable rows trail the routed stops in
+  AddedDate/PoiId order, are de-emphasized, non-selectable (no button
+  semantics; `SelectStop` also guards), carry `UiStrings.TripStopNotPlaceableAria`
+  and the detail sentence as `title`, and show the not-placeable marker instead
+  of an order badge. Identical treatment on `TripStopList` and
+  `MobileTripPanel` (tokens only on mobile).
+- `[TRIP-PLACE-05]` Three `TripStopNotPlaceable*` constants added under the
+  Trip View section of `UiStrings`; no hardcoded markup text.
+- Behavior change to note: previously unplaceable members were absent from the
+  stop list entirely (silent drop); they are now visible with the honest
+  treatment. The empty-state check switched from `OrderedStops` to `StopRows`
+  so an all-unplaceable membership still shows its rows.
 
 ### File List
 
-_(to be filled by the dev agent)_
+- NEW `LucidCartographer/Services/Trip/StopPlaceability.cs`
+- MOD `LucidCartographer/Services/Trip/ITripOrderingService.cs` (PlaceableStop record + GetPlaceableStopsAsync)
+- MOD `LucidCartographer/Services/Trip/TripOrderingService.cs` (accessor impl; ReadAsync routed through predicate; lockstep comment)
+- MOD `LucidCartographer/Components/Shared/Trip/TripProjections.cs` (TripStopRow record)
+- MOD `LucidCartographer/Components/Shared/Trip/TripViewModel.cs` (StopRows projection, ReadStopsAndRowsAsync, SelectStop guard)
+- MOD `LucidCartographer/Components/Shared/Trip/TripStopList.razor` (Not placeable row treatment, StopRows iteration)
+- MOD `LucidCartographer/Components/Shared/Trip/MobileTripPanel.razor` (mirrored treatment)
+- MOD `LucidCartographer/Services/LeafletMapService.cs` (TRIP-PLACE-02 contract comment only)
+- MOD `LucidCartographer/Services/UiStrings.cs` (TripStopNotPlaceable / Detail / Aria)
+- NEW `LucidCartographer.Tests/Services/TripPlaceableTests.cs`
+- MOD `LucidCartographer.Tests/Components/Trip/TripStopListTests.cs` (Story 1.6 dual-surface bUnit coverage)
+- MOD `_bmad-output/implementation-artifacts/1-6-flag-unplaceable-stops.md` (this record)
+
+### Change Log
+
+- 2026-06-12: Story 1.6 implemented — IsPlaceable contract (StopPlaceability),
+  placeable-only routing candidate accessor, full-membership StopRows with
+  contiguous presented numbering, "Not placeable" row treatment on desktop +
+  mobile, UiStrings additions, unit + bUnit coverage. Full suite 647/647 green;
+  build clean under warnings-as-errors. Status → review.

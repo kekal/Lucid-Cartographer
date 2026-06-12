@@ -47,3 +47,21 @@ public sealed record TripStop(
     double Lon,
     bool IsStart,
     bool IsFinish);
+
+/// <summary>
+/// One stop-list row over the FULL trip membership — placeable stops and
+/// unplaceable POIs alike (an unplaceable POI is never silently dropped from
+/// the list; UX-DR10). [TRIP-PLACE-04][TRIP-ORDER-UNPLACE-01]
+/// <see cref="DisplayOrder"/> is the user-facing routed Stop Order, computed
+/// over the placeable subset only: contiguous 1..M for placeable rows, and
+/// <c>null</c> for unplaceable rows (which render the "Not placeable"
+/// treatment instead of an order badge, so the presented numbering never shows
+/// a gap). The stored <c>OrderIndex</c> (owned by TripOrderingService) is not
+/// affected — this is presentation state only. The row components render this
+/// state verbatim; the placeability decision is made in TripViewModel.
+/// </summary>
+public sealed record TripStopRow(
+    int? DisplayOrder,
+    int PoiId,
+    string Name,
+    bool IsPlaceable);

@@ -1,6 +1,15 @@
 namespace LucidCartographer.Services.Trip;
 
 /// <summary>
+/// One ordered, placeable routing candidate: a stop with a Stop Order and both
+/// coordinates present. [TRIP-PLACE-03] This is the shape any all-pairs routing
+/// computation (the Epic 3 N×N Distance Matrix / TSP candidate set) consumes —
+/// unplaceable stops never appear here. Coordinates are non-nullable by
+/// construction (the accessor filters through <see cref="StopPlaceability"/>).
+/// </summary>
+public sealed record PlaceableStop(int PoiId, int OrderIndex, double Latitude, double Longitude);
+
+/// <summary>
 /// Owns the Stop Order (<see cref="Data.Entities.PoiCollectionItem.OrderIndex"/>)
 /// for a Trip. This is the SINGLE write-path for <c>OrderIndex</c> across the
 /// whole app — seed, append, compaction (and later drag/keyboard/TSP/MCP
@@ -26,6 +35,15 @@ public interface ITripOrderingService
     /// placeable item that has an order (<c>OrderIndex &gt; 0</c>).
     /// </summary>
     Task<IReadOnlyDictionary<int, int>> GetStopOrderAsync(int collectionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns the ordered <b>placeable-only</b> stop set — the routing candidate
+    /// set. [TRIP-PLACE-03] Legs and any future all-pairs work (Distance Matrix,
+    /// Epic 3) must consume this accessor; the full membership (including
+    /// unplaceable items) stays available to the stop <i>list</i> via the
+    /// ViewModel projection. Read-only: never writes <c>OrderIndex</c>.
+    /// </summary>
+    Task<IReadOnlyList<PlaceableStop>> GetPlaceableStopsAsync(int collectionId, CancellationToken ct = default);
 
     /// <summary>
     /// Seeds a deterministic Stop Order: placeable items ordered by

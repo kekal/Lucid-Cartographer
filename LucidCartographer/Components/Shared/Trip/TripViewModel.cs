@@ -68,6 +68,17 @@ public sealed class TripViewModel(
     public IReadOnlyList<TripStop> OrderedStops { get; private set; } = [];
 
     /// <summary>
+    /// Full-membership stop-list rows: every placeable stop (carrying its
+    /// presented routed number, contiguous 1..M) followed by every unplaceable
+    /// POI (no routed number — the "Not placeable" treatment). Unplaceable POIs
+    /// are kept in the collection and in this list but excluded from
+    /// <see cref="OrderedStops"/>/<see cref="OrderedLegs"/>/<see cref="StopOrders"/>
+    /// (markers, legs, routing). Empty when Trip View is off.
+    /// [TRIP-PLACE-04][TRIP-ORDER-UNPLACE-01]
+    /// </summary>
+    public IReadOnlyList<TripStopRow> StopRows { get; private set; } = [];
+
+    /// <summary>
     /// Straight connecting legs between consecutive placeable stops, plus the
     /// closing leg back to the Start on a Roundtrip (no distinct Finish). Empty
     /// when Trip View is off or fewer than two placeable stops exist. Every leg
@@ -115,6 +126,15 @@ public sealed class TripViewModel(
         // A selection is only meaningful while Trip View is on; ignore otherwise
         // so a stray call can't leave a stale selection on a plain collection.
         if (!IsTripViewEnabled)
+        {
+            return;
+        }
+
+        // [TRIP-PLACE-04] Only placeable stops are selectable — an unplaceable
+        // row has no marker to pan to, so a selection of it is meaningless.
+        // (The row components don't wire selection on unplaceable rows; this
+        // guard keeps the VM honest against any other caller.)
+        if (poiId is { } requested && OrderedStops.All(s => s.PoiId != requested))
         {
             return;
         }
@@ -402,6 +422,7 @@ public sealed class TripViewModel(
     {
         StopOrders = NoStops;
         OrderedStops = [];
+        StopRows = [];
         OrderedLegs = [];
         // TRIP-SELECT-01: selection is transient and only valid while Trip View
         // is on — drop it (and its announcement) whenever the projections clear
@@ -419,9 +440,10 @@ public sealed class TripViewModel(
     private async Task RefreshProjectionsAsync(int collectionId)
     {
         var (startPoiId, finishPoiId) = await ReadStartFinishAsync(collectionId);
-        var stops = await ReadOrderedStopsAsync(collectionId, startPoiId, finishPoiId);
+        var (stops, rows) = await ReadStopsAndRowsAsync(collectionId, startPoiId, finishPoiId);
 
         OrderedStops = stops;
+        StopRows = rows;
         StopOrders = stops.Count == 0
             ? NoStops
             : stops.ToDictionary(s => s.PoiId, s => s.OrderIndex);
@@ -442,41 +464,71 @@ public sealed class TripViewModel(
     }
 
     /// <summary>
-    /// Reads the active collection's placeable, ordered stops (OrderIndex &gt; 0,
-    /// both coordinates non-null) ascending by Stop number, projecting the POI
-    /// name + coordinates. Mirrors the null-coord filter the ordering service and
-    /// <c>LeafletMapService</c> both apply, so coordinate-less stops are excluded
-    /// from legs and numbered markers without renumbering (Story 1.6 owns the
-    /// "Not placeable" labelling).
+    /// Reads the active collection's FULL membership in one pass and splits it
+    /// through the canonical <see cref="StopPlaceability"/> predicate
+    /// ([TRIP-PLACE-01]) into:
+    /// <list type="bullet">
+    /// <item>the placeable, ordered stops (OrderIndex &gt; 0, both coordinates
+    /// non-null) — the only inputs to markers, legs and routing
+    /// ([TRIP-PLACE-02]/[TRIP-PLACE-03]); and</item>
+    /// <item>the stop-list rows over everything: placeable rows first (with the
+    /// presented routed number), then the unplaceable POIs (kept visible with
+    /// the "Not placeable" treatment, never silently dropped — UX-DR10).</item>
+    /// </list>
+    /// [TRIP-ORDER-UNPLACE-01] Stored <c>OrderIndex</c> (written only by
+    /// TripOrderingService over the placeable membership; unplaceable items hold
+    /// 0 = "not a stop") is read, never written, here. The user-facing routed
+    /// number is recomputed contiguously 1..M over the placeable subset so the
+    /// presented badges can never show a gap, whatever the stored values are.
     /// </summary>
-    private async Task<IReadOnlyList<TripStop>> ReadOrderedStopsAsync(int collectionId, int? startPoiId, int? finishPoiId)
+    private async Task<(IReadOnlyList<TripStop> Stops, IReadOnlyList<TripStopRow> Rows)> ReadStopsAndRowsAsync(
+        int collectionId, int? startPoiId, int? finishPoiId)
     {
         await using var db = await factory.CreateDbContextAsync(_cts.Token);
-        var rows = await db.PoiCollectionItems
+        var members = await db.PoiCollectionItems
             .AsNoTracking()
-            .Where(ci => ci.PoiCollectionId == collectionId && ci.OrderIndex > 0
-                && ci.Poi.Latitude != null && ci.Poi.Longitude != null)
-            .OrderBy(ci => ci.OrderIndex)
+            .Where(ci => ci.PoiCollectionId == collectionId)
             .Select(ci => new
             {
                 ci.PoiId,
                 ci.OrderIndex,
                 ci.Poi.Name,
-                Lat = ci.Poi.Latitude!.Value,
-                Lon = ci.Poi.Longitude!.Value,
+                ci.Poi.Latitude,
+                ci.Poi.Longitude,
+                ci.Poi.AddedDate,
             })
             .ToListAsync(_cts.Token);
 
-        return rows
-            .Select(r => new TripStop(
-                r.OrderIndex,
+        var stops = members
+            .Where(r => r.OrderIndex > 0 && StopPlaceability.IsPlaceable(r.Latitude, r.Longitude))
+            .OrderBy(r => r.OrderIndex)
+            // Presented routed number = position in the placeable subset (1..M),
+            // independent of the stored OrderIndex values. [TRIP-ORDER-UNPLACE-01]
+            .Select((r, i) => new TripStop(
+                i + 1,
                 r.PoiId,
                 r.Name,
-                r.Lat,
-                r.Lon,
+                r.Latitude!.Value,
+                r.Longitude!.Value,
                 r.PoiId == startPoiId,
                 r.PoiId == finishPoiId))
             .ToList();
+
+        // Unplaceable rows trail the routed stops in a stable, deterministic
+        // order (AddedDate, then PoiId — the same tie-break the ordering service
+        // uses). They carry no routed number. [TRIP-PLACE-04]
+        var unplaceable = members
+            .Where(r => !StopPlaceability.IsPlaceable(r.Latitude, r.Longitude))
+            .OrderBy(r => r.AddedDate)
+            .ThenBy(r => r.PoiId)
+            .Select(r => new TripStopRow(DisplayOrder: null, r.PoiId, r.Name, IsPlaceable: false));
+
+        var rows = stops
+            .Select(s => new TripStopRow(s.OrderIndex, s.PoiId, s.Name, IsPlaceable: true))
+            .Concat(unplaceable)
+            .ToList();
+
+        return (stops, rows);
     }
 
     private async Task<(int? StartPoiId, int? FinishPoiId)> ReadStartFinishAsync(int collectionId)

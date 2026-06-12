@@ -19,7 +19,7 @@
 <div class="scroll" style="flex:1">
     @* `trip-stop-list` scopes the JS scroll-into-view helper (TRIP-SELECT-05). *@
     <div class="list trip-stop-list" aria-label="@UiStrings.TripStopListAria">
-        @if (Vm.OrderedStops.Count == 0)
+        @if (Vm.StopRows.Count == 0)
         {
             <div class="empty">
                 <span class="ms" aria-hidden="true">route</span>
@@ -28,64 +28,91 @@
         }
         else
         {
-            @foreach (var stop in Vm.OrderedStops)
+            @foreach (var row in Vm.StopRows)
             {
-                var selected = Vm.SelectedStopPoiId == stop.PoiId;
-                @* data-poi-id mirrors the plain POI list rows so the scroll helper
-                   (TRIP-SELECT-05) can locate a row. Tap / Enter / Space select the
-                   stop (list→map). Selected rows tint with the primary-soft token
-                   and expose aria-current (AC3). ≥44px touch target via .row. *@
-                <div class="row" @key="stop.PoiId" data-poi-id="@stop.PoiId"
-                     role="button" tabindex="0"
-                     aria-current="@(selected ? "true" : null)"
-                     aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripStopRowAria, stop.OrderIndex, Vm.OrderedStops.Count, stop.Name)"
-                     draggable="true"
-                     style="@(selected ? "background:var(--primary-soft)" : "")"
-                     @onclick="() => Vm.SelectStop(stop.PoiId, TripSelectionSource.List)"
-                     @onkeydown="e => OnRowKeyDown(e, stop.PoiId)"
-                     @ondragstart="() => OnDragStart(stop.PoiId)"
-                     @ondragover:preventDefault
-                     @ondrop="() => OnDropAsync(stop.OrderIndex)"
-                     @ondrop:preventDefault
-                     @ondragend="OnDragEnd">
-                    @* TRIP-ORDER-04: drag handle (pointer/touch reorder, UX-DR3).
-                       The whole row is draggable; the handle is the affordance. *@
-                    <span aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDragHandle, stop.Name)"
-                          style="display:inline-flex;align-items:center;justify-content:center;min-width:24px;color:var(--text-2);touch-action:none">
-                        <span class="ms" aria-hidden="true">drag_indicator</span>
-                    </span>
-                    <div class="avatar" style="background:var(--primary)">
-                        <StopOrderBadge Number="stop.OrderIndex" />
+                @if (!row.IsPlaceable)
+                {
+                    @* [TRIP-PLACE-04] Mobile "Not placeable" row — identical
+                       treatment to the desktop list (UX-DR12): kept visible,
+                       de-emphasized, NOT selectable, no routed order badge (the
+                       placeable numbering stays contiguous with no visible gap).
+                       Tokens only, no raw hex. *@
+                    <div class="row" @key="row.PoiId" data-poi-id="@row.PoiId"
+                         aria-label="@UiStrings.TripStopNotPlaceableAria"
+                         title="@UiStrings.TripStopNotPlaceableDetail"
+                         style="opacity:.6">
+                        <div class="avatar" style="background:var(--bg-elev-2);color:var(--text-2)" aria-hidden="true">
+                            <span class="ms">location_off</span>
+                        </div>
+                        <div class="meta">
+                            <div class="name" style="color:var(--text-2)">@row.Name</div>
+                            <div class="sub">@UiStrings.TripStopNotPlaceable</div>
+                        </div>
                     </div>
-                    <div class="meta">
-                        <div class="name">@stop.Name</div>
-                        @* Inert timeline placeholder (Epic 2 computes arrival time). *@
-                        <div class="sub" aria-label="@UiStrings.TripTimelineAria">@UiStrings.TripTimelinePlaceholder</div>
+                }
+                else
+                {
+                    var stop = Vm.OrderedStops.First(s => s.PoiId == row.PoiId);
+                    var selected = Vm.SelectedStopPoiId == row.PoiId;
+                    var number = row.DisplayOrder!.Value;
+                    @* data-poi-id mirrors the plain POI list rows so the scroll helper
+                       (TRIP-SELECT-05) can locate a row. Tap / Enter / Space select the
+                       stop (list→map). Selected rows tint with the primary-soft token
+                       and expose aria-current (AC3). ≥44px touch target via .row.
+                       The badge shows the presented routed order over the placeable
+                       subset — contiguous 1..M ([TRIP-ORDER-UNPLACE-01]). *@
+                    <div class="row" @key="row.PoiId" data-poi-id="@row.PoiId"
+                         role="button" tabindex="0"
+                         aria-current="@(selected ? "true" : null)"
+                         aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripStopRowAria, number, Vm.OrderedStops.Count, row.Name)"
+                         draggable="true"
+                         style="@(selected ? "background:var(--primary-soft)" : "")"
+                         @onclick="() => Vm.SelectStop(row.PoiId, TripSelectionSource.List)"
+                         @onkeydown="e => OnRowKeyDown(e, row.PoiId)"
+                         @ondragstart="() => OnDragStart(row.PoiId)"
+                         @ondragover:preventDefault
+                         @ondrop="() => OnDropAsync(stop.OrderIndex)"
+                         @ondrop:preventDefault
+                         @ondragend="OnDragEnd">
+                        @* TRIP-ORDER-04: drag handle (pointer/touch reorder, UX-DR3).
+                           The whole row is draggable; the handle is the affordance. *@
+                        <span aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDragHandle, row.Name)"
+                              style="display:inline-flex;align-items:center;justify-content:center;min-width:24px;color:var(--text-2);touch-action:none">
+                            <span class="ms" aria-hidden="true">drag_indicator</span>
+                        </span>
+                        <div class="avatar" style="background:var(--primary)">
+                            <StopOrderBadge Number="number" />
+                        </div>
+                        <div class="meta">
+                            <div class="name">@row.Name</div>
+                            @* Inert timeline placeholder (Epic 2 computes arrival time). *@
+                            <div class="sub" aria-label="@UiStrings.TripTimelineAria">@UiStrings.TripTimelinePlaceholder</div>
+                        </div>
+                        @* Inert dwell placeholder (Epic 2 sets dwell). *@
+                        <div class="trailing" aria-label="@UiStrings.TripDwellAria">@UiStrings.TripDwellPlaceholder</div>
+                        @* TRIP-ORDER-03: keyboard/touch move controls — identical
+                           semantics to the desktop surface (same VM methods, same
+                           aria-labels), ≥44px touch targets (NFR4 / UX-DR12). *@
+                        <button type="button"
+                                aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopUp, row.Name)"
+                                disabled="@(!Vm.CanMoveUp(stop))"
+                                style="min-width:44px;min-height:44px;background:transparent;border:none;color:var(--text-2);@(Vm.CanMoveUp(stop) ? "" : "opacity:.4")"
+                                @onclick="() => Vm.MoveStopUpAsync(row.PoiId)"
+                                @onclick:stopPropagation
+                                @onkeydown:stopPropagation>
+                            <span class="ms" aria-hidden="true">arrow_upward</span>
+                        </button>
+                        <button type="button"
+                                aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopDown, row.Name)"
+                                disabled="@(!Vm.CanMoveDown(stop))"
+                                style="min-width:44px;min-height:44px;background:transparent;border:none;color:var(--text-2);@(Vm.CanMoveDown(stop) ? "" : "opacity:.4")"
+                                @onclick="() => Vm.MoveStopDownAsync(row.PoiId)"
+                                @onclick:stopPropagation
+                                @onkeydown:stopPropagation>
+                            <span class="ms" aria-hidden="true">arrow_downward</span>
+                        </button>
                     </div>
-                    @* Inert dwell placeholder (Epic 2 sets dwell). *@
-                    <div class="trailing" aria-label="@UiStrings.TripDwellAria">@UiStrings.TripDwellPlaceholder</div>
-                    @* TRIP-ORDER-03: keyboard/touch move controls — identical
-                       semantics to the desktop surface (same VM methods, same
-                       aria-labels), ≥44px touch targets (NFR4 / UX-DR12). *@
-                    <button type="button"
-                            aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopUp, stop.Name)"
-                            disabled="@(!Vm.CanMoveUp(stop))"
-                            style="min-width:44px;min-height:44px;background:transparent;border:none;color:var(--text-2);@(Vm.CanMoveUp(stop) ? "" : "opacity:.4")"
-                            @onclick="() => Vm.MoveStopUpAsync(stop.PoiId)"
-                            @onclick:stopPropagation
-                            @onkeydown:stopPropagation>
-                        <span class="ms" aria-hidden="true">arrow_upward</span>
-                    </button>
-                    <button type="button"
-                            aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopDown, stop.Name)"
-                            disabled="@(!Vm.CanMoveDown(stop))"
-                            style="min-width:44px;min-height:44px;background:transparent;border:none;color:var(--text-2);@(Vm.CanMoveDown(stop) ? "" : "opacity:.4")"
-                            @onclick="() => Vm.MoveStopDownAsync(stop.PoiId)"
-                            @onclick:stopPropagation
-                            @onkeydown:stopPropagation>
-                        <span class="ms" aria-hidden="true">arrow_downward</span>
-                    </button>
-                </div>
+                }
             }
         }
     </div>

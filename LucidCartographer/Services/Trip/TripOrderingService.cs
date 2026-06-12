@@ -19,6 +19,9 @@ public sealed class TripOrderingService(
     public async Task<bool> HasOrderAsync(int collectionId, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        // The null-coordinate check is inlined here (and in GetStopOrderAsync)
+        // only because EF must translate it to SQL; the rule is the canonical
+        // StopPlaceability predicate ([TRIP-PLACE-01]) — keep them in lockstep.
         // Defensive: only a placeable item counts as "ordered". Guards against a
         // backfill/migration that numbered non-placeable rows — otherwise such
         // rows would make a never-properly-seeded collection report as ordered
@@ -41,6 +44,25 @@ public sealed class TripOrderingService(
             .Select(ci => new { ci.PoiId, ci.OrderIndex })
             .ToListAsync(ct);
         return rows.ToDictionary(r => r.PoiId, r => r.OrderIndex);
+    }
+
+    public async Task<IReadOnlyList<PlaceableStop>> GetPlaceableStopsAsync(int collectionId, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var rows = await db.PoiCollectionItems
+            .AsNoTracking()
+            .Where(ci => ci.PoiCollectionId == collectionId && ci.OrderIndex > 0)
+            .OrderBy(ci => ci.OrderIndex)
+            .Select(ci => new { ci.PoiId, ci.OrderIndex, ci.Poi.Latitude, ci.Poi.Longitude })
+            .ToListAsync(ct);
+
+        // [TRIP-PLACE-03] The routing candidate set is the placeable subset only,
+        // filtered through the one canonical predicate. Unplaceable stops (null
+        // lat OR null lon) never enter any all-pairs computation.
+        return rows
+            .Where(r => StopPlaceability.IsPlaceable(r.Latitude, r.Longitude))
+            .Select(r => new PlaceableStop(r.PoiId, r.OrderIndex, r.Latitude!.Value, r.Longitude!.Value))
+            .ToList();
     }
 
     public async Task SeedOrderAsync(int collectionId, CancellationToken ct = default)
@@ -244,15 +266,22 @@ public sealed class TripOrderingService(
     private async Task<List<ItemRow>> ReadAsync(int collectionId, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
-        return await db.PoiCollectionItems
+        var rows = await db.PoiCollectionItems
             .AsNoTracking()
             .Where(ci => ci.PoiCollectionId == collectionId)
-            .Select(ci => new ItemRow(
-                ci.PoiId,
-                ci.Poi.Latitude != null && ci.Poi.Longitude != null,
-                ci.Poi.AddedDate,
-                ci.OrderIndex))
+            .Select(ci => new { ci.PoiId, ci.Poi.Latitude, ci.Poi.Longitude, ci.Poi.AddedDate, ci.OrderIndex })
             .ToListAsync(ct);
+
+        // [TRIP-PLACE-01] Placeability is decided by the one canonical predicate
+        // (raw coordinates are projected so the check runs in memory, not inlined
+        // into the SQL expression).
+        return rows
+            .Select(r => new ItemRow(
+                r.PoiId,
+                StopPlaceability.IsPlaceable(r.Latitude, r.Longitude),
+                r.AddedDate,
+                r.OrderIndex))
+            .ToList();
     }
 
     private sealed record ItemRow(int PoiId, bool Placeable, DateTime AddedDate, int Order);
