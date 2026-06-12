@@ -38,9 +38,17 @@ public class TripStopListTests : BunitTestContext
         return factory;
     }
 
-    private static async Task<TripViewModel> EnabledVmAsync(int placeable)
+    private static async Task<TripViewModel> EnabledVmAsync(int placeable, int? startPoiId = null, int? finishPoiId = null)
     {
         var factory = SeedFactory(placeable);
+        if (startPoiId is not null || finishPoiId is not null)
+        {
+            await using var db = await factory.CreateDbContextAsync();
+            var collection = await db.PoiCollections.FirstAsync(c => c.Id == CollectionId);
+            collection.StartPoiId = startPoiId;
+            collection.FinishPoiId = finishPoiId;
+            await db.SaveChangesAsync();
+        }
         var writeLock = new SqliteWriteLock();
         var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
         var vm = new TripViewModel(ordering, factory, writeLock, NullLogger<TripViewModel>.Instance);
@@ -169,5 +177,182 @@ public class TripStopListTests : BunitTestContext
 
         cut.WaitForAssertion(() =>
             cut.Find(".row[data-poi-id='1']").GetAttribute("aria-current").Should().Be("true"));
+    }
+
+    // === Story 1.5: keyboard move controls + drag reorder ===
+
+    private static string MoveUpLabel(string name) =>
+        string.Format(CultureInfo.CurrentCulture, UiStrings.TripMoveStopUp, name);
+
+    private static string MoveDownLabel(string name) =>
+        string.Format(CultureInfo.CurrentCulture, UiStrings.TripMoveStopDown, name);
+
+    [Fact]
+    public async Task TripStopList_MoveButtons_ArePresent_WithAriaLabels_AndDragHandle()
+    {
+        await using var vm = await EnabledVmAsync(placeable: 3);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        // Real, Tab-reachable buttons per row with descriptive aria-labels.
+        var up = cut.Find($"button[aria-label=\"{MoveUpLabel("P2")}\"]");
+        var down = cut.Find($"button[aria-label=\"{MoveDownLabel("P2")}\"]");
+        up.GetAttribute("type").Should().Be("button");
+        down.GetAttribute("type").Should().Be("button");
+
+        // Drag handle with its accessible name; the row itself is draggable.
+        var handleAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripDragHandle, "P1");
+        cut.Find($"[aria-label=\"{handleAria}\"]").Should().NotBeNull();
+        cut.Find("li[data-poi-id='1']").GetAttribute("draggable").Should().Be("true");
+    }
+
+    [Fact]
+    public async Task TripStopList_MoveUpDisabledOnFirst_MoveDownDisabledOnLast()
+    {
+        await using var vm = await EnabledVmAsync(placeable: 3);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        cut.Find($"button[aria-label=\"{MoveUpLabel("P1")}\"]").HasAttribute("disabled").Should().BeTrue();
+        cut.Find($"button[aria-label=\"{MoveDownLabel("P1")}\"]").HasAttribute("disabled").Should().BeFalse();
+        cut.Find($"button[aria-label=\"{MoveUpLabel("P3")}\"]").HasAttribute("disabled").Should().BeFalse();
+        cut.Find($"button[aria-label=\"{MoveDownLabel("P3")}\"]").HasAttribute("disabled").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task TripStopList_PinnedStartFinishRows_HaveBothMoveButtonsDisabled()
+    {
+        // P1 pinned Start, P4 pinned Finish ⇒ movable window is [2..3].
+        await using var vm = await EnabledVmAsync(placeable: 4, startPoiId: 1, finishPoiId: 4);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        cut.Find($"button[aria-label=\"{MoveUpLabel("P1")}\"]").HasAttribute("disabled").Should().BeTrue();
+        cut.Find($"button[aria-label=\"{MoveDownLabel("P1")}\"]").HasAttribute("disabled").Should().BeTrue();
+        cut.Find($"button[aria-label=\"{MoveUpLabel("P4")}\"]").HasAttribute("disabled").Should().BeTrue();
+        cut.Find($"button[aria-label=\"{MoveDownLabel("P4")}\"]").HasAttribute("disabled").Should().BeTrue();
+
+        // Interior edges respect the pinned window: P2 can't move up into slot 1,
+        // P3 can't move down into slot 4.
+        cut.Find($"button[aria-label=\"{MoveUpLabel("P2")}\"]").HasAttribute("disabled").Should().BeTrue();
+        cut.Find($"button[aria-label=\"{MoveDownLabel("P2")}\"]").HasAttribute("disabled").Should().BeFalse();
+        cut.Find($"button[aria-label=\"{MoveUpLabel("P3")}\"]").HasAttribute("disabled").Should().BeFalse();
+        cut.Find($"button[aria-label=\"{MoveDownLabel("P3")}\"]").HasAttribute("disabled").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task TripStopList_MoveDown_ReordersByOneAndAnnounces()
+    {
+        await using var vm = await EnabledVmAsync(placeable: 3);
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        cut.Find($"button[aria-label=\"{MoveDownLabel("P1")}\"]").Click();
+
+        var expected = string.Format(CultureInfo.CurrentCulture, UiStrings.TripStopMovedAnnouncement, "P1", 2, 3);
+        cut.WaitForAssertion(() =>
+        {
+            var rows = cut.FindAll("li");
+            rows[0].TextContent.Should().Contain("P2");
+            rows[1].TextContent.Should().Contain("P1", "the stop moved exactly one position");
+            // The aria-live region carries the announcement.
+            cut.FindAll("[aria-live='polite']").Should().Contain(r => r.TextContent.Contains(expected, StringComparison.Ordinal));
+        });
+
+        vm.LastReorderAnnouncement.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task TripStopList_MoveUp_ReordersByOne()
+    {
+        await using var vm = await EnabledVmAsync(placeable: 3);
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        cut.Find($"button[aria-label=\"{MoveUpLabel("P3")}\"]").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            var rows = cut.FindAll("li");
+            rows[1].TextContent.Should().Contain("P3");
+            rows[2].TextContent.Should().Contain("P2");
+        });
+    }
+
+    [Fact]
+    public async Task TripStopList_DragDrop_MovesStopToTargetSlot()
+    {
+        await using var vm = await EnabledVmAsync(placeable: 3);
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        // Native HTML5 DnD: dragstart on P1's row, drop on P3's row (slot 3).
+        cut.Find("li[data-poi-id='1']").DragStart();
+        cut.Find("li[data-poi-id='3']").Drop();
+
+        cut.WaitForAssertion(() =>
+        {
+            var rows = cut.FindAll("li");
+            rows[0].TextContent.Should().Contain("P2");
+            rows[1].TextContent.Should().Contain("P3");
+            rows[2].TextContent.Should().Contain("P1");
+        });
+    }
+
+    [Fact]
+    public async Task TripStopList_DropOnOwnPosition_IsNoOp_NoAnnouncement()
+    {
+        await using var vm = await EnabledVmAsync(placeable: 3);
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        cut.Find("li[data-poi-id='2']").DragStart();
+        cut.Find("li[data-poi-id='2']").Drop();
+
+        var rows = cut.FindAll("li");
+        rows[0].TextContent.Should().Contain("P1");
+        rows[1].TextContent.Should().Contain("P2");
+        rows[2].TextContent.Should().Contain("P3");
+        vm.LastReorderAnnouncement.Should().BeNull("a no-op drop must not announce a move");
+    }
+
+    [Fact]
+    public async Task MobileTripPanel_HasSameMoveControls_AndAnnounces()
+    {
+        await using var vm = await EnabledVmAsync(placeable: 3);
+        var cut = RenderComponent<MobileTripPanel>(p => p.Add(x => x.Vm, vm));
+
+        // Same aria-labels as desktop (shared UiStrings + shared VM).
+        cut.Find($"button[aria-label=\"{MoveUpLabel("P1")}\"]").HasAttribute("disabled").Should().BeTrue();
+        var down = cut.Find($"button[aria-label=\"{MoveDownLabel("P1")}\"]");
+        down.HasAttribute("disabled").Should().BeFalse();
+
+        // ≥44px touch targets on the mobile move controls.
+        down.GetAttribute("style").Should().Contain("min-width:44px").And.Contain("min-height:44px");
+
+        down.Click();
+
+        var expected = string.Format(CultureInfo.CurrentCulture, UiStrings.TripStopMovedAnnouncement, "P1", 2, 3);
+        cut.WaitForAssertion(() =>
+        {
+            var rows = cut.FindAll(".row");
+            rows[0].TextContent.Should().Contain("P2");
+            rows[1].TextContent.Should().Contain("P1");
+            cut.FindAll("[aria-live='polite']").Should().Contain(r => r.TextContent.Contains(expected, StringComparison.Ordinal));
+        });
+    }
+
+    [Fact]
+    public async Task MobileTripPanel_DragDrop_MovesStop()
+    {
+        await using var vm = await EnabledVmAsync(placeable: 3);
+        var cut = RenderComponent<MobileTripPanel>(p => p.Add(x => x.Vm, vm));
+
+        cut.Find(".row[data-poi-id='3']").DragStart();
+        cut.Find(".row[data-poi-id='1']").Drop();
+
+        cut.WaitForAssertion(() =>
+        {
+            var rows = cut.FindAll(".row");
+            rows[0].TextContent.Should().Contain("P3");
+            rows[1].TextContent.Should().Contain("P1");
+            rows[2].TextContent.Should().Contain("P2");
+        });
     }
 }

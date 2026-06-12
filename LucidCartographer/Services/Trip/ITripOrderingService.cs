@@ -43,6 +43,19 @@ public interface ITripOrderingService
     Task AppendStopAsync(int collectionId, int poiId, CancellationToken ct = default);
 
     /// <summary>
+    /// Moves a single Stop to <paramref name="targetOrderIndex"/> (1-based) and
+    /// renumbers the affected range so the order stays contiguous 1..N. Covers
+    /// both drag-to-position and one-step keyboard moves (Story 1.5). Pin-aware:
+    /// when <see cref="Data.Entities.PoiCollection.StartPoiId"/> /
+    /// <see cref="Data.Entities.PoiCollection.FinishPoiId"/> designate a Start /
+    /// Finish, the target is clamped into the movable interior window and the
+    /// pinned Stops never move; moving the pinned Stop itself is a no-op.
+    /// Out-of-range targets clamp; a no-op move short-circuits without writing.
+    /// Never changes <c>StartPoiId</c>/<c>FinishPoiId</c> (that is Story 1.7).
+    /// </summary>
+    Task ReorderStopAsync(int collectionId, int poiId, int targetOrderIndex, CancellationToken ct = default);
+
+    /// <summary>
     /// Re-compacts the order so the remaining placeable Stops are contiguous
     /// 1..N with no gap or duplicate, preserving their relative order.
     /// </summary>

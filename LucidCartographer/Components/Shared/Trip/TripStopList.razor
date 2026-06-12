@@ -25,6 +25,10 @@
     @* TRIP-SELECT-05: announces the selected stop (list→map or map→list). *@
     <span class="sr-only" role="status" aria-live="polite">@Vm.SelectionAnnouncement</span>
 
+    @* TRIP-ORDER-03: announces every successful reorder ("X moved to stop 2 of 5")
+       — one visually-hidden polite region per stop-list surface (NFR4 / AR-9). *@
+    <span class="sr-only" role="status" aria-live="polite">@Vm.LastReorderAnnouncement</span>
+
     @if (Vm.OrderedStops.Count == 0)
     {
         <div class="px-3 py-4 text-sm text-on-surface-variant">@UiStrings.TripStopListEmpty</div>
@@ -44,12 +48,23 @@
                     role="button" tabindex="0"
                     aria-current="@(selected ? "true" : null)"
                     aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripStopRowAria, stop.OrderIndex, Vm.OrderedStops.Count, stop.Name)"
+                    draggable="true"
                     @onclick="() => Vm.SelectStop(stop.PoiId, TripSelectionSource.List)"
                     @onkeydown="e => OnRowKeyDown(e, stop.PoiId)"
+                    @ondragstart="() => OnDragStart(stop.PoiId)"
+                    @ondragover:preventDefault
+                    @ondrop="() => OnDropAsync(stop.OrderIndex)"
+                    @ondrop:preventDefault
+                    @ondragend="OnDragEnd"
                     class="flex items-center gap-2 px-2 py-2 border-b border-surface-container cursor-pointer @(selected ? "bg-primary/10 ring-1 ring-inset ring-primary" : "hover:bg-surface-container")">
-                    @* Leading gutter reserved for the Story-1.5 drag handle / move
-                       controls — render nothing here now, just hold the space. *@
-                    <span class="w-4 flex-shrink-0" aria-hidden="true"></span>
+                    @* TRIP-ORDER-04: drag handle (pointer reorder path, UX-DR3).
+                       The whole row is draggable (native HTML5 DnD, no JS module);
+                       the handle is the visual + accessible affordance for it. *@
+                    <span class="w-4 flex-shrink-0 cursor-grab text-on-surface-variant select-none"
+                          aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDragHandle, stop.Name)"
+                          title="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDragHandle, stop.Name)">
+                        <span aria-hidden="true">⠿</span>
+                    </span>
                     @* Order badge: primary-filled numbered circle (UX-DR2). The
                        descriptive "Stop X of Y" label conveys the position; the
                        bare numeral is hidden so it isn't read twice. *@
@@ -63,6 +78,29 @@
                           aria-label="@UiStrings.TripDwellAria">@UiStrings.TripDwellPlaceholder</span>
                     <span class="text-xs text-on-surface-variant flex-shrink-0 w-6 text-right"
                           aria-label="@UiStrings.TripTimelineAria">@UiStrings.TripTimelinePlaceholder</span>
+                    @* TRIP-ORDER-03: keyboard move controls (NFR4 / AR-9 build-
+                       blocker) — real buttons, Tab-reachable, Enter/Space natively
+                       activatable, disabled at the edges of the pin-aware movable
+                       window and on pinned Start/Finish rows. stopPropagation so
+                       activating a move never also selects the row. *@
+                    <button type="button"
+                            class="inline-flex items-center justify-center w-6 h-6 rounded text-on-surface-variant flex-shrink-0 enabled:hover:bg-surface-container-high disabled:opacity-40"
+                            aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopUp, stop.Name)"
+                            disabled="@(!Vm.CanMoveUp(stop))"
+                            @onclick="() => Vm.MoveStopUpAsync(stop.PoiId)"
+                            @onclick:stopPropagation
+                            @onkeydown:stopPropagation>
+                        <span aria-hidden="true">▲</span>
+                    </button>
+                    <button type="button"
+                            class="inline-flex items-center justify-center w-6 h-6 rounded text-on-surface-variant flex-shrink-0 enabled:hover:bg-surface-container-high disabled:opacity-40"
+                            aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopDown, stop.Name)"
+                            disabled="@(!Vm.CanMoveDown(stop))"
+                            @onclick="() => Vm.MoveStopDownAsync(stop.PoiId)"
+                            @onclick:stopPropagation
+                            @onkeydown:stopPropagation>
+                        <span aria-hidden="true">▼</span>
+                    </button>
                 </li>
             }
         </ul>
@@ -84,6 +122,27 @@
         {
             Vm.SelectStop(poiId, TripSelectionSource.List);
         }
+    }
+
+    // TRIP-ORDER-04: native HTML5 DnD, pure Blazor (no JS module). The bridge
+    // only remembers which PoiId the drag started on and forwards the drop's
+    // target slot to the VM — clamping/pinning/no-op logic lives in the service
+    // (the authoritative single OrderIndex writer), never client-side.
+    private int? _draggedPoiId;
+
+    private void OnDragStart(int poiId) => _draggedPoiId = poiId;
+
+    private void OnDragEnd() => _draggedPoiId = null;
+
+    private async Task OnDropAsync(int targetOrderIndex)
+    {
+        if (_draggedPoiId is not { } poiId)
+        {
+            return;
+        }
+
+        _draggedPoiId = null;
+        await Vm.MoveStopToAsync(poiId, targetOrderIndex);
     }
 
     public void Dispose() => Vm.StateChanged -= OnVmChanged;

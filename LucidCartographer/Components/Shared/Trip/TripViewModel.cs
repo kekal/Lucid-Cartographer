@@ -132,6 +132,110 @@ public sealed class TripViewModel(
         Notify();
     }
 
+    // --- Stop reorder (Story 1.5) ---
+
+    // TRIP-ORDER-03: drag and keyboard both surface here and delegate to the
+    // single OrderIndex writer (ITripOrderingService.ReorderStopAsync, AR-11).
+    // The VM never mutates OrderIndex itself; after a successful move it
+    // re-reads the projections and raises StateChanged, which the host page
+    // already turns into the incremental Story-1.3 leg redraw (no full reload).
+
+    /// <summary>
+    /// Localized "name moved to stop X of Y" text for the reorder aria-live
+    /// region; null until the first successful move. Not set on no-op moves.
+    /// </summary>
+    public string? LastReorderAnnouncement { get; private set; }
+
+    /// <summary>
+    /// Whether the Stop can move one position up. False on a pinned Start/Finish
+    /// and on the topmost movable Stop (mirrors the service's interior window so
+    /// the buttons disable instead of throwing; the service stays authoritative).
+    /// </summary>
+    public bool CanMoveUp(TripStop stop) =>
+        !stop.IsStart && !stop.IsFinish && stop.OrderIndex > MinMovableOrder;
+
+    /// <summary>
+    /// Whether the Stop can move one position down. False on a pinned
+    /// Start/Finish and on the bottommost movable Stop.
+    /// </summary>
+    public bool CanMoveDown(TripStop stop) =>
+        !stop.IsStart && !stop.IsFinish && stop.OrderIndex < MaxMovableOrder;
+
+    private int MinMovableOrder =>
+        OrderedStops.Count > 0 && OrderedStops[0].IsStart ? 2 : 1;
+
+    private int MaxMovableOrder =>
+        OrderedStops.Count > 0 && OrderedStops[^1].IsFinish
+            ? OrderedStops.Count - 1
+            : OrderedStops.Count;
+
+    /// <summary>Moves the Stop one position earlier in the order (keyboard path).</summary>
+    public Task MoveStopUpAsync(int poiId) => MoveStopByAsync(poiId, -1);
+
+    /// <summary>Moves the Stop one position later in the order (keyboard path).</summary>
+    public Task MoveStopDownAsync(int poiId) => MoveStopByAsync(poiId, +1);
+
+    private async Task MoveStopByAsync(int poiId, int delta)
+    {
+        var stop = OrderedStops.FirstOrDefault(s => s.PoiId == poiId);
+        if (stop is null)
+        {
+            return;
+        }
+
+        await MoveStopToAsync(poiId, stop.OrderIndex + delta);
+    }
+
+    /// <summary>
+    /// Moves the Stop to the target 1-based slot (drag path; also backs the
+    /// one-step keyboard moves). Delegates to the single OrderIndex writer,
+    /// which clamps into the pin-aware movable window and short-circuits no-ops
+    /// without a DB write. On a successful move, refreshes the projections,
+    /// sets <see cref="LastReorderAnnouncement"/> and raises
+    /// <see cref="StateChanged"/> (host redraws legs incrementally).
+    /// </summary>
+    public async Task MoveStopToAsync(int poiId, int targetOrderIndex)
+    {
+        if (ActiveCollectionId is not { } collectionId || !IsTripViewEnabled)
+        {
+            return;
+        }
+
+        var before = OrderedStops.FirstOrDefault(s => s.PoiId == poiId);
+        if (before is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await ordering.ReorderStopAsync(collectionId, poiId, targetOrderIndex, _cts.Token);
+            await RefreshProjectionsAsync(collectionId);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to reorder stop {PoiId} in collection {CollectionId}", poiId, collectionId);
+            return;
+        }
+
+        var after = OrderedStops.FirstOrDefault(s => s.PoiId == poiId);
+        if (after is not null && after.OrderIndex != before.OrderIndex)
+        {
+            // Announce only genuine moves — a clamped/own-position no-op stays
+            // silent so the live region never reports a move that didn't happen.
+            LastReorderAnnouncement = string.Format(
+                System.Globalization.CultureInfo.CurrentCulture,
+                UiStrings.TripStopMovedAnnouncement,
+                after.Name, after.OrderIndex, OrderedStops.Count);
+        }
+
+        Notify();
+    }
+
     // --- Lifecycle / loading ---
 
     /// <summary>

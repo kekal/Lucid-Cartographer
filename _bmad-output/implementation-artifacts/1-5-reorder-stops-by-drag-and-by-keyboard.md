@@ -1,6 +1,9 @@
+---
+baseline_commit: 979180b38b60d38ab0052b1afe25a15c12239406
+---
 # Story 1.5: Reorder stops by drag and by keyboard
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -26,40 +29,40 @@ This story adds the two user-driven reorder paths — pointer drag and keyboard 
 
 ## Tasks / Subtasks
 
-- [ ] **Extend the single `TripOrderingService` ordering method (AC: 1, 4, 5, 6)**
-  - [ ] In `Services/Trip/TripOrderingService.cs` (from Story 1.2), add a public reorder method — e.g. `Task ReorderStopAsync(int collectionId, int poiId, int targetOrderIndex, CancellationToken ct)` (move a single stop to a target slot, covers both drag-to-position and one-step keyboard moves) — that delegates to the SAME private renumber/compaction routine Story 1.2 uses for seed/compaction. Do NOT fork a second renumbering implementation (AR-11). [Source: architecture.md#Communication Patterns; architecture.md#Frontend Architecture (D8)]
-  - [ ] Enforce 1-based contiguous gap-free `OrderIndex` after the move; reject/clamp out-of-range targets. [Source: architecture.md#Format Patterns]
-  - [ ] Pin enforcement: if `PoiCollection.StartPoiId` is set, the Start is fixed at Order 1; if `FinishPoiId` is set, the Finish is fixed at Order N. Compute the movable interior window (`[2 .. N-1]` when both pinned; `[2 .. N]` Start-only; `[1 .. N-1]` Finish-only; `[1 .. N]` neither) and clamp the target into it; never let a reorder relocate the Start/Finish or push an interior stop into a pinned slot. Reordering must NOT change `StartPoiId`/`FinishPoiId` (that is Story 1.7). [Source: epics.md#Story 1.5; architecture.md#Frontend Architecture (D5 pin precedent)]
-  - [ ] Load/save through `IDbContextFactory<AppDbContext>`; serialize the `SaveChangesAsync` under `SqliteWriteLock.Gate` (`await Gate.WaitAsync(ct)` … `Gate.Release()` in `finally`) exactly like enrichment/dedup. No `ConfigureAwait(false)`. [Source: project-context.md#Critical Implementation Rules; Services/SqliteWriteLock.cs]
-  - [ ] Detect the no-op case (target == current order, or a clamped no-op) and short-circuit before writing so no redundant `SaveChangesAsync` runs (protects the "no-op reorder" invariant and SM-C2 intent). [Source: epics.md#Story 1.5 AC; architecture.md#Process Patterns]
-  - [ ] Tag the new decision with a `TRIP-*` comment code (e.g. `TRIP-ORDER-02`) referencing AR-11 single-writer. [Source: architecture.md#Enforcement Guidelines]
+- [x] **Extend the single `TripOrderingService` ordering method (AC: 1, 4, 5, 6)**
+  - [x] In `Services/Trip/TripOrderingService.cs` (from Story 1.2), add a public reorder method — e.g. `Task ReorderStopAsync(int collectionId, int poiId, int targetOrderIndex, CancellationToken ct)` (move a single stop to a target slot, covers both drag-to-position and one-step keyboard moves) — that delegates to the SAME private renumber/compaction routine Story 1.2 uses for seed/compaction. Do NOT fork a second renumbering implementation (AR-11). [Source: architecture.md#Communication Patterns; architecture.md#Frontend Architecture (D8)]
+  - [x] Enforce 1-based contiguous gap-free `OrderIndex` after the move; reject/clamp out-of-range targets. [Source: architecture.md#Format Patterns]
+  - [x] Pin enforcement: if `PoiCollection.StartPoiId` is set, the Start is fixed at Order 1; if `FinishPoiId` is set, the Finish is fixed at Order N. Compute the movable interior window (`[2 .. N-1]` when both pinned; `[2 .. N]` Start-only; `[1 .. N-1]` Finish-only; `[1 .. N]` neither) and clamp the target into it; never let a reorder relocate the Start/Finish or push an interior stop into a pinned slot. Reordering must NOT change `StartPoiId`/`FinishPoiId` (that is Story 1.7). [Source: epics.md#Story 1.5; architecture.md#Frontend Architecture (D5 pin precedent)]
+  - [x] Load/save through `IDbContextFactory<AppDbContext>`; serialize the `SaveChangesAsync` under `SqliteWriteLock.Gate` (`await Gate.WaitAsync(ct)` … `Gate.Release()` in `finally`) exactly like enrichment/dedup. No `ConfigureAwait(false)`. [Source: project-context.md#Critical Implementation Rules; Services/SqliteWriteLock.cs]
+  - [x] Detect the no-op case (target == current order, or a clamped no-op) and short-circuit before writing so no redundant `SaveChangesAsync` runs (protects the "no-op reorder" invariant and SM-C2 intent). [Source: epics.md#Story 1.5 AC; architecture.md#Process Patterns]
+  - [x] Tag the new decision with a `TRIP-*` comment code (e.g. `TRIP-ORDER-02`) referencing AR-11 single-writer. [Source: architecture.md#Enforcement Guidelines]
 
-- [ ] **Surface reorder on `TripViewModel` (AC: 1, 2, 5)**
-  - [ ] Add VM methods the rows bind to — e.g. `Task MoveStopUpAsync(int poiId)`, `Task MoveStopDownAsync(int poiId)`, and `Task MoveStopToAsync(int poiId, int targetOrderIndex)` for drag — each calling the `TripOrderingService` reorder method, then refreshing the VM's ordered-stop state and raising `StateChanged` (mirror the existing `Notify()` pattern). VM stays sealed/Transient with `private set` state. [Source: project-context.md#Architecture Layering; Components/Pages/MapPageViewModel.cs]
-  - [ ] Expose a `LastReorderAnnouncement` (string, `private set`) the row/panel binds into the `aria-live` region; set it on every successful move using `UiStrings` formatted with the stop name + new position + total. [Source: architecture.md#Frontend Architecture (D8)]
-  - [ ] After a successful reorder, trigger the existing dependent-view redraw used by Story 1.3 (leg re-render via `LeafletMapService`/`leafletInterop.js`) — incremental, not a full reload. Do NOT add travel-time recompute here (that is Epic 2); only redraw. [Source: epics.md#Story 1.5 AC; architecture.md#Frontend Architecture (D6)]
+- [x] **Surface reorder on `TripViewModel` (AC: 1, 2, 5)**
+  - [x] Add VM methods the rows bind to — e.g. `Task MoveStopUpAsync(int poiId)`, `Task MoveStopDownAsync(int poiId)`, and `Task MoveStopToAsync(int poiId, int targetOrderIndex)` for drag — each calling the `TripOrderingService` reorder method, then refreshing the VM's ordered-stop state and raising `StateChanged` (mirror the existing `Notify()` pattern). VM stays sealed/Transient with `private set` state. [Source: project-context.md#Architecture Layering; Components/Pages/MapPageViewModel.cs]
+  - [x] Expose a `LastReorderAnnouncement` (string, `private set`) the row/panel binds into the `aria-live` region; set it on every successful move using `UiStrings` formatted with the stop name + new position + total. [Source: architecture.md#Frontend Architecture (D8)]
+  - [x] After a successful reorder, trigger the existing dependent-view redraw used by Story 1.3 (leg re-render via `LeafletMapService`/`leafletInterop.js`) — incremental, not a full reload. Do NOT add travel-time recompute here (that is Epic 2); only redraw. [Source: epics.md#Story 1.5 AC; architecture.md#Frontend Architecture (D6)]
 
-- [ ] **Keyboard move controls in `TripStopList.razor` (AC: 2, 3, 4)**
-  - [ ] Add per-row move-up and move-down `<button>`s (real buttons, keyboard-focusable, Enter/Space activatable) bound to the VM move methods. Each carries an `aria-label` from `UiStrings` (formatted with the POI name). [Source: epics.md#Story 1.5; architecture.md#Frontend Architecture (D8)]
-  - [ ] Disable (or guard) move-up on the topmost movable stop and move-down on the bottommost movable stop, and disable both on a pinned Start/Finish row, so AC-4 holds without throwing. Disabled buttons get `aria-disabled`/`disabled`. [Source: epics.md#Story 1.5 AC]
-  - [ ] Add a single visually-hidden `aria-live="polite"` region per stop-list surface bound to `Vm.LastReorderAnnouncement`, following the existing announce pattern (see `EnrichmentStatus.razor` aria/status precedent). [Source: Components/Shared/EnrichmentStatus.razor; architecture.md#Frontend Architecture (D8)]
-  - [ ] Keep the component a thin bridge: `@code` only subscribes `Vm.StateChanged`, calls VM methods, no ordering logic in markup. [Source: project-context.md#Architecture Layering]
+- [x] **Keyboard move controls in `TripStopList.razor` (AC: 2, 3, 4)**
+  - [x] Add per-row move-up and move-down `<button>`s (real buttons, keyboard-focusable, Enter/Space activatable) bound to the VM move methods. Each carries an `aria-label` from `UiStrings` (formatted with the POI name). [Source: epics.md#Story 1.5; architecture.md#Frontend Architecture (D8)]
+  - [x] Disable (or guard) move-up on the topmost movable stop and move-down on the bottommost movable stop, and disable both on a pinned Start/Finish row, so AC-4 holds without throwing. Disabled buttons get `aria-disabled`/`disabled`. [Source: epics.md#Story 1.5 AC]
+  - [x] Add a single visually-hidden `aria-live="polite"` region per stop-list surface bound to `Vm.LastReorderAnnouncement`, following the existing announce pattern (see `EnrichmentStatus.razor` aria/status precedent). [Source: Components/Shared/EnrichmentStatus.razor; architecture.md#Frontend Architecture (D8)]
+  - [x] Keep the component a thin bridge: `@code` only subscribes `Vm.StateChanged`, calls VM methods, no ordering logic in markup. [Source: project-context.md#Architecture Layering]
 
-- [ ] **Drag interop (AC: 1, 4, 6)**
-  - [ ] Add a drag handle to each stop row (UX-DR3: drag handle · order badge · name · dwell field · timeline value · keyboard move up/down). Prefer native HTML5 drag-and-drop via Blazor (`draggable="true"`, `@ondragstart`/`@ondragover:preventDefault`/`@ondrop`) to avoid a new JS module; if a small JS helper is required for reliable drop-position calculation, add it to the existing `wwwroot/js` (extend, do not create a parallel module — `leafletInterop.js` precedent for "extend the existing one"). [Source: architecture.md#Gap Analysis (drag mechanism non-blocking); architecture.md#Naming Patterns (JS interop)]
-  - [ ] On drop, compute the target `OrderIndex`, clamp into the movable interior window (reuse the same pin logic — do not duplicate it client-side; the service is authoritative), and call `Vm.MoveStopToAsync`. A drop onto the first/last (pinned) slot clamps to the nearest interior slot and never reassigns Start/Finish. [Source: epics.md#Story 1.5 AC]
-  - [ ] Ensure drop on own position is a no-op (AC-6).
+- [x] **Drag interop (AC: 1, 4, 6)**
+  - [x] Add a drag handle to each stop row (UX-DR3: drag handle · order badge · name · dwell field · timeline value · keyboard move up/down). Prefer native HTML5 drag-and-drop via Blazor (`draggable="true"`, `@ondragstart`/`@ondragover:preventDefault`/`@ondrop`) to avoid a new JS module; if a small JS helper is required for reliable drop-position calculation, add it to the existing `wwwroot/js` (extend, do not create a parallel module — `leafletInterop.js` precedent for "extend the existing one"). [Source: architecture.md#Gap Analysis (drag mechanism non-blocking); architecture.md#Naming Patterns (JS interop)]
+  - [x] On drop, compute the target `OrderIndex`, clamp into the movable interior window (reuse the same pin logic — do not duplicate it client-side; the service is authoritative), and call `Vm.MoveStopToAsync`. A drop onto the first/last (pinned) slot clamps to the nearest interior slot and never reassigns Start/Finish. [Source: epics.md#Story 1.5 AC]
+  - [x] Ensure drop on own position is a no-op (AC-6).
 
-- [ ] **Mirror everything on the mobile path (AC: 3)**
-  - [ ] Apply the same drag handle + move-up/down buttons + `aria-live` region to the mobile stop-list surface (`MobileTripPanel.razor` / mobile `TripStopList` per the `Mobile*` split). Touch targets ≥ ~44px. Both surfaces share the same `TripViewModel`, so behavior is identical by construction. [Source: architecture.md#Structure Patterns; project-context.md#UI Conventions (dual render path)]
+- [x] **Mirror everything on the mobile path (AC: 3)**
+  - [x] Apply the same drag handle + move-up/down buttons + `aria-live` region to the mobile stop-list surface (`MobileTripPanel.razor` / mobile `TripStopList` per the `Mobile*` split). Touch targets ≥ ~44px. Both surfaces share the same `TripViewModel`, so behavior is identical by construction. [Source: architecture.md#Structure Patterns; project-context.md#UI Conventions (dual render path)]
 
-- [ ] **UiStrings (AC: 2, 3)**
-  - [ ] Add to `Services/UiStrings.cs`: `TripMoveStopUp` / `TripMoveStopDown` aria-label templates (e.g. `"Move {0} up"`, `"Move {0} down"`), `TripStopMovedAnnouncement` (e.g. `"{0} moved to stop {1} of {2}"`), and a drag-handle `aria-label` (e.g. `TripDragHandle = "Drag to reorder {0}"`). No hardcoded UI text in markup. [Source: project-context.md#UI Conventions; epics.md#NFR5]
+- [x] **UiStrings (AC: 2, 3)**
+  - [x] Add to `Services/UiStrings.cs`: `TripMoveStopUp` / `TripMoveStopDown` aria-label templates (e.g. `"Move {0} up"`, `"Move {0} down"`), `TripStopMovedAnnouncement` (e.g. `"{0} moved to stop {1} of {2}"`), and a drag-handle `aria-label` (e.g. `TripDragHandle = "Drag to reorder {0}"`). No hardcoded UI text in markup. [Source: project-context.md#UI Conventions; epics.md#NFR5]
 
-- [ ] **Tests (AC: 1–6)**
-  - [ ] **Unit** (`LucidCartographer.Tests/Services/TripOrderingServiceTests.cs`): renumber-on-move correctness; contiguity/gap-free/uniqueness invariant after move; move within interior window; **pinned-Start-only**, **pinned-Finish-only**, **both-pinned** cases (interior-only, pin stays at 1/N, drop-into-pinned-slot clamps); no-op short-circuits without writing; manual reorder overrides a prior order. Assert 1-based. [Source: architecture.md#Pattern Enforcement; epics.md#Story 1.5]
-  - [ ] **Component / bUnit** (`LucidCartographer.Tests/Components/TripStopListTests.cs`): move buttons present with correct `aria-label`s; activating move-up/down invokes the VM and the move buttons are keyboard-operable; `aria-live` region receives the announcement text; move-up disabled on first movable row, move-down on last, both disabled on pinned rows. [Source: architecture.md#Implementation Readiness (bUnit layer)]
-  - [ ] **Integration, both surfaces** (`LucidCartographer.Tests/Integration/…` desktop via `IntegrationTestBase`, mobile via `MobileTestBase`): drag a stop and assert persisted order + incremental redraw (no full reload); keyboard move on both surfaces produces identical `OrderIndex` and announcement; pinned Start/Finish unaffected. [Source: project-context.md#Testing Rules; architecture.md#File Organization]
+- [x] **Tests (AC: 1–6)**
+  - [x] **Unit** (`LucidCartographer.Tests/Services/TripOrderingServiceTests.cs`): renumber-on-move correctness; contiguity/gap-free/uniqueness invariant after move; move within interior window; **pinned-Start-only**, **pinned-Finish-only**, **both-pinned** cases (interior-only, pin stays at 1/N, drop-into-pinned-slot clamps); no-op short-circuits without writing; manual reorder overrides a prior order. Assert 1-based. [Source: architecture.md#Pattern Enforcement; epics.md#Story 1.5]
+  - [x] **Component / bUnit** (`LucidCartographer.Tests/Components/TripStopListTests.cs`): move buttons present with correct `aria-label`s; activating move-up/down invokes the VM and the move buttons are keyboard-operable; `aria-live` region receives the announcement text; move-up disabled on first movable row, move-down on last, both disabled on pinned rows. [Source: architecture.md#Implementation Readiness (bUnit layer)]
+  - [x] **Integration, both surfaces** (`LucidCartographer.Tests/Integration/…` desktop via `IntegrationTestBase`, mobile via `MobileTestBase`): drag a stop and assert persisted order + incremental redraw (no full reload); keyboard move on both surfaces produces identical `OrderIndex` and announcement; pinned Start/Finish unaffected. [Source: project-context.md#Testing Rules; architecture.md#File Organization]
 
 ## Dev Notes
 
@@ -130,8 +133,36 @@ Three layers per project convention. **Unit** carries the renumber/pin logic (in
 
 ### Agent Model Used
 
+claude-fable-5
+
 ### Debug Log References
+
+- Full suite: 654/654 passed (including ScrapeProgress_ShowsIndicator — no rerun needed).
+- Playwright's mouse-gesture `DragToAsync` did not reliably synthesize HTML5 dragstart/drop against the Blazor handlers; the desktop drag integration test dispatches the DOM `dragstart`/`drop` events directly (with a real `DataTransfer`), which still exercises the full Blazor handler → VM → service → DB → re-render path end-to-end.
 
 ### Completion Notes List
 
+- `TripOrderingService.ReorderStopAsync(collectionId, poiId, targetOrderIndex, ct)` added as the reorder entry point (TRIP-ORDER-02). It funnels through the existing private `Renumber` + `SetOrderAsync` (the one gated writer) — no second renumbering routine. Pin window computed from `PoiCollection.StartPoiId`/`FinishPoiId` ([2..N-1] both, [2..N] Start-only, [1..N-1] Finish-only, [1..N] neither); targets clamp into it; moving the pinned Start/Finish itself is a no-op; reorder never touches `StartPoiId`/`FinishPoiId`. No-op moves (own slot, clamped-onto-own-slot, unknown/non-placeable POI) short-circuit before any tracking/`SaveChangesAsync` — proven by a SaveChanges-counting factory in the unit tests.
+- `TripViewModel` gains `MoveStopUpAsync`/`MoveStopDownAsync`/`MoveStopToAsync` + `LastReorderAnnouncement` (TRIP-ORDER-03) and `CanMoveUp`/`CanMoveDown` guard helpers that mirror the service's pin window for button disabling (service stays authoritative). A successful move refreshes the projections and raises `StateChanged`; the host page's existing `OnTripChanged → PushTripAsync` (Story 1.3) performs the incremental leg/badge redraw — no MapPage change was needed, no full reload, no travel-time logic.
+- Both stop-list surfaces (desktop `TripStopList.razor`, mobile `MobileTripPanel.razor`) gained: a drag handle (TRIP-ORDER-04, whole row `draggable="true"`, pure-Blazor HTML5 DnD — no JS module touched), per-row move-up/move-down `<button>`s with `UiStrings` aria-labels and disabled edge/pin guards, and a visually-hidden `aria-live="polite"` region bound to `Vm.LastReorderAnnouncement`. Mobile move buttons are ≥44px (asserted in the mobile integration test via BoundingBox). `stopPropagation` on the buttons keeps a move activation from also selecting the row.
+- Announcement is only set on a genuine order change (no-op drops/clamps stay silent), formatted "{name} moved to stop {n} of {N}".
+- All four new UI strings live in `Services/UiStrings.cs`; no hardcoded markup text.
+- Build clean under TreatWarningsAsErrors; no ConfigureAwait(false); all writes under `SqliteWriteLock.Gate`.
+
 ### File List
+
+- LucidCartographer/Services/Trip/ITripOrderingService.cs (modified — ReorderStopAsync contract)
+- LucidCartographer/Services/Trip/TripOrderingService.cs (modified — ReorderStopAsync + ReadPinsAsync, TRIP-ORDER-02)
+- LucidCartographer/Components/Shared/Trip/TripViewModel.cs (modified — move methods, LastReorderAnnouncement, CanMoveUp/CanMoveDown, TRIP-ORDER-03)
+- LucidCartographer/Components/Shared/Trip/TripStopList.razor (modified — drag handle + DnD handlers, move buttons, reorder aria-live region, TRIP-ORDER-04)
+- LucidCartographer/Components/Shared/Trip/MobileTripPanel.razor (modified — same controls, ≥44px touch targets)
+- LucidCartographer/Services/UiStrings.cs (modified — TripMoveStopUp/Down, TripStopMovedAnnouncement, TripDragHandle)
+- LucidCartographer.Tests/Services/TripOrderingServiceTests.cs (modified — 12 new reorder unit tests incl. pin permutations + no-write no-op)
+- LucidCartographer.Tests/Components/Trip/TripStopListTests.cs (modified — 8 new bUnit tests, desktop + mobile)
+- LucidCartographer.Tests/Integration/TripViewIntegrationTests.cs (modified — keyboard move, drag, edge-guard desktop tests)
+- LucidCartographer.Tests/Integration/MobileTripViewTests.cs (modified — mobile keyboard move + 44px target + edge guards)
+- _bmad-output/implementation-artifacts/1-5-reorder-stops-by-drag-and-by-keyboard.md (this file)
+
+### Change Log
+
+- 2026-06-12: Story 1.5 implemented — pin-aware single-writer ReorderStopAsync; drag + keyboard reorder on desktop and mobile stop lists with aria-labels, aria-live announcements and disabled-edge guards; 654/654 tests green. Status → review.

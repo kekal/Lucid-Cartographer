@@ -108,6 +108,80 @@ public sealed class TripOrderingService(
         await SetOrderAsync(collectionId, Renumber(ordered.Concat(appended)), ct);
     }
 
+    public async Task ReorderStopAsync(int collectionId, int poiId, int targetOrderIndex, CancellationToken ct = default)
+    {
+        var rows = await ReadAsync(collectionId, ct);
+
+        // TRIP-ORDER-02 (AR-11 single writer): drag and keyboard both land here
+        // and funnel through the same Renumber + SetOrderAsync the seed/compaction
+        // paths use — no second renumbering routine exists. The current sequence
+        // is the compacted Stop list (placeable, ordered); the move is a single
+        // remove + insert in that sequence followed by a full 1..N renumber, so
+        // the result is contiguous, gap-free and unique by construction.
+        var stops = rows.Where(r => r.Placeable && r.Order > 0)
+            .OrderBy(r => r.Order)
+            .ThenBy(r => r.AddedDate)
+            .ThenBy(r => r.PoiId)
+            .ToList();
+
+        var currentIndex = stops.FindIndex(s => s.PoiId == poiId);
+        if (currentIndex < 0)
+        {
+            // Not a Stop of this collection (absent, non-placeable or unordered).
+            return;
+        }
+
+        // Pin enforcement: a designated Start is fixed at Order 1, a designated
+        // Finish at Order N. The movable window is [2..N-1] when both are pinned,
+        // [2..N] Start-only, [1..N-1] Finish-only, [1..N] when neither. Pins only
+        // count when the designated POI actually is a Stop here (defensive).
+        // Reordering NEVER touches StartPoiId/FinishPoiId — that is Story 1.7.
+        var (startPoiId, finishPoiId) = await ReadPinsAsync(collectionId, ct);
+        var startPinned = startPoiId is { } sid && stops.Any(s => s.PoiId == sid);
+        var finishPinned = finishPoiId is { } fid && stops.Any(s => s.PoiId == fid);
+
+        if ((startPinned && poiId == startPoiId) || (finishPinned && poiId == finishPoiId))
+        {
+            // The pinned Start/Finish itself never moves.
+            return;
+        }
+
+        var n = stops.Count;
+        var min = startPinned ? 2 : 1;
+        var max = finishPinned ? n - 1 : n;
+        if (min > max)
+        {
+            // No movable interior slot exists (e.g. 2 stops, both pinned).
+            return;
+        }
+
+        var target = Math.Clamp(targetOrderIndex, min, max);
+        var current = currentIndex + 1;
+        if (target == current)
+        {
+            // No-op move (own position, or clamped back onto it): short-circuit
+            // before any tracking/SaveChangesAsync so nothing is written (AC-6).
+            return;
+        }
+
+        var moving = stops[currentIndex];
+        stops.RemoveAt(currentIndex);
+        stops.Insert(target - 1, moving);
+
+        await SetOrderAsync(collectionId, Renumber(stops), ct);
+    }
+
+    private async Task<(int? StartPoiId, int? FinishPoiId)> ReadPinsAsync(int collectionId, CancellationToken ct)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var row = await db.PoiCollections
+            .AsNoTracking()
+            .Where(c => c.Id == collectionId)
+            .Select(c => new { c.StartPoiId, c.FinishPoiId })
+            .FirstOrDefaultAsync(ct);
+        return (row?.StartPoiId, row?.FinishPoiId);
+    }
+
     private static Dictionary<int, int> Renumber(IEnumerable<ItemRow> rows)
     {
         var desired = new Dictionary<int, int>();

@@ -88,6 +88,15 @@ public static class UiStrings
     // {2} = POI name.
     public const string TripStopRowAria = "Stop {0} of {1}: {2}";
 
+    // Trip View — stop reorder (Story 1.5). {0} = POI name. The move-control
+    // aria-labels and the aria-live announcement after every successful move.
+    public const string TripMoveStopUp = "Move {0} up";
+    public const string TripMoveStopDown = "Move {0} down";
+    // {0} = POI name, {1} = new stop number, {2} = total stops.
+    public const string TripStopMovedAnnouncement = "{0} moved to stop {1} of {2}";
+    // Drag-handle accessible name. {0} = POI name.
+    public const string TripDragHandle = "Drag to reorder {0}";
+
     // Data Sources Page
     public const string DataSourcesPageTitle = "Data Sources - Lucid Cartographer";
     public const string DataAndImports = "Data & Imports";

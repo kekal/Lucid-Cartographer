@@ -219,6 +219,260 @@ public class TripOrderingServiceTests
         order.Values.Should().BeEquivalentTo(new[] { 1, 2, 3 });
     }
 
+    // === Story 1.5: ReorderStopAsync (single writer, pin-aware, no-op safe) ===
+
+    // Wraps the InMemory factory and counts SaveChanges commits so the no-op
+    // short-circuit ("no redundant DB write") is directly observable.
+    private sealed class CountingDbContextFactory(IDbContextFactory<AppDbContext> inner) : IDbContextFactory<AppDbContext>
+    {
+        private int _saveCount;
+
+        public int SaveCount => Volatile.Read(ref _saveCount);
+
+        public AppDbContext CreateDbContext()
+        {
+            var db = inner.CreateDbContext();
+            db.SavedChanges += (_, _) => Interlocked.Increment(ref _saveCount);
+            return db;
+        }
+    }
+
+    private static async Task SetPinsAsync(IDbContextFactory<AppDbContext> factory, int? startPoiId, int? finishPoiId)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        var collection = await db.PoiCollections.FirstAsync(c => c.Id == CollectionId);
+        collection.StartPoiId = startPoiId;
+        collection.FinishPoiId = finishPoiId;
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task<(int? Start, int? Finish)> ReadPinsAsync(IDbContextFactory<AppDbContext> factory)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        var c = await db.PoiCollections.FirstAsync(x => x.Id == CollectionId);
+        return (c.StartPoiId, c.FinishPoiId);
+    }
+
+    // Seeds 4 placeable POIs (ids 1..4, AddedDate ascending) and seeds the
+    // order so 1→1, 2→2, 3→3, 4→4.
+    private static async Task<(IDbContextFactory<AppDbContext> Factory, TripOrderingService Service)> SeededFourAsync()
+    {
+        var factory = await SeedAsync(
+            (1, new DateTime(2025, 1, 1), true),
+            (2, new DateTime(2025, 1, 2), true),
+            (3, new DateTime(2025, 1, 3), true),
+            (4, new DateTime(2025, 1, 4), true));
+        var service = CreateService(factory);
+        await service.SeedOrderAsync(CollectionId);
+        return (factory, service);
+    }
+
+    [Fact]
+    public async Task Reorder_MovesStopForward_AndRenumbersContiguously()
+    {
+        var (factory, service) = await SeededFourAsync();
+
+        await service.ReorderStopAsync(CollectionId, 1, 3);
+
+        var order = await ReadOrderAsync(factory);
+        order[2].Should().Be(1);
+        order[3].Should().Be(2);
+        order[1].Should().Be(3, "the dragged stop lands exactly on the target slot");
+        order[4].Should().Be(4);
+        order.Values.Should().BeEquivalentTo(new[] { 1, 2, 3, 4 }, "1-based, contiguous, gap-free, unique");
+    }
+
+    [Fact]
+    public async Task Reorder_MovesStopBackward_AndRenumbersContiguously()
+    {
+        var (factory, service) = await SeededFourAsync();
+
+        await service.ReorderStopAsync(CollectionId, 4, 2);
+
+        var order = await ReadOrderAsync(factory);
+        order[1].Should().Be(1);
+        order[4].Should().Be(2);
+        order[2].Should().Be(3);
+        order[3].Should().Be(4);
+        order.Values.Should().BeEquivalentTo(new[] { 1, 2, 3, 4 });
+    }
+
+    [Fact]
+    public async Task Reorder_OneStepMoves_AreExactlyOnePosition()
+    {
+        var (factory, service) = await SeededFourAsync();
+
+        await service.ReorderStopAsync(CollectionId, 2, 3); // move-down
+        var order = await ReadOrderAsync(factory);
+        order[2].Should().Be(3);
+        order[3].Should().Be(2);
+
+        await service.ReorderStopAsync(CollectionId, 2, 2); // move-up back
+        order = await ReadOrderAsync(factory);
+        order[2].Should().Be(2);
+        order[3].Should().Be(3);
+        order.Values.Should().BeEquivalentTo(new[] { 1, 2, 3, 4 });
+    }
+
+    [Fact]
+    public async Task Reorder_ClampsOutOfRangeTargets()
+    {
+        var (factory, service) = await SeededFourAsync();
+
+        await service.ReorderStopAsync(CollectionId, 2, 99);
+        var order = await ReadOrderAsync(factory);
+        order[2].Should().Be(4, "an over-range target clamps to N");
+
+        await service.ReorderStopAsync(CollectionId, 2, -5);
+        order = await ReadOrderAsync(factory);
+        order[2].Should().Be(1, "an under-range target clamps to 1");
+        order.Values.Should().BeEquivalentTo(new[] { 1, 2, 3, 4 });
+    }
+
+    [Fact]
+    public async Task Reorder_PinnedStartOnly_ClampsIntoInteriorWindow_AndStartStaysAtOne()
+    {
+        var (factory, service) = await SeededFourAsync();
+        await SetPinsAsync(factory, startPoiId: 1, finishPoiId: null);
+
+        // Drop into the pinned first slot clamps to the nearest interior slot (2).
+        await service.ReorderStopAsync(CollectionId, 3, 1);
+
+        var order = await ReadOrderAsync(factory);
+        order[1].Should().Be(1, "the pinned Start never leaves Order 1");
+        order[3].Should().Be(2, "the drop clamps into the movable window [2..N]");
+        order[2].Should().Be(3);
+        order[4].Should().Be(4);
+        order.Values.Should().BeEquivalentTo(new[] { 1, 2, 3, 4 });
+
+        // The last slot is open (no Finish pin): an interior stop may take it.
+        await service.ReorderStopAsync(CollectionId, 2, 4);
+        order = await ReadOrderAsync(factory);
+        order[2].Should().Be(4);
+        order[1].Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Reorder_PinnedFinishOnly_ClampsIntoInteriorWindow_AndFinishStaysAtN()
+    {
+        var (factory, service) = await SeededFourAsync();
+        await SetPinsAsync(factory, startPoiId: null, finishPoiId: 4);
+
+        // Drop into the pinned last slot clamps to the nearest interior slot (N-1).
+        await service.ReorderStopAsync(CollectionId, 2, 4);
+
+        var order = await ReadOrderAsync(factory);
+        order[4].Should().Be(4, "the pinned Finish never leaves Order N");
+        order[2].Should().Be(3, "the drop clamps into the movable window [1..N-1]");
+        order[1].Should().Be(1);
+        order[3].Should().Be(2);
+        order.Values.Should().BeEquivalentTo(new[] { 1, 2, 3, 4 });
+
+        // The first slot is open (no Start pin): an interior stop may take it.
+        await service.ReorderStopAsync(CollectionId, 3, 1);
+        order = await ReadOrderAsync(factory);
+        order[3].Should().Be(1);
+        order[4].Should().Be(4);
+    }
+
+    [Fact]
+    public async Task Reorder_BothPinned_MovesInteriorOnly_PinsKeepOneAndN()
+    {
+        var (factory, service) = await SeededFourAsync();
+        await SetPinsAsync(factory, startPoiId: 1, finishPoiId: 4);
+
+        await service.ReorderStopAsync(CollectionId, 2, 99); // clamps to N-1 = 3
+        await service.ReorderStopAsync(CollectionId, 3, 1);  // clamps to 2
+
+        var order = await ReadOrderAsync(factory);
+        order[1].Should().Be(1);
+        order[4].Should().Be(4);
+        order[3].Should().Be(2);
+        order[2].Should().Be(3);
+        order.Values.Should().BeEquivalentTo(new[] { 1, 2, 3, 4 });
+    }
+
+    [Fact]
+    public async Task Reorder_MovingThePinnedStartOrFinish_IsNoOp()
+    {
+        var (factory, service) = await SeededFourAsync();
+        await SetPinsAsync(factory, startPoiId: 1, finishPoiId: 4);
+
+        await service.ReorderStopAsync(CollectionId, 1, 3);
+        await service.ReorderStopAsync(CollectionId, 4, 2);
+
+        var order = await ReadOrderAsync(factory);
+        order[1].Should().Be(1);
+        order[2].Should().Be(2);
+        order[3].Should().Be(3);
+        order[4].Should().Be(4);
+    }
+
+    [Fact]
+    public async Task Reorder_NeverChangesStartFinishDesignation()
+    {
+        var (factory, service) = await SeededFourAsync();
+        await SetPinsAsync(factory, startPoiId: 1, finishPoiId: 4);
+
+        // A drop into the first/last slot clamps — it must NOT transfer the role.
+        await service.ReorderStopAsync(CollectionId, 2, 1);
+        await service.ReorderStopAsync(CollectionId, 3, 4);
+
+        (await ReadPinsAsync(factory)).Should().Be(((int?)1, (int?)4),
+            "reorder never rewrites StartPoiId/FinishPoiId (Story 1.7 owns designation)");
+    }
+
+    [Fact]
+    public async Task Reorder_NoOpTarget_ShortCircuits_WithoutWriting()
+    {
+        var (factory, service0) = await SeededFourAsync();
+        _ = service0;
+        var counting = new CountingDbContextFactory(factory);
+        var service = CreateService(counting);
+
+        // Own position, clamped-back-onto-own-position, and unknown POI: none writes.
+        await service.ReorderStopAsync(CollectionId, 2, 2);
+        await service.ReorderStopAsync(CollectionId, 1, -3); // clamps to 1 == current
+        await service.ReorderStopAsync(CollectionId, 999, 2); // not a stop
+
+        counting.SaveCount.Should().Be(0, "a no-op reorder must not run SaveChangesAsync");
+        var order = await ReadOrderAsync(factory);
+        order.Values.Should().BeEquivalentTo(new[] { 1, 2, 3, 4 }, "order stays contiguous and untouched");
+    }
+
+    [Fact]
+    public async Task Reorder_IsNoOp_ForNonPlaceableOrUnorderedPoi()
+    {
+        var factory = await SeedAsync(
+            (1, new DateTime(2025, 1, 1), true),
+            (2, new DateTime(2025, 1, 2), true),
+            (3, new DateTime(2025, 1, 3), false));
+        var service = CreateService(factory);
+        await service.SeedOrderAsync(CollectionId);
+
+        await service.ReorderStopAsync(CollectionId, 3, 1);
+
+        var order = await ReadOrderAsync(factory);
+        order[3].Should().Be(0, "a non-placeable item is not a Stop and cannot be reordered");
+        order[1].Should().Be(1);
+        order[2].Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Reorder_ManualMove_OverridesPriorOrder_AndPersists()
+    {
+        var (factory, service) = await SeededFourAsync();
+
+        // First "assisted" arrangement, then a manual move overrides it.
+        await service.ReorderStopAsync(CollectionId, 4, 1);
+        await service.ReorderStopAsync(CollectionId, 1, 4);
+
+        var order = await ReadOrderAsync(factory);
+        order[4].Should().Be(1, "the earlier move persists");
+        order[1].Should().Be(4, "the later manual move overrides and persists");
+        order.Values.Should().BeEquivalentTo(new[] { 1, 2, 3, 4 });
+    }
+
     [Fact]
     public async Task GetStopOrder_ReturnsOnlyOrderedPlaceableItems()
     {

@@ -109,6 +109,113 @@ public class TripViewIntegrationTests : IntegrationTestBase
         Assert.Null(await Page.Locator($"{StopPanelSelector} li[data-poi-id='{firstId}']").GetAttributeAsync("aria-current"));
     }
 
+    // === Story 1.5: reorder by keyboard controls and by drag ===
+
+    private async Task<IReadOnlyList<string>> StopNamesAsync()
+    {
+        var labels = new List<string>();
+        var rows = Page.Locator($"{StopPanelSelector} li[data-poi-id]");
+        var count = await rows.CountAsync();
+        for (var i = 0; i < count; i++)
+        {
+            // Row aria-label is "Stop {n} of {N}: {name}" — take the name part.
+            var aria = await rows.Nth(i).GetAttributeAsync("aria-label") ?? string.Empty;
+            labels.Add(aria[(aria.IndexOf(": ", StringComparison.Ordinal) + 2)..]);
+        }
+        return labels;
+    }
+
+    private async Task EnableTripViewAsync()
+    {
+        await SeedAsync();
+        await NavigateAndWaitAsync("/");
+        await Page.WaitForSelectorAsync("td:has-text('Wawel Castle')", new() { Timeout = 10000 });
+        await Page.Locator(ToggleSelector).ClickAsync();
+        await Page.WaitForSelectorAsync(StopPanelSelector, new() { Timeout = 10000 });
+    }
+
+    [Fact]
+    public async Task KeyboardMoveDown_PersistsOrder_Announces_WithoutFullReload()
+    {
+        await EnableTripViewAsync();
+
+        var before = await StopNamesAsync();
+        Assert.True(before.Count >= 3);
+
+        // Marker survives only as long as no full page reload happens.
+        await Page.EvaluateAsync("() => { window.__noReloadMarker = 1; }");
+
+        // Activate the first stop's move-down control (real button, aria-labelled).
+        var downLabel = string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopDown, before[0]);
+        await Page.Locator($"{StopPanelSelector} button[aria-label=\"{downLabel}\"]").ClickAsync();
+
+        // The stop moved exactly one position and the aria-live region announced it.
+        var announcement = string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripStopMovedAnnouncement, before[0], 2, before.Count);
+        await Page.Locator($"{StopPanelSelector} li[data-poi-id] >> nth=1").Filter(new() { HasText = before[0] })
+            .WaitForAsync(new() { Timeout = 10000 });
+        await Page.Locator($"span[aria-live='polite']:has-text(\"{announcement}\")").WaitForAsync(new() { Timeout = 10000 });
+
+        var after = await StopNamesAsync();
+        Assert.Equal(before[1], after[0]);
+        Assert.Equal(before[0], after[1]);
+
+        // Incremental redraw, not a full reload: the marker is still set.
+        Assert.Equal(1, await Page.EvaluateAsync<int>("() => window.__noReloadMarker ?? 0"));
+
+        // Persisted: leave the Map page and come back — the new order is restored.
+        await ClickDataSourcesTabAsync();
+        await ClickMapTabAsync();
+        await Page.WaitForSelectorAsync(StopPanelSelector, new() { Timeout = 10000 });
+        var restored = await StopNamesAsync();
+        Assert.Equal(after, restored);
+    }
+
+    [Fact]
+    public async Task DragStopToNewPosition_PersistsRenumberedOrder()
+    {
+        await EnableTripViewAsync();
+
+        var before = await StopNamesAsync();
+        Assert.True(before.Count >= 3);
+
+        // HTML5 drag of the first stop onto the last row. Dispatch the DOM drag
+        // events directly (Playwright's mouse-gesture drag does not reliably
+        // synthesize HTML5 dragstart/drop) — this still exercises the full
+        // Blazor handler → VM → service → DB → re-render path end-to-end.
+        var rows = Page.Locator($"{StopPanelSelector} li[data-poi-id]");
+        var dataTransfer = await Page.EvaluateHandleAsync("() => new DataTransfer()");
+        await rows.Nth(0).DispatchEventAsync("dragstart", new { dataTransfer });
+        await rows.Nth(before.Count - 1).DispatchEventAsync("drop", new { dataTransfer });
+
+        // The dragged stop lands on the target slot; the rest renumber contiguously.
+        await Page.Locator($"{StopPanelSelector} li[data-poi-id] >> nth={before.Count - 1}")
+            .Filter(new() { HasText = before[0] })
+            .WaitForAsync(new() { Timeout = 10000 });
+        var after = await StopNamesAsync();
+        Assert.Equal(before[0], after[^1]);
+        Assert.Equal(before[1], after[0]);
+
+        // Persisted across SPA re-mount.
+        await ClickDataSourcesTabAsync();
+        await ClickMapTabAsync();
+        await Page.WaitForSelectorAsync(StopPanelSelector, new() { Timeout = 10000 });
+        Assert.Equal(after, await StopNamesAsync());
+    }
+
+    [Fact]
+    public async Task MoveUpOnFirstStop_IsDisabledGuard()
+    {
+        await EnableTripViewAsync();
+
+        var names = await StopNamesAsync();
+        var upLabel = string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopUp, names[0]);
+        var downLabel = string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopDown, names[^1]);
+
+        // Edge guards: first stop can't move up, last can't move down.
+        Assert.True(await Page.Locator($"{StopPanelSelector} button[aria-label=\"{upLabel}\"]").IsDisabledAsync());
+        Assert.True(await Page.Locator($"{StopPanelSelector} button[aria-label=\"{downLabel}\"]").IsDisabledAsync());
+    }
+
     [Fact]
     public async Task TripViewState_PersistsAcrossReopen()
     {
