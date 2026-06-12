@@ -47,6 +47,9 @@ project: maps_editor
 # story 1-4 moved to review on 2026-06-12 via bmad-dev-story (627/627 tests green)
 # epic-1 activated and stories 1-1..1-7 created via bmad-create-story on 2026-06-11
 # stories 1-5 and 1-6 moved to in-progress on 2026-06-12 via bmad-dev-story (parallel subagents in worktrees story/1-5, story/1-6)
+# stories 1-5 and 1-6 moved to review on 2026-06-12 via bmad-dev-story (1-5: 654/654 green; 1-6: 647/647 green; merged to master, post-merge 672/673 with one unrelated Union_ShowsAllUniquePois flake passing in isolation)
+# story 1-7 moved to in-progress on 2026-06-12 via bmad-dev-story (subagent in worktree story/1-7)
+# story 1-7 moved to review on 2026-06-12 via bmad-dev-story (709/710 green; known Union_ShowsAllUniquePois flake passes in isolation; merged to master)
 project_key: NOKEY
 tracking_system: file-system
 story_location: "{project-root}/_bmad-output/implementation-artifacts"
@@ -58,9 +61,9 @@ development_status:
   1-2-toggle-trip-view-and-seed-stop-order: done
   1-3-render-ordered-stops-connecting-legs-and-the-stop-panel: done
   1-4-two-way-list-map-selection-sync: done
-  1-5-reorder-stops-by-drag-and-by-keyboard: in-progress
-  1-6-flag-unplaceable-stops: in-progress
-  1-7-designate-start-finish-and-roundtrip: ready-for-dev
+  1-5-reorder-stops-by-drag-and-by-keyboard: review
+  1-6-flag-unplaceable-stops: review
+  1-7-designate-start-finish-and-roundtrip: review
   epic-1-retrospective: optional
 
   # Epic 2: Travel times, dwell & the honest itinerary timeline
