@@ -9,6 +9,23 @@
         markers: {},
         dotnetRef: null,
         labelsVisible: false,
+        // Trip View Stop Order: poiId -> stop number. When a marker's POI has an
+        // entry here, addCollectionMarkers / setStopOrders render a numbered
+        // primary badge instead of the plain colour dot. Empty = Trip View off,
+        // every marker reverts to its plain dot. Survives collection re-shows
+        // (enrichment refresh) the same way labelsVisible does.
+        stopOrders: {},
+        // TRIP-MAP-01: Trip View connecting legs. A dedicated L.layerGroup of
+        // straight polylines between consecutive Stops (plus the Roundtrip
+        // closing leg), kept SEPARATE from layerGroups/markers so trip overlays
+        // never collide with the plain-collection markers. Numbered Stop markers
+        // are NOT here — they reuse the existing state.markers + setStopOrders
+        // badge path (Story 1.2). null = no legs drawn.
+        tripLegLayer: null,
+        // TRIP-SELECT-02: the currently emphasised Trip Stop marker (poiId), or
+        // null. Folded into buildMarkerIcon (like stopOrders) so the emphasis
+        // survives marker re-skins / re-shows; at most one marker is emphasised.
+        selectedStopId: null,
         // When true, marker.bindPopup is skipped and the tooltip click does not
         // openPopup either. The mobile layout shows a POI detail panel below
         // the map that replaces what the popup would say, so the popup is
@@ -185,6 +202,33 @@
         }
     }
 
+    // Build the divIcon for a marker. When Trip View is on and this POI has a
+    // Stop number, render a primary-filled numbered badge; otherwise the plain
+    // colour dot. Kept in one place so addCollectionMarkers and setStopOrders
+    // (re-skin in place) stay consistent.
+    function buildMarkerIcon(poiId, color) {
+        // TRIP-SELECT-02: the selected Stop marker gets a `.trip-stop-selected`
+        // class (a token-driven emphasis ring) in addition to its normal dot /
+        // numbered badge. Baked in here so the emphasis is preserved across
+        // setStopOrders / addCollectionMarkers re-skins.
+        var selected = state.selectedStopId != null && poiId === state.selectedStopId;
+        var stop = state.stopOrders[poiId];
+        if (stop != null) {
+            return L.divIcon({
+                className: 'stop-order-marker' + (selected ? ' trip-stop-selected' : ''),
+                html: '<div class="stop-order-badge">' + escapeHtml(String(stop)) + '</div>',
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
+            });
+        }
+        return L.divIcon({
+            className: 'custom-marker' + (selected ? ' trip-stop-selected' : ''),
+            html: '<div style="width:24px;height:24px;border-radius:50%;background:' + color + ';border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>',
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
+        });
+    }
+
     window.leafletInterop = {
         initMap: function (elementId, dotnetRef) {
             // Dispose previous dotnetRef to prevent .NET reference leak on re-init
@@ -218,6 +262,11 @@
             // Reset on (re)init so the JS state matches the freshly-constructed,
             // transient MapPageViewModel (whose ShowPoiLabels defaults to false).
             state.labelsVisible = false;
+            state.stopOrders = {};
+            state.selectedStopId = null;
+            // Prior map removed above took its overlay layers with it; drop the
+            // stale trip-leg group handle so a fresh draw starts clean.
+            state.tripLegLayer = null;
             // The previous map (if any) was removed above, taking its geolocation
             // watch and user marker with it. Reset so locateUser starts cleanly
             // against the new map (e.g. after a desktop<->mobile viewport flip).
@@ -268,6 +317,9 @@
             }
             state.layerGroups = {};
             state.markers = {};
+            state.stopOrders = {};
+            state.selectedStopId = null;
+            state.tripLegLayer = null;
             state.userMarker = null;
             state.locating = false;
             state.recenterOnNextFix = false;
@@ -282,14 +334,10 @@
             var group = L.layerGroup();
 
             pois.forEach(function (poi) {
-                var icon = L.divIcon({
-                    className: 'custom-marker',
-                    html: '<div style="width:24px;height:24px;border-radius:50%;background:' + color + ';border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>',
-                    iconSize: [24, 24],
-                    iconAnchor: [12, 12]
-                });
-
-                var marker = L.marker([poi.latitude, poi.longitude], { icon: icon });
+                var marker = L.marker([poi.latitude, poi.longitude], { icon: buildMarkerIcon(poi.id, color) });
+                // Remember the colour so setStopOrders can rebuild the plain dot
+                // when Trip View turns off without needing a re-show.
+                marker._poiColor = color;
 
                 if (!state.mobileMode) {
                     marker.bindPopup(
@@ -341,6 +389,109 @@
                     marker.unbindTooltip();
                 }
             }
+        },
+
+        // Apply (or clear) Trip View Stop Order badges. `orders` is a poiId->stop
+        // number map; an empty object turns Trip View off and reverts every
+        // marker to its plain colour dot. Re-skins existing markers in place
+        // (rebuilds each icon) so no collection re-show is needed; new markers
+        // added later read state.stopOrders in addCollectionMarkers.
+        setStopOrders: function (orders) {
+            state.stopOrders = orders || {};
+            for (var id in state.markers) {
+                if (!Object.prototype.hasOwnProperty.call(state.markers, id)) continue;
+                var marker = state.markers[id];
+                var color = marker._poiColor || '#005bbf';
+                marker.setIcon(buildMarkerIcon(marker._poiId, color));
+            }
+        },
+
+        // TRIP-SELECT-02: emphasise the selected Stop marker (or clear with a
+        // null/0 poiId). Sets state.selectedStopId then re-skins every marker in
+        // place (reads state.selectedStopId in buildMarkerIcon) so at most one is
+        // emphasised and the prior emphasis is removed. The selected marker is
+        // also raised above its neighbours. Works regardless of mobileMode.
+        emphasizeStop: function (poiId) {
+            state.selectedStopId = (poiId == null) ? null : poiId;
+            for (var id in state.markers) {
+                if (!Object.prototype.hasOwnProperty.call(state.markers, id)) continue;
+                var marker = state.markers[id];
+                var color = marker._poiColor || '#005bbf';
+                marker.setIcon(buildMarkerIcon(marker._poiId, color));
+                marker.setZIndexOffset(state.selectedStopId === marker._poiId ? 1000 : 0);
+            }
+        },
+
+        // TRIP-SELECT-03: bring the selected Stop's marker into view. Only pans
+        // when the marker is currently OUTSIDE the viewport, and never changes
+        // zoom (AC1 is "within the viewport", not "centred + zoomed") — distinct
+        // from focusOnPoi's flyTo-zoom-16.
+        panToStop: function (poiId) {
+            if (!state.map) return;
+            var marker = state.markers[poiId];
+            if (!marker) return;
+            var ll = marker.getLatLng();
+            if (!state.map.getBounds().contains(ll)) {
+                state.map.panTo(ll, { animate: true });
+            }
+        },
+
+        // TRIP-SELECT-05: scroll the Trip stop row for `poiId` into view (the
+        // map→list direction). Scoped to `.trip-stop-list` so it never matches
+        // the PoiTable / plain mobile POI list rows that share data-poi-id. Works
+        // for the desktop <ul> and the mobile .list alike (both non-virtualized).
+        scrollTripRowIntoView: function (poiId) {
+            var el = document.querySelector('.trip-stop-list [data-poi-id="' + poiId + '"]');
+            if (el && el.scrollIntoView) {
+                el.scrollIntoView({ block: 'center', behavior: 'auto' });
+            }
+        },
+
+        // TRIP-MAP-02 / TRIP-MAP-03: (re)draw the Trip View connecting legs.
+        // `legs` is an array of {fromLat,fromLon,toLat,toLon,isMeasured}. This is
+        // an INCREMENTAL redraw: only the prior trip-leg layer is removed and the
+        // new one added — no initMap, no addCollectionMarkers rebuild of unrelated
+        // collections (satisfies NFR1 / AC3). An empty/absent array clears the legs.
+        drawTripLegs: function (legs) {
+            if (!state.map) return;
+            if (state.tripLegLayer) {
+                state.map.removeLayer(state.tripLegLayer);
+                state.tripLegLayer = null;
+            }
+            if (!legs || !legs.length) return;
+
+            var group = L.layerGroup();
+            legs.forEach(function (leg) {
+                // Line-solidity = geometric fidelity: only a Measured leg renders
+                // solid/full-weight; every Phase-1 leg is non-Measured → dashed +
+                // muted. The stroke colour comes from the .trip-leg-line CSS class
+                // (token palette, mirroring .stop-order-marker) — no hex is
+                // hardcoded here. The `measured` branch is reserved for Phase 2.
+                var measured = !!leg.isMeasured;
+                L.polyline(
+                    [[leg.fromLat, leg.fromLon], [leg.toLat, leg.toLon]],
+                    {
+                        className: measured ? 'trip-leg-line trip-leg-measured' : 'trip-leg-line',
+                        dashArray: measured ? null : '6 6',
+                        weight: measured ? 4 : 2,
+                        opacity: measured ? 1 : 0.7,
+                        // Legs must never intercept clicks meant for the Stop
+                        // markers above them (preserves marker-click selection — AC4).
+                        interactive: false
+                    }
+                ).addTo(group);
+            });
+            group.addTo(state.map);
+            state.tripLegLayer = group;
+        },
+
+        // Remove the trip-leg layer (Trip-View-off / collection hide). The
+        // numbered Stop markers are reverted separately via setStopOrders({}).
+        clearTripLegs: function () {
+            if (state.tripLegLayer && state.map) {
+                state.map.removeLayer(state.tripLegLayer);
+            }
+            state.tripLegLayer = null;
         },
 
         removeCollectionMarkers: function (collectionId) {

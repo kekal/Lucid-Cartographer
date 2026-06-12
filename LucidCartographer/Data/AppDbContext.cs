@@ -13,6 +13,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<PoiTag> PoiTags => Set<PoiTag>();
     public DbSet<Session> Sessions => Set<Session>();
     public DbSet<User> Users => Set<User>();
+    public DbSet<RouteSegment> RouteSegments => Set<RouteSegment>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -76,6 +77,29 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.Property(e => e.CreatedDate).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
             entity.HasIndex(e => e.Name);
+
+            // TRIP-SCHEMA-03: Trip-lens columns + Start/Finish FKs.
+            entity.Property(e => e.TravelMode).HasMaxLength(20);
+
+            // FK-id-only relationships to Poi (no inverse collection on Poi). Deleting a
+            // Start/Finish POI nulls the reference rather than cascading the Collection away.
+            entity.HasOne<Poi>()
+                .WithMany()
+                .HasForeignKey(e => e.StartPoiId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<Poi>()
+                .WithMany()
+                .HasForeignKey(e => e.FinishPoiId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.StartPoiId);
+            entity.HasIndex(e => e.FinishPoiId);
+
+            // TRIP-SCHEMA-01: string-persisted enum constrained at the DB level (CK_<Table>_<Column>
+            // style, like CK_Poi_*). SQL is built from TravelMode.All so it can never drift.
+            entity.ToTable(t =>
+                t.HasCheckConstraint("CK_PoiCollection_TravelMode",
+                    EnumCheckSql("TravelMode", TravelMode.All)));
         });
 
         modelBuilder.Entity<PoiCollectionItem>(entity =>
@@ -128,7 +152,46 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.Property(e => e.PasswordHash).HasMaxLength(512);
             entity.HasIndex(e => e.Username).IsUnique();
         });
+
+        modelBuilder.Entity<RouteSegment>(entity =>
+        {
+            // TRIP-CACHE-01: directional composite key — A→B and B→A are distinct rows.
+            entity.HasKey(e => new { e.FromPoiId, e.ToPoiId, e.TravelMode });
+
+            entity.Property(e => e.TravelMode).HasMaxLength(20);
+            entity.Property(e => e.Fidelity).HasMaxLength(20);
+            entity.Property(e => e.Source).HasMaxLength(100);
+
+            // Cached legs are invalidated when either endpoint POI is deleted.
+            entity.HasOne<Poi>()
+                .WithMany()
+                .HasForeignKey(e => e.FromPoiId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<Poi>()
+                .WithMany()
+                .HasForeignKey(e => e.ToPoiId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.FromPoiId);
+            entity.HasIndex(e => e.ToPoiId);
+
+            // TRIP-SCHEMA-01: string-persisted enums constrained at the DB level. SQL is built
+            // from TravelMode.All / Fidelity.All so the constraints can never drift.
+            entity.ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_RouteSegment_TravelMode",
+                    EnumCheckSql("TravelMode", TravelMode.All));
+                t.HasCheckConstraint("CK_RouteSegment_Fidelity",
+                    EnumCheckSql("Fidelity", Fidelity.All));
+            });
+        });
     }
+
+    // TRIP-SCHEMA-01: single source of truth for the string-enum CHECK constraints. Produces e.g.
+    // "TravelMode IN ('AnyAir','Drive','Walk','Cycle')" directly from the enum's All list, so adding
+    // a value to TravelMode.All / Fidelity.All cannot silently diverge from the DB constraint.
+    private static string EnumCheckSql(string column, IReadOnlyList<string> allowed) =>
+        $"{column} IN ({string.Join(",", allowed.Select(v => $"'{v}'"))})";
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {

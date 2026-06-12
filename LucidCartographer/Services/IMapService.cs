@@ -20,6 +20,40 @@ public interface IMapService
 
     /// <summary>Show or hide permanent POI name labels next to every marker.</summary>
     Task SetLabelsVisibleAsync(bool visible);
+
+    /// <summary>
+    /// Apply Trip View Stop Order badges to markers. When <paramref name="orders"/>
+    /// has entries, the matching POI markers render their Stop number; passing
+    /// null or an empty map reverts every marker to its plain dot.
+    /// </summary>
+    Task SetStopOrdersAsync(IReadOnlyDictionary<int, int>? orders);
+
+    /// <summary>
+    /// Draw (or incrementally redraw) the Trip View connecting legs — straight,
+    /// non-Measured (dashed + muted) polylines between consecutive Stops plus the
+    /// Roundtrip closing leg. Replaces only the prior trip-leg layer; an empty
+    /// list clears it. The numbered Stop markers are applied separately via
+    /// <see cref="SetStopOrdersAsync"/>.
+    /// </summary>
+    Task DrawTripLegsAsync(IReadOnlyList<TripLegDto> legs);
+
+    /// <summary>Remove the Trip View connecting legs (Trip View off / collection hide).</summary>
+    Task ClearTripAsync();
+
+    /// <summary>
+    /// Emphasise the selected Trip Stop marker, or clear emphasis when
+    /// <paramref name="poiId"/> is null. At most one marker is emphasised; the
+    /// prior emphasis is removed. Additive to the existing marker popup/click —
+    /// it does not change the marker-click channel.
+    /// </summary>
+    Task EmphasizeStopAsync(int? poiId);
+
+    /// <summary>
+    /// Pan the map so the selected Stop's marker is within the viewport, only
+    /// when it is currently outside it; the zoom level is left unchanged.
+    /// </summary>
+    Task PanToStopAsync(int poiId);
+
     /// <summary>
     /// CRIT-04: Destroy the JS-side map object to prevent memory leaks on navigation.
     /// </summary>

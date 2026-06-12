@@ -19,6 +19,7 @@ builder.Services
     .AddImportPipeline()
     .AddEnrichmentPipeline(builder.Configuration)
     .AddDeduplicationPipeline(builder.Configuration)
+    .AddTripServices()
     .AddBrowserSession(builder.Configuration)
     .AddExportPipeline()
     .AddAppAuthentication(builder.Configuration, builder.Environment)

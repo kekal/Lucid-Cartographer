@@ -42,6 +42,36 @@ public sealed class MapPageViewModel(
 
     private void Notify() => StateChanged?.Invoke();
 
+    /// <summary>
+    /// Invoked after a membership mutation (POI added/removed and the map/list
+    /// refreshed) so the Trip layer can append/re-compact the Stop Order. Set by
+    /// the host page; null when no Trip layer is wired. Kept separate from
+    /// <see cref="StateChanged"/> so the (DB-touching) reconcile only runs on real
+    /// membership changes, not on every pan/selection notify.
+    /// </summary>
+    public Func<Task>? MembershipChanged { get; set; }
+
+    /// <summary>
+    /// The single collection a Trip can be scoped to: the lone visible collection
+    /// when exactly one is visible and no search is active; otherwise null
+    /// (per-collection Trip state is only coherent against one collection).
+    /// </summary>
+    public int? SingleVisibleCollectionId
+    {
+        get
+        {
+            if (PreviousSearchQuery != null)
+            {
+                return null;
+            }
+            var visible = CollectionStates.Where(c => c.IsVisible).ToList();
+            return visible.Count == 1 ? visible[0].Id : null;
+        }
+    }
+
+    /// <summary>Placeable (lat+lon present) POIs in the current filtered result set — drives the Trip toggle's ≥2 gate.</summary>
+    public int PlaceablePoiCount => FilteredPois.Count(p => p is { Latitude: not null, Longitude: not null });
+
     // --- State ---
 
     public IReadOnlyList<PoiCollection> Collections { get; private set; } = [];
@@ -653,6 +683,13 @@ public sealed class MapPageViewModel(
             s?.Collection.PoiCount = col.PoiCount;
         }
         await LoadVisibleCollectionsAsync();
+
+        // Let the Trip layer append/re-compact its Stop Order now that the
+        // membership (and the filtered set) reflects the mutation.
+        if (MembershipChanged is not null)
+        {
+            await MembershipChanged();
+        }
     }
 
     public ValueTask DisposeAsync()

@@ -1,0 +1,35 @@
+@using LucidCartographer.Components.Shared.Trip
+@implements IDisposable
+
+@* Desktop Trip View toggle. Lives in the filtered-results region (never in a
+   menu, per FR-17/UX-DR1). Absent entirely below 2 placeable POIs — never an
+   error or broken affordance (UX-DR10). A switch exposing aria-pressed; its
+   on/off change is announced through the adjacent aria-live region. *@
+
+@if (Vm.IsToggleAvailable)
+{
+    <div class="flex items-center gap-2">
+        <button type="button"
+                role="switch"
+                aria-pressed="@(Vm.IsTripViewEnabled ? "true" : "false")"
+                aria-label="@UiStrings.TripViewToggleAria"
+                @onclick="OnToggleAsync"
+                class="inline-flex items-center gap-1.5 text-sm font-medium transition-colors @(Vm.IsTripViewEnabled ? "text-primary" : "text-on-surface-variant hover:text-primary")">
+            <span class="material-symbols-outlined text-base @(Vm.IsTripViewEnabled ? "filled" : "")" aria-hidden="true">route</span>
+            @UiStrings.TripView
+        </button>
+    </div>
+    <span class="sr-only" role="status" aria-live="polite">@Vm.Announcement</span>
+}
+
+@code {
+    [Parameter, EditorRequired] public TripViewModel Vm { get; set; } = null!;
+
+    protected override void OnInitialized() => Vm.StateChanged += OnVmChanged;
+
+    private void OnVmChanged() => InvokeAsync(StateHasChanged);
+
+    private Task OnToggleAsync() => Vm.ToggleAsync();
+
+    public void Dispose() => Vm.StateChanged -= OnVmChanged;
+}

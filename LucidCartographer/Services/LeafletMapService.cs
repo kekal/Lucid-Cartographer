@@ -9,6 +9,14 @@ namespace LucidCartographer.Services;
 /// </summary>
 public record MarkerDto(int Id, string Name, double Latitude, double Longitude, string? Address, string? GoogleMapsUrl);
 
+/// <summary>
+/// DTO for one Trip View connecting leg passed to the JS interop layer. Carries
+/// only the endpoint coordinates + fidelity flag the polyline needs (the POI ids
+/// the ViewModel-side <c>TripLeg</c> holds are not relevant to the draw). Property
+/// names serialize to camelCase to match leafletInterop.drawTripLegs.
+/// </summary>
+public record TripLegDto(double FromLat, double FromLon, double ToLat, double ToLon, bool IsMeasured);
+
 public class LeafletMapService(IJSRuntime js) : IMapService, IAsyncDisposable
 {
     private DotNetObjectReference<LeafletMapService>? _dotnetRef;
@@ -55,6 +63,21 @@ public class LeafletMapService(IJSRuntime js) : IMapService, IAsyncDisposable
     public async Task HighlightMarkerAsync(int poiId) => await InvokeJsVoidAsync("leafletInterop.highlightMarker", poiId);
 
     public async Task SetLabelsVisibleAsync(bool visible) => await InvokeJsVoidAsync("leafletInterop.setLabelsVisible", visible);
+
+    public async Task SetStopOrdersAsync(IReadOnlyDictionary<int, int>? orders) =>
+        // Pass an empty object (not null) so the JS side can clear unconditionally.
+        await InvokeJsVoidAsync("leafletInterop.setStopOrders", orders ?? new Dictionary<int, int>());
+
+    public async Task DrawTripLegsAsync(IReadOnlyList<TripLegDto> legs) =>
+        await InvokeJsVoidAsync("leafletInterop.drawTripLegs", legs);
+
+    public async Task ClearTripAsync() => await InvokeJsVoidAsync("leafletInterop.clearTripLegs");
+
+    // TRIP-SELECT-04: list ↔ map selection sync. Pass the int? straight through —
+    // a null clears the emphasis JS-side.
+    public async Task EmphasizeStopAsync(int? poiId) => await InvokeJsVoidAsync("leafletInterop.emphasizeStop", poiId);
+
+    public async Task PanToStopAsync(int poiId) => await InvokeJsVoidAsync("leafletInterop.panToStop", poiId);
 
     public async Task DestroyMapAsync() => await InvokeJsVoidAsync("leafletInterop.destroyMap");
 

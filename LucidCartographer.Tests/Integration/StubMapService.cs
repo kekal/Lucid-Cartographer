@@ -20,6 +20,12 @@ public class StubMapService : IMapService
     public Task RefreshLayoutAsync() => Task.CompletedTask;
     public Task HighlightMarkerAsync(int poiId) => Task.CompletedTask;
     public Task SetLabelsVisibleAsync(bool visible) => Task.CompletedTask;
+    public Task SetStopOrdersAsync(IReadOnlyDictionary<int, int>? orders) => Task.CompletedTask;
+
+    public Task DrawTripLegsAsync(IReadOnlyList<TripLegDto> legs) => Task.CompletedTask;
+    public Task ClearTripAsync() => Task.CompletedTask;
+    public Task EmphasizeStopAsync(int? poiId) => Task.CompletedTask;
+    public Task PanToStopAsync(int poiId) => Task.CompletedTask;
     public Task DestroyMapAsync() => Task.CompletedTask;
     public Task EnableBoundsTrackingAsync() => Task.CompletedTask;
 }

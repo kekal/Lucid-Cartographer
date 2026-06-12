@@ -1,4 +1,5 @@
 @using LucidCartographer.Data.Entities
+@using LucidCartographer.Components.Shared.Trip
 @inject IJSRuntime Js
 
 @{
@@ -91,6 +92,10 @@
                             </td>
                             <td class="px-4 py-2.5">
                                 <div class="flex items-center gap-2">
+                                    @if (StopOrderFor(poi.Id) is { } stopNumber)
+                                    {
+                                        <StopOrderBadge Number="stopNumber" />
+                                    }
                                     @{
                                         var (icon, iconClass, iconTitle) = poi switch
                                         {
@@ -274,6 +279,9 @@
 @code {
     [Parameter, EditorRequired] public IReadOnlyList<Poi> Pois { get; set; } = [];
     [Parameter] public int? SelectedPoiId { get; set; }
+    // Trip View Stop Order: PoiId → stop number. Non-null + has-entry renders the
+    // leading order badge on that row; null (Trip View off) renders no badges.
+    [Parameter] public IReadOnlyDictionary<int, int>? StopOrders { get; set; }
     [Parameter] public string? CollectionName { get; set; }
     [Parameter] public IReadOnlyDictionary<int, IReadOnlyList<string>>? PoiCollectionNames { get; set; }
     [Parameter] public IReadOnlyDictionary<int, IReadOnlyList<int>>? PoiCollectionMemberships { get; set; }
@@ -343,6 +351,9 @@
         try { await Js.InvokeVoidAsync("LucidCartographer.scrollListToPoi", _scrollContainer, id, index, 44); }
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"scrollListToIndex failed: {ex.Message}"); }
     }
+
+    private int? StopOrderFor(int poiId) =>
+        StopOrders != null && StopOrders.TryGetValue(poiId, out var n) ? n : null;
 
     private IReadOnlyList<string> GetCollectionNames(int poiId)
     {

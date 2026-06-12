@@ -55,6 +55,73 @@ nav a, .nav-link-no-underline {
     display: none;
 }
 
+/* Trip View Stop Order marker badge — primary-filled numbered circle replacing
+   the plain dot when Trip View is on. Mirrors the in-list StopOrderBadge
+   (primary fill, white numeral, text-xs weight 700, fully rounded). Uses the
+   --primary token (with the #005bbf fallback for contexts that don't define it)
+   so a re-theme keeps the marker badge in step with the in-list badge. */
+.stop-order-marker .stop-order-badge {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--primary, #005bbf);
+    color: var(--on-primary, #fff);
+    border: 2px solid #fff;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+}
+
+/* Trip View selected-Stop marker emphasis (TRIP-SELECT-02). Applied to the
+   selected marker's divIcon (plain dot or numbered badge) on top of its normal
+   styling — a primary-token ring + slight scale so exactly one marker reads as
+   "selected", distinct from the unselected Stops. Token-driven (var(--primary))
+   so it tracks the theme; the inner badge/dot keeps its own background. */
+.trip-stop-selected {
+    z-index: 1000;
+}
+
+.trip-stop-selected .stop-order-badge,
+.trip-stop-selected > div {
+    box-shadow: 0 0 0 3px #fff, 0 0 0 6px var(--primary, #005bbf), 0 1px 4px rgba(0, 0, 0, 0.35);
+    transform: scale(1.12);
+    transition: transform 0.08s ease-out;
+}
+
+/* Trip View leg colour tokens. Defined as real CSS custom properties at :root
+   (global — they reach both the desktop layout and the mobile .m-app shell) with
+   a dark-theme override, so the muted leg stroke is genuinely token-driven and
+   adapts to dark mode. (Earlier this referenced an undefined `--outline`, which
+   silently fell through to a stranded literal — fixed in code review.) */
+:root {
+    --trip-leg-muted: #727785;
+}
+
+html[data-theme="dark"] {
+    --trip-leg-muted: #98a0ad;
+}
+
+/* Trip View connecting leg (TRIP-MAP-02). A straight polyline between
+   consecutive Stops. Phase-1 legs are all non-Measured → dashed + muted: the
+   stroke colour is the --trip-leg-muted token (single source, dark-mode aware)
+   so a re-theme keeps the legs in step, and no hex is hardcoded in
+   leafletInterop.js. Leaflet sets stroke/dash as SVG presentation attributes,
+   which a stylesheet rule overrides — so the token wins. The reserved
+   .trip-leg-measured variant (Phase 2) renders solid + primary; only the dashed
+   path is exercised today. */
+.trip-leg-line {
+    stroke: var(--trip-leg-muted);
+}
+
+.trip-leg-measured {
+    stroke: var(--primary, #005bbf);
+}
+
 /* Blazor error UI */
 #blazor-error-ui {
     background: lightyellow;

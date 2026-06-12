@@ -114,6 +114,56 @@
         await MapService.SetLabelsVisibleAsync(visible);
     }
 
+    public async Task SetStopOrdersAsync(IReadOnlyDictionary<int, int>? orders)
+    {
+        if (!IsInitialized)
+        {
+            return;
+        }
+
+        await MapService.SetStopOrdersAsync(orders);
+    }
+
+    public async Task DrawTripLegsAsync(IReadOnlyList<TripLegDto> legs)
+    {
+        if (!IsInitialized)
+        {
+            return;
+        }
+
+        await MapService.DrawTripLegsAsync(legs);
+    }
+
+    public async Task ClearTripAsync()
+    {
+        if (!IsInitialized)
+        {
+            return;
+        }
+
+        await MapService.ClearTripAsync();
+    }
+
+    public async Task EmphasizeStopAsync(int? poiId)
+    {
+        if (!IsInitialized)
+        {
+            return;
+        }
+
+        await MapService.EmphasizeStopAsync(poiId);
+    }
+
+    public async Task PanToStopAsync(int poiId)
+    {
+        if (!IsInitialized)
+        {
+            return;
+        }
+
+        await MapService.PanToStopAsync(poiId);
+    }
+
     // REVIEW-12: Async callback — no more async void
     private async Task HandleMarkerClickedAsync(int poiId)
     {

@@ -1,0 +1,74 @@
+@implements IDisposable
+
+@* Mobile Trip View stop-list panel (Story 1.3, AC2 / UX-DR12) — the MobileTrip*
+   split of TripStopList. Same rows + placeholders in the mobile bottom-panel /
+   sheet idiom (.scroll / .list / .row, data-poi-id, ≥44px touch targets; the
+   safe-area insets are honoured by the hosting .m-bottom-panel). Markup + a
+   ~12-line VM bridge only. The host bottom panel already renders the results
+   header with the Trip View toggle, so this component is just the list body —
+   keeping the toggle reachable so the user can turn Trip View back off. Dark
+   mode is first-class: every colour is a token (var(--…)), never a raw hex. *@
+
+@* TRIP-SELECT-05: announces the selected stop (list→map or map→list). *@
+<span class="sr-only" role="status" aria-live="polite">@Vm.SelectionAnnouncement</span>
+
+<div class="scroll" style="flex:1">
+    @* `trip-stop-list` scopes the JS scroll-into-view helper (TRIP-SELECT-05). *@
+    <div class="list trip-stop-list" aria-label="@UiStrings.TripStopListAria">
+        @if (Vm.OrderedStops.Count == 0)
+        {
+            <div class="empty">
+                <span class="ms" aria-hidden="true">route</span>
+                <div class="t">@UiStrings.TripStopListEmpty</div>
+            </div>
+        }
+        else
+        {
+            @foreach (var stop in Vm.OrderedStops)
+            {
+                var selected = Vm.SelectedStopPoiId == stop.PoiId;
+                @* data-poi-id mirrors the plain POI list rows so the scroll helper
+                   (TRIP-SELECT-05) can locate a row. Tap / Enter / Space select the
+                   stop (list→map). Selected rows tint with the primary-soft token
+                   and expose aria-current (AC3). ≥44px touch target via .row. *@
+                <div class="row" @key="stop.PoiId" data-poi-id="@stop.PoiId"
+                     role="button" tabindex="0"
+                     aria-current="@(selected ? "true" : null)"
+                     aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripStopRowAria, stop.OrderIndex, Vm.OrderedStops.Count, stop.Name)"
+                     style="@(selected ? "background:var(--primary-soft)" : "")"
+                     @onclick="() => Vm.SelectStop(stop.PoiId, TripSelectionSource.List)"
+                     @onkeydown="e => OnRowKeyDown(e, stop.PoiId)">
+                    <div class="avatar" style="background:var(--primary)">
+                        <StopOrderBadge Number="stop.OrderIndex" />
+                    </div>
+                    <div class="meta">
+                        <div class="name">@stop.Name</div>
+                        @* Inert timeline placeholder (Epic 2 computes arrival time). *@
+                        <div class="sub" aria-label="@UiStrings.TripTimelineAria">@UiStrings.TripTimelinePlaceholder</div>
+                    </div>
+                    @* Inert dwell placeholder (Epic 2 sets dwell). *@
+                    <div class="trailing" aria-label="@UiStrings.TripDwellAria">@UiStrings.TripDwellPlaceholder</div>
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public TripViewModel Vm { get; set; } = null!;
+
+    protected override void OnInitialized() => Vm.StateChanged += OnVmChanged;
+
+    private void OnVmChanged() => InvokeAsync(StateHasChanged);
+
+    // Mobile rows are <div role="button" tabindex="0"> — Enter/Space mirror the tap.
+    private void OnRowKeyDown(KeyboardEventArgs e, int poiId)
+    {
+        if (e.Key is "Enter" or " ")
+        {
+            Vm.SelectStop(poiId, TripSelectionSource.List);
+        }
+    }
+
+    public void Dispose() => Vm.StateChanged -= OnVmChanged;
+}

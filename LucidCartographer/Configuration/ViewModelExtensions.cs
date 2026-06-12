@@ -1,4 +1,5 @@
 using LucidCartographer.Components.Pages;
+using LucidCartographer.Components.Shared.Trip;
 using LucidCartographer.Services;
 
 namespace LucidCartographer.Configuration;
@@ -15,6 +16,9 @@ public static class ViewModelExtensions
     {
         services.AddTransient<DataSourcesPageViewModel>();
         services.AddTransient<MapPageViewModel>();
+        // Trip View VM shares the page-scoped Transient lifetime (one per MapPage
+        // component instance), alongside MapPageViewModel.
+        services.AddTransient<TripViewModel>();
         services.AddTransient<OperationsPageViewModel>();
         services.AddTransient<GoogleSessionPageViewModel>();
 

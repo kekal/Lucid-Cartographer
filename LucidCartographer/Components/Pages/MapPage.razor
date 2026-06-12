@@ -1,7 +1,9 @@
 @page "/"
 @rendermode InteractiveServer
 @using LucidCartographer.Data.Entities
+@using LucidCartographer.Components.Shared.Trip
 @inject MapPageViewModel Vm
+@inject TripViewModel TripVm
 @inject ViewportService Viewport
 @inject IJSRuntime Js
 @implements IAsyncDisposable
@@ -46,7 +48,7 @@ else if (Viewport.IsMobile)
 
             @* Map (top ~46%) *@
             <div style="flex:0 0 46%;position:relative">
-                <LeafletMap @ref="_leafletMap" OnMarkerSelected="Vm.HandleMarkerSelectedAsync" OnBoundsChanged="Vm.HandleBoundsChanged" />
+                <LeafletMap @ref="_leafletMap" OnMarkerSelected="OnMarkerSelectedAsync" OnBoundsChanged="Vm.HandleBoundsChanged" />
                 @* Bottom-right of the map. Top-right is occupied by Leaflet's
                    built-in zoom controls — putting our FABs there hides them
                    behind +/−. Bottom-right is empty and thumb-friendly.
@@ -146,11 +148,24 @@ else if (Viewport.IsMobile)
                         }
                         @list.Count @(list.Count == 1 ? "place" : "places")
                     </span>
-                    <button class="icon-btn" type="button" style="background:transparent"
-                            @onclick="() => _drawerOpen = true" aria-label="@UiStrings.Collections">
-                        <span class="ms" aria-hidden="true">layers</span>
-                    </button>
+                    <div style="display:flex;align-items:center;gap:2px">
+                        @* Trip View toggle lives in the mobile bottom-panel results region (FR-17, both surfaces). *@
+                        <MobileTripToggle Vm="TripVm" />
+                        <button class="icon-btn" type="button" style="background:transparent"
+                                @onclick="() => _drawerOpen = true" aria-label="@UiStrings.Collections">
+                            <span class="ms" aria-hidden="true">layers</span>
+                        </button>
+                    </div>
                 </div>
+                @if (TripVm.IsTripViewEnabled)
+                {
+                    @* Trip View on: the bottom panel shows the ordered stop list
+                       (the header above keeps the toggle, so the user can turn it
+                       back off). Map stays at the ~46% top. *@
+                    <MobileTripPanel Vm="TripVm" />
+                }
+                else
+                {
                 <div class="scroll" style="flex:1">
                     <div class="list">
                         @foreach (var p in list)
@@ -165,9 +180,18 @@ else if (Viewport.IsMobile)
                             <div class="row" @key="p.Id" data-poi-id="@p.Id" role="button" tabindex="0"
                                  @onclick="() => Vm.HandlePoiSelectedAsync(p.Id)"
                                  @onkeydown="e => OnRowKeyDownAsync(e, p.Id)">
-                                <div class="avatar" style="@($"background:{CollectionColorFor(p.Id)}")">
-                                    <span class="ms filled" style="font-size:18px" aria-hidden="true">location_on</span>
-                                </div>
+                                @if (StopOrderFor(p.Id) is { } mobileStop)
+                                {
+                                    <div class="avatar" style="background:var(--primary)">
+                                        <StopOrderBadge Number="mobileStop" />
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="avatar" style="@($"background:{CollectionColorFor(p.Id)}")">
+                                        <span class="ms filled" style="font-size:18px" aria-hidden="true">location_on</span>
+                                    </div>
+                                }
                                 <div class="meta">
                                     <div class="name">@p.Name</div>
                                     <div class="sub">@CategoryAddress(p)</div>
@@ -204,6 +228,7 @@ else if (Viewport.IsMobile)
                         }
                     </div>
                 </div>
+                }
                 }
             </div>
         </div>
@@ -266,6 +291,8 @@ else
                 @if (Vm.CollectionStates.Any(c => c.IsVisible))
                 {
                     <div class="ml-auto flex items-center gap-4">
+                        @* Trip View toggle — desktop filtered-results header region (FR-17, not a menu). *@
+                        <TripToggle Vm="TripVm" />
                         <button class="text-sm text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1.5"
                                 @onclick="Vm.FitMapBoundsAsync"
                                 aria-label="@UiStrings.FitMapToVisible">
@@ -285,7 +312,7 @@ else
 
             @* Map *@
             <div style="flex: 1 1 0; min-height: 120px;" class="relative min-h-0">
-                <LeafletMap @ref="_leafletMap" OnMarkerSelected="Vm.HandleMarkerSelectedAsync" OnBoundsChanged="Vm.HandleBoundsChanged" />
+                <LeafletMap @ref="_leafletMap" OnMarkerSelected="OnMarkerSelectedAsync" OnBoundsChanged="Vm.HandleBoundsChanged" />
             </div>
 
             @* Drag handle *@
@@ -298,6 +325,7 @@ else
                  class="flex-shrink-0 bg-white shadow-inner overflow-hidden flex flex-col">
                 <PoiTable Pois="Vm.FilteredPois"
                          SelectedPoiId="Vm.SelectedPoiId"
+                         StopOrders="@(TripVm.IsTripViewEnabled ? TripVm.StopOrders : null)"
                          CollectionName="@Vm.SelectedCollectionName"
                          PoiCollectionNames="Vm.PoiCollectionNames"
                          PoiCollectionMemberships="Vm.PoiCollectionMemberships"
@@ -315,6 +343,15 @@ else
                          OnBatchCopyToNewClicked="Vm.HandleBatchCopyToNewCollectionAsync" />
             </div>
         </div>
+
+        @* Trip View stop-list panel — shown beside the map (additively) when Trip
+           View is on. The map + PoiTable stay intact; this is a thin extra column. *@
+        @if (TripVm.IsTripViewEnabled)
+        {
+            <div class="w-64 flex-shrink-0">
+                <TripStopList Vm="TripVm" />
+            </div>
+        }
 
         @* Right Detail Pane — parent owns the null check *@
         @if (Vm.SelectedPoi != null)
@@ -361,12 +398,31 @@ else
     // re-call on actual flips, not on every render.
     private bool? _jsMobileMode;
 
+    // Trip View scope tracking. _tripScopeInit guards the first LoadAsync;
+    // _tripCollectionId is the collection last loaded into TripVm; _pushedStopOrders
+    // is the last Stop Order map pushed to the JS map (so we skip redundant interop).
+    private bool _tripScopeInit;
+    private int? _tripCollectionId;
+    private IReadOnlyDictionary<int, int>? _pushedStopOrders;
+    // Last leg geometry pushed to the JS map (dedup so an unrelated state notify
+    // doesn't re-issue an identical incremental redraw).
+    private IReadOnlyList<TripLeg>? _pushedLegs;
+    // Last selected Stop pushed to the map (emphasis + pan/scroll). -1 is a
+    // "force re-push" sentinel (no real poiId is negative) used on map re-wire.
+    private int? _pushedSelectedStopId = -1;
+    // Last SelectionTick pushed — lets an idempotent re-select (same poiId, higher
+    // tick) re-run the pan/scroll follow-up. -1 forces a re-push on map re-wire.
+    private long _pushedSelectionTick = -1;
+
     protected override async Task OnInitializedAsync()
     {
         Vm.StateChanged += OnVmChanged;
+        TripVm.StateChanged += OnTripChanged;
+        Vm.MembershipChanged = OnMembershipChangedAsync;
         Viewport.Changed += OnViewportChanged;
         Vm.RendererDispatch = InvokeAsync;
         await Vm.InitializeAsync();
+        await SyncTripAsync();
     }
 
     protected override Task OnParametersSetAsync() => Vm.OnNavigationChangedAsync();
@@ -379,6 +435,15 @@ else
         if (_leafletMap is not null && !ReferenceEquals(_leafletMap, _wiredMap))
         {
             _wiredMap = _leafletMap;
+            // The JS map was just (re)constructed — initMap reset state.stopOrders
+            // and state.tripLegLayer to empty — so the last pushed Stop Order /
+            // legs are stale. Clear both dedup caches so PushTripAsync below
+            // re-applies the badges + legs to the fresh map (e.g. after a
+            // desktop<->mobile viewport flip). [Review][Patch]
+            _pushedStopOrders = null;
+            _pushedLegs = null;
+            _pushedSelectedStopId = -1;
+            _pushedSelectionTick = -1;
             try
             {
                 await _leafletMap.WaitForInitAsync();
@@ -417,6 +482,10 @@ else
             }
 
             await Vm.OnMapInitializedAsync();
+
+            // Map is now live — push any persisted Stop Order badges + connecting
+            // legs onto the freshly-seeded markers (no-op when Trip View is off).
+            await PushTripAsync();
 
             // Mobile: ask for GPS access and drop a "you are here" star. This
             // runs once per map instance (the block is gated on a fresh
@@ -473,7 +542,213 @@ else
         }
     }
 
-    private void OnVmChanged() => InvokeAsync(StateHasChanged);
+    private void OnVmChanged() => InvokeAsync(async () =>
+    {
+        await SyncTripAsync();
+        StateHasChanged();
+    });
+
+    private void OnTripChanged() => InvokeAsync(async () =>
+    {
+        await PushTripAsync();
+        StateHasChanged();
+    });
+
+    // Re-scope the Trip layer to the current single visible collection (reads
+    // persisted Trip state only when the scope collection changes; otherwise just
+    // refreshes the placeable count), then reconcile the map's Stop badges.
+    private async Task SyncTripAsync()
+    {
+        var colId = Vm.SingleVisibleCollectionId;
+        var count = Vm.PlaceablePoiCount;
+        if (!_tripScopeInit || colId != _tripCollectionId)
+        {
+            _tripScopeInit = true;
+            _tripCollectionId = colId;
+            await TripVm.LoadAsync(colId, count);
+        }
+        else
+        {
+            TripVm.UpdatePlaceableCount(count);
+        }
+        await PushTripAsync();
+    }
+
+    // Membership mutation just landed: append/re-compact the Stop Order and
+    // refresh the badges + legs. Wired to Vm.MembershipChanged so it only runs on
+    // real add/remove, not on every state notification.
+    private async Task OnMembershipChangedAsync()
+    {
+        await TripVm.RefreshAfterMembershipChangeAsync(Vm.PlaceablePoiCount);
+        await PushTripAsync();
+    }
+
+    // Push all Trip overlays (numbered Stop badges + connecting legs + selection
+    // emphasis/pan/scroll) to the JS map. Each is independently de-duped, so an
+    // unrelated state notify is cheap.
+    private async Task PushTripAsync()
+    {
+        await PushStopOrdersAsync();
+        await PushTripLegsAsync();
+        await PushTripSelectionAsync();
+    }
+
+    // TRIP-SELECT: marker click — reuse the existing marker-click channel. When
+    // Trip View is on, a marker click selects the Stop (map→list: emphasise +
+    // scroll the row into view); the Leaflet popup (desktop) still opens in JS
+    // and the mobile tooltip path is unchanged. When Trip View is off, the
+    // original POI-detail selection behaviour is preserved exactly (AC4).
+    private async Task OnMarkerSelectedAsync(int poiId)
+    {
+        if (TripVm.IsTripViewEnabled)
+        {
+            TripVm.SelectStop(poiId, TripSelectionSource.Map);
+        }
+        else
+        {
+            await Vm.HandleMarkerSelectedAsync(poiId);
+        }
+    }
+
+    // TRIP-SELECT: reflect the VM's selected Stop onto the map. Emphasis is
+    // re-applied whenever the selected marker changes; the directional follow-up
+    // runs on every (re-)selection — a List selection pans the marker into view, a
+    // Map selection scrolls the stop row into view. De-duped on the pushed
+    // (poiId, SelectionTick) so unrelated state notifications don't re-pan/re-scroll,
+    // while an idempotent re-select (advanced tick) still re-centres its marker.
+    private async Task PushTripSelectionAsync()
+    {
+        if (_leafletMap is not { IsInitialized: true })
+        {
+            return;
+        }
+        var sel = TripVm.IsTripViewEnabled ? TripVm.SelectedStopPoiId : null;
+        var tick = TripVm.IsTripViewEnabled ? TripVm.SelectionTick : -1;
+        // [Review][Patch] Dedup on (poiId, SelectionTick) rather than poiId alone, so
+        // re-selecting the already-selected row (same poiId, advanced tick) still re-runs
+        // the directional follow-up — re-panning a marker the user has scrolled off-screen
+        // (AC1). Unrelated StateChanged notifications leave both unchanged → no-op.
+        var poiChanged = sel != _pushedSelectedStopId;
+        var selectionAdvanced = tick != _pushedSelectionTick;
+        if (!poiChanged && !selectionAdvanced)
+        {
+            return;
+        }
+        _pushedSelectedStopId = sel;
+        _pushedSelectionTick = tick;
+
+        // Emphasis only needs re-skinning when the selected marker actually changes.
+        if (poiChanged)
+        {
+            await _leafletMap.EmphasizeStopAsync(sel);
+        }
+
+        if (sel is { } poiId)
+        {
+            if (TripVm.LastSelectionSource == TripSelectionSource.List)
+            {
+                await _leafletMap.PanToStopAsync(poiId);
+            }
+            else
+            {
+                try { await Js.InvokeVoidAsync("leafletInterop.scrollTripRowIntoView", poiId); }
+                catch (JSDisconnectedException) { }
+                catch (InvalidOperationException) { }
+            }
+        }
+    }
+
+    private async Task PushStopOrdersAsync()
+    {
+        if (_leafletMap is not { IsInitialized: true })
+        {
+            return;
+        }
+        var orders = TripVm.IsTripViewEnabled ? TripVm.StopOrders : null;
+        if (OrdersEqual(orders, _pushedStopOrders))
+        {
+            return;
+        }
+        _pushedStopOrders = orders;
+        await _leafletMap.SetStopOrdersAsync(orders);
+    }
+
+    // Incremental leg redraw (AC3 / NFR1): on a Stop-Order/Start/Finish/membership
+    // change TripViewModel recomputes OrderedLegs and raises StateChanged; we draw
+    // the new legs (replacing only the prior trip-leg layer) or clear them when
+    // Trip View is off. No navigation, no map re-init.
+    private async Task PushTripLegsAsync()
+    {
+        if (_leafletMap is not { IsInitialized: true })
+        {
+            return;
+        }
+        var legs = TripVm.IsTripViewEnabled ? TripVm.OrderedLegs : null;
+        if (LegsEqual(legs, _pushedLegs))
+        {
+            return;
+        }
+        _pushedLegs = legs;
+        if (legs is { Count: > 0 })
+        {
+            var dtos = legs
+                .Select(l => new TripLegDto(l.FromLat, l.FromLon, l.ToLat, l.ToLon, l.IsMeasured))
+                .ToList();
+            await _leafletMap.DrawTripLegsAsync(dtos);
+        }
+        else
+        {
+            await _leafletMap.ClearTripAsync();
+        }
+    }
+
+    private static bool LegsEqual(IReadOnlyList<TripLeg>? a, IReadOnlyList<TripLeg>? b)
+    {
+        var ca = a?.Count ?? 0;
+        var cb = b?.Count ?? 0;
+        if (ca != cb)
+        {
+            return false;
+        }
+        if (ca == 0)
+        {
+            return true;
+        }
+        for (var i = 0; i < ca; i++)
+        {
+            // TripLeg is a record — value equality compares every endpoint + flag.
+            if (!a![i].Equals(b![i]))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool OrdersEqual(IReadOnlyDictionary<int, int>? a, IReadOnlyDictionary<int, int>? b)
+    {
+        var ca = a?.Count ?? 0;
+        var cb = b?.Count ?? 0;
+        if (ca != cb)
+        {
+            return false;
+        }
+        if (ca == 0)
+        {
+            return true;
+        }
+        foreach (var kvp in a!)
+        {
+            if (!b!.TryGetValue(kvp.Key, out var v) || v != kvp.Value)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private int? StopOrderFor(int poiId) =>
+        TripVm.IsTripViewEnabled && TripVm.StopOrders.TryGetValue(poiId, out var n) ? n : null;
 
     // Wraps Vm.CloseDetailPane so we capture the POI id BEFORE the VM clears
     // SelectedPoiId. The same callback handles both UI back chevron and the
@@ -537,8 +812,11 @@ else
     public async ValueTask DisposeAsync()
     {
         Vm.StateChanged -= OnVmChanged;
+        TripVm.StateChanged -= OnTripChanged;
+        Vm.MembershipChanged = null;
         Viewport.Changed -= OnViewportChanged;
         await Vm.DisposeAsync();
+        await TripVm.DisposeAsync();
         _selfRef?.Dispose();
         if (_leafletMap != null)
         {

@@ -130,6 +130,11 @@ public abstract class IntegrationTestBase : IAsyncLifetime
         builder.Services.AddSingleton<Services.Operations.DedupTrigger>();
         builder.Services.AddScoped<Services.Operations.IPoiDeduplicationService, Services.Operations.PoiDeduplicationService>();
 
+        // Trip View slice — TripViewModel (added via AddPageViewModels) needs
+        // ITripOrderingService; the shared SqliteWriteLock is already registered
+        // just above, so AddTripServices reuses it.
+        builder.Services.AddTripServices();
+
         // Google Saved-List export pipeline (mirrors AddExportPipeline minus the
         // file exporters already registered above). The DataSourcesPage VM @injects
         // IExportJobQueue + ExportJobStatusService, and both the scraper and the

@@ -59,6 +59,35 @@ public static class UiStrings
     public const string NoCollectionsYet = "No collections yet.";
     public const string ImportDataHint = "Import data via Data Sources tab.";
 
+    // Trip View
+    public const string TripView = "Trip View";
+    public const string TripViewToggleAria = "Toggle Trip View — order the visible places into a trip";
+    public const string TripViewEnabledAnnouncement = "Trip View on. Places are ordered as a trip.";
+    public const string TripViewDisabledAnnouncement = "Trip View off. Showing the plain collection.";
+    // {0} = stop number; used as the order badge's screen-reader label.
+    public const string StopOrderBadgeAria = "Stop {0}";
+
+    // Trip View — stop-list panel (Story 1.3). The dwell + timeline values are
+    // inert placeholders here ("—"); the real values arrive in Epic 2.
+    public const string TripStopList = "Trip stops";
+    public const string TripStopListAria = "Trip stop list, in travel order";
+    // {0} = stop count; announced via the panel's aria-live region.
+    public const string TripStopCountAria = "{0} stop trip";
+    public const string TripStopListEmpty = "No placeable stops yet.";
+    // {0} = this stop's number, {1} = total stops. Row-level screen-reader label.
+    public const string TripStopBadgeAria = "Stop {0} of {1}";
+    public const string TripDwellPlaceholder = "—";
+    public const string TripDwellAria = "Dwell time (set in a later step)";
+    public const string TripTimelinePlaceholder = "—";
+    public const string TripTimelineAria = "Arrival time (computed in a later step)";
+
+    // Trip View — list ↔ map selection sync (Story 1.4). {0} = stop number,
+    // {1} = POI name; announced via the panel's aria-live region on selection.
+    public const string TripStopSelectedAnnouncement = "Selected stop {0}: {1}";
+    // Selectable stop-row accessible name. {0} = stop number, {1} = total stops,
+    // {2} = POI name.
+    public const string TripStopRowAria = "Stop {0} of {1}: {2}";
+
     // Data Sources Page
     public const string DataSourcesPageTitle = "Data Sources - Lucid Cartographer";
     public const string DataAndImports = "Data & Imports";
