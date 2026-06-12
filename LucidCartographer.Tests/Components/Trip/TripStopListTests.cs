@@ -170,4 +170,110 @@ public class TripStopListTests : BunitTestContext
         cut.WaitForAssertion(() =>
             cut.Find(".row[data-poi-id='1']").GetAttribute("aria-current").Should().Be("true"));
     }
+
+    // === Story 1.6: "Not placeable" row treatment ([TRIP-PLACE-04/05]) ===
+
+    /// <summary>
+    /// Mixed-membership VM: 2 placeable POIs (1, 2) plus an unplaceable POI (99,
+    /// no coordinates) that must stay visible with the "Not placeable" treatment.
+    /// </summary>
+    private static async Task<TripViewModel> MixedVmAsync()
+    {
+        var factory = SeedFactory(placeable: 2);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.Pois.Add(new Poi { Id = 99, Name = "NoCoords", Latitude = null, Longitude = null, AddedDate = new DateTime(2025, 1, 9) });
+            db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = 99, PoiCollectionId = CollectionId });
+            await db.SaveChangesAsync();
+        }
+
+        var writeLock = new SqliteWriteLock();
+        var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
+        var vm = new TripViewModel(ordering, factory, writeLock, NullLogger<TripViewModel>.Instance);
+        await vm.LoadAsync(CollectionId, 2);
+        await vm.ToggleAsync();
+        return vm;
+    }
+
+    [Fact]
+    public async Task TripStopList_UnplaceableRow_Present_Labelled_NoBadge_WithAria()
+    {
+        await using var vm = await MixedVmAsync();
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        // The row is present — never dropped (AC1).
+        var rows = cut.FindAll("li");
+        rows.Should().HaveCount(3, "the unplaceable POI stays in the list");
+
+        var row = cut.Find("li[data-poi-id='99']");
+        row.TextContent.Should().Contain("NoCoords");
+        // "Not placeable" copy via UiStrings + the honest detail sentence (AC5).
+        row.TextContent.Should().Contain(UiStrings.TripStopNotPlaceable);
+        row.GetAttribute("title").Should().Be(UiStrings.TripStopNotPlaceableDetail);
+        // Screen-reader label describes the not-placeable state.
+        row.GetAttribute("aria-label").Should().Be(UiStrings.TripStopNotPlaceableAria);
+        // No routed order badge on the unplaceable row (AC4): the badge aria-label
+        // pattern ("Stop X of Y") must not appear inside it.
+        row.QuerySelectorAll("[aria-label^='Stop']").Should().BeEmpty();
+        // Not selectable — no button semantics.
+        row.HasAttribute("role").Should().BeFalse();
+        row.HasAttribute("tabindex").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task TripStopList_PlaceableBadges_ReadContiguous_WithUnplaceablePresent()
+    {
+        await using var vm = await MixedVmAsync();
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        // Placeable badges read 1..2 with no visible gap (AC4).
+        var badge1 = string.Format(CultureInfo.CurrentCulture, UiStrings.TripStopBadgeAria, 1, 2);
+        var badge2 = string.Format(CultureInfo.CurrentCulture, UiStrings.TripStopBadgeAria, 2, 2);
+        cut.Find($"[aria-label=\"{badge1}\"]").TextContent.Trim().Should().Be("1");
+        cut.Find($"[aria-label=\"{badge2}\"]").TextContent.Trim().Should().Be("2");
+    }
+
+    [Fact]
+    public async Task TripStopList_UnplaceableRow_Click_DoesNotSelect()
+    {
+        await using var vm = await MixedVmAsync();
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        // The unplaceable row carries no click handler at all (not selectable),
+        // so bUnit reports a missing handler rather than dispatching.
+        var click = () => cut.Find("li[data-poi-id='99']").Click();
+        click.Should().Throw<Bunit.MissingEventHandlerException>();
+
+        // And the VM-level guard ignores it even if invoked directly.
+        vm.SelectStop(99);
+        vm.SelectedStopPoiId.Should().BeNull("an unplaceable row is not selectable");
+        cut.FindAll("li[aria-current='true']").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task MobileTripPanel_UnplaceableRow_Present_Labelled_NoBadge_WithAria()
+    {
+        await using var vm = await MixedVmAsync();
+
+        var cut = RenderComponent<MobileTripPanel>(p => p.Add(x => x.Vm, vm));
+
+        // Identical treatment on the mobile surface (AC6).
+        var rows = cut.FindAll(".row");
+        rows.Should().HaveCount(3, "the unplaceable POI stays in the mobile list");
+
+        var row = cut.Find(".row[data-poi-id='99']");
+        row.TextContent.Should().Contain("NoCoords");
+        row.TextContent.Should().Contain(UiStrings.TripStopNotPlaceable);
+        row.GetAttribute("title").Should().Be(UiStrings.TripStopNotPlaceableDetail);
+        row.GetAttribute("aria-label").Should().Be(UiStrings.TripStopNotPlaceableAria);
+        // No StopOrderBadge inside the unplaceable row, and no button semantics.
+        row.QuerySelectorAll("[aria-label^='Stop']").Should().BeEmpty();
+        row.HasAttribute("role").Should().BeFalse();
+
+        // Placeable rows still carry their contiguous badges 1..2.
+        var badge1 = string.Format(CultureInfo.CurrentCulture, UiStrings.StopOrderBadgeAria, 1);
+        cut.Find($"[aria-label=\"{badge1}\"]").Should().NotBeNull();
+    }
 }

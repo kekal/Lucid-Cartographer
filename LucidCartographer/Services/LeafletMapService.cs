@@ -64,6 +64,12 @@ public class LeafletMapService(IJSRuntime js) : IMapService, IAsyncDisposable
 
     public async Task SetLabelsVisibleAsync(bool visible) => await InvokeJsVoidAsync("leafletInterop.setLabelsVisible", visible);
 
+    // [TRIP-PLACE-02] Trip markers and legs only ever receive the PLACEABLE
+    // subset: StopOrders/OrderedLegs are projected by TripViewModel through the
+    // canonical StopPlaceability predicate (and the base collection markers are
+    // already coordinate-filtered by PoiService), so a null-coordinate POI can
+    // never reach this interop — no marker, no leg endpoint, and the loop is
+    // built over consecutive placeable stops so it is never severed.
     public async Task SetStopOrdersAsync(IReadOnlyDictionary<int, int>? orders) =>
         // Pass an empty object (not null) so the JS side can clear unconditionally.
         await InvokeJsVoidAsync("leafletInterop.setStopOrders", orders ?? new Dictionary<int, int>());

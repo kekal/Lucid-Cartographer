@@ -15,7 +15,7 @@
 <div class="scroll" style="flex:1">
     @* `trip-stop-list` scopes the JS scroll-into-view helper (TRIP-SELECT-05). *@
     <div class="list trip-stop-list" aria-label="@UiStrings.TripStopListAria">
-        @if (Vm.OrderedStops.Count == 0)
+        @if (Vm.StopRows.Count == 0)
         {
             <div class="empty">
                 <span class="ms" aria-hidden="true">route</span>
@@ -24,31 +24,57 @@
         }
         else
         {
-            @foreach (var stop in Vm.OrderedStops)
+            @foreach (var row in Vm.StopRows)
             {
-                var selected = Vm.SelectedStopPoiId == stop.PoiId;
-                @* data-poi-id mirrors the plain POI list rows so the scroll helper
-                   (TRIP-SELECT-05) can locate a row. Tap / Enter / Space select the
-                   stop (list→map). Selected rows tint with the primary-soft token
-                   and expose aria-current (AC3). ≥44px touch target via .row. *@
-                <div class="row" @key="stop.PoiId" data-poi-id="@stop.PoiId"
-                     role="button" tabindex="0"
-                     aria-current="@(selected ? "true" : null)"
-                     aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripStopRowAria, stop.OrderIndex, Vm.OrderedStops.Count, stop.Name)"
-                     style="@(selected ? "background:var(--primary-soft)" : "")"
-                     @onclick="() => Vm.SelectStop(stop.PoiId, TripSelectionSource.List)"
-                     @onkeydown="e => OnRowKeyDown(e, stop.PoiId)">
-                    <div class="avatar" style="background:var(--primary)">
-                        <StopOrderBadge Number="stop.OrderIndex" />
+                @if (!row.IsPlaceable)
+                {
+                    @* [TRIP-PLACE-04] Mobile "Not placeable" row — identical
+                       treatment to the desktop list (UX-DR12): kept visible,
+                       de-emphasized, NOT selectable, no routed order badge (the
+                       placeable numbering stays contiguous with no visible gap).
+                       Tokens only, no raw hex. *@
+                    <div class="row" @key="row.PoiId" data-poi-id="@row.PoiId"
+                         aria-label="@UiStrings.TripStopNotPlaceableAria"
+                         title="@UiStrings.TripStopNotPlaceableDetail"
+                         style="opacity:.6">
+                        <div class="avatar" style="background:var(--bg-elev-2);color:var(--text-2)" aria-hidden="true">
+                            <span class="ms">location_off</span>
+                        </div>
+                        <div class="meta">
+                            <div class="name" style="color:var(--text-2)">@row.Name</div>
+                            <div class="sub">@UiStrings.TripStopNotPlaceable</div>
+                        </div>
                     </div>
-                    <div class="meta">
-                        <div class="name">@stop.Name</div>
-                        @* Inert timeline placeholder (Epic 2 computes arrival time). *@
-                        <div class="sub" aria-label="@UiStrings.TripTimelineAria">@UiStrings.TripTimelinePlaceholder</div>
+                }
+                else
+                {
+                    var selected = Vm.SelectedStopPoiId == row.PoiId;
+                    var number = row.DisplayOrder!.Value;
+                    @* data-poi-id mirrors the plain POI list rows so the scroll helper
+                       (TRIP-SELECT-05) can locate a row. Tap / Enter / Space select the
+                       stop (list→map). Selected rows tint with the primary-soft token
+                       and expose aria-current (AC3). ≥44px touch target via .row.
+                       The badge shows the presented routed order over the placeable
+                       subset — contiguous 1..M ([TRIP-ORDER-UNPLACE-01]). *@
+                    <div class="row" @key="row.PoiId" data-poi-id="@row.PoiId"
+                         role="button" tabindex="0"
+                         aria-current="@(selected ? "true" : null)"
+                         aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripStopRowAria, number, Vm.OrderedStops.Count, row.Name)"
+                         style="@(selected ? "background:var(--primary-soft)" : "")"
+                         @onclick="() => Vm.SelectStop(row.PoiId, TripSelectionSource.List)"
+                         @onkeydown="e => OnRowKeyDown(e, row.PoiId)">
+                        <div class="avatar" style="background:var(--primary)">
+                            <StopOrderBadge Number="number" />
+                        </div>
+                        <div class="meta">
+                            <div class="name">@row.Name</div>
+                            @* Inert timeline placeholder (Epic 2 computes arrival time). *@
+                            <div class="sub" aria-label="@UiStrings.TripTimelineAria">@UiStrings.TripTimelinePlaceholder</div>
+                        </div>
+                        @* Inert dwell placeholder (Epic 2 sets dwell). *@
+                        <div class="trailing" aria-label="@UiStrings.TripDwellAria">@UiStrings.TripDwellPlaceholder</div>
                     </div>
-                    @* Inert dwell placeholder (Epic 2 sets dwell). *@
-                    <div class="trailing" aria-label="@UiStrings.TripDwellAria">@UiStrings.TripDwellPlaceholder</div>
-                </div>
+                }
             }
         }
     </div>

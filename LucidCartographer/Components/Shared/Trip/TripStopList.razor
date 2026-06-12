@@ -25,7 +25,7 @@
     @* TRIP-SELECT-05: announces the selected stop (list→map or map→list). *@
     <span class="sr-only" role="status" aria-live="polite">@Vm.SelectionAnnouncement</span>
 
-    @if (Vm.OrderedStops.Count == 0)
+    @if (Vm.StopRows.Count == 0)
     {
         <div class="px-3 py-4 text-sm text-on-surface-variant">@UiStrings.TripStopListEmpty</div>
     }
@@ -33,37 +33,65 @@
     {
         @* `trip-stop-list` scopes the JS scroll-into-view helper (TRIP-SELECT-05). *@
         <ul class="flex-1 overflow-y-auto trip-stop-list" aria-label="@UiStrings.TripStopListAria">
-            @foreach (var stop in Vm.OrderedStops)
+            @foreach (var row in Vm.StopRows)
             {
-                var selected = Vm.SelectedStopPoiId == stop.PoiId;
-                @* TRIP-SELECT-05: selectable row — click / Enter / Space select the
-                   stop (list→map). data-poi-id lets the scroll helper locate it on
-                   the map→list direction. Selected rows get a primary-token ring +
-                   tint and expose aria-current to AT (AC3). *@
-                <li @key="stop.PoiId" data-poi-id="@stop.PoiId"
-                    role="button" tabindex="0"
-                    aria-current="@(selected ? "true" : null)"
-                    aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripStopRowAria, stop.OrderIndex, Vm.OrderedStops.Count, stop.Name)"
-                    @onclick="() => Vm.SelectStop(stop.PoiId, TripSelectionSource.List)"
-                    @onkeydown="e => OnRowKeyDown(e, stop.PoiId)"
-                    class="flex items-center gap-2 px-2 py-2 border-b border-surface-container cursor-pointer @(selected ? "bg-primary/10 ring-1 ring-inset ring-primary" : "hover:bg-surface-container")">
-                    @* Leading gutter reserved for the Story-1.5 drag handle / move
-                       controls — render nothing here now, just hold the space. *@
-                    <span class="w-4 flex-shrink-0" aria-hidden="true"></span>
-                    @* Order badge: primary-filled numbered circle (UX-DR2). The
-                       descriptive "Stop X of Y" label conveys the position; the
-                       bare numeral is hidden so it isn't read twice. *@
-                    <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary text-on-primary text-xs font-bold flex-shrink-0"
-                          aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripStopBadgeAria, stop.OrderIndex, Vm.OrderedStops.Count)">
-                        <span aria-hidden="true">@stop.OrderIndex</span>
-                    </span>
-                    <span class="flex-1 min-w-0 truncate text-sm text-on-surface" title="@stop.Name">@stop.Name</span>
-                    @* Inert placeholders (Epic 2 computes the real values). *@
-                    <span class="text-xs text-on-surface-variant flex-shrink-0"
-                          aria-label="@UiStrings.TripDwellAria">@UiStrings.TripDwellPlaceholder</span>
-                    <span class="text-xs text-on-surface-variant flex-shrink-0 w-6 text-right"
-                          aria-label="@UiStrings.TripTimelineAria">@UiStrings.TripTimelinePlaceholder</span>
-                </li>
+                @if (!row.IsPlaceable)
+                {
+                    @* [TRIP-PLACE-04] "Not placeable" row (UX-DR10/UX-DR11): kept in
+                       the list — never dropped — but de-emphasized, NOT selectable
+                       (no marker to pan to), and with the not-placeable marker
+                       replacing the routed order badge so the placeable numbering
+                       reads contiguous with no visible gap. The aria-label tells a
+                       screen reader the honest story; the title carries the full
+                       provenance sentence. *@
+                    <li @key="row.PoiId" data-poi-id="@row.PoiId"
+                        aria-label="@UiStrings.TripStopNotPlaceableAria"
+                        title="@UiStrings.TripStopNotPlaceableDetail"
+                        class="flex items-center gap-2 px-2 py-2 border-b border-surface-container opacity-60">
+                        <span class="w-4 flex-shrink-0" aria-hidden="true"></span>
+                        @* Not-placeable marker in the badge slot — outlined, muted,
+                           no number (explicit empty markers are first-class). *@
+                        <span class="inline-flex items-center justify-center w-5 h-5 rounded-full border border-on-surface-variant text-on-surface-variant text-xs flex-shrink-0"
+                              aria-hidden="true">—</span>
+                        <span class="flex-1 min-w-0 truncate text-sm text-on-surface-variant" title="@row.Name">@row.Name</span>
+                        <span class="text-xs text-on-surface-variant flex-shrink-0">@UiStrings.TripStopNotPlaceable</span>
+                    </li>
+                }
+                else
+                {
+                    var selected = Vm.SelectedStopPoiId == row.PoiId;
+                    var number = row.DisplayOrder!.Value;
+                    @* TRIP-SELECT-05: selectable row — click / Enter / Space select the
+                       stop (list→map). data-poi-id lets the scroll helper locate it on
+                       the map→list direction. Selected rows get a primary-token ring +
+                       tint and expose aria-current to AT (AC3). *@
+                    <li @key="row.PoiId" data-poi-id="@row.PoiId"
+                        role="button" tabindex="0"
+                        aria-current="@(selected ? "true" : null)"
+                        aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripStopRowAria, number, Vm.OrderedStops.Count, row.Name)"
+                        @onclick="() => Vm.SelectStop(row.PoiId, TripSelectionSource.List)"
+                        @onkeydown="e => OnRowKeyDown(e, row.PoiId)"
+                        class="flex items-center gap-2 px-2 py-2 border-b border-surface-container cursor-pointer @(selected ? "bg-primary/10 ring-1 ring-inset ring-primary" : "hover:bg-surface-container")">
+                        @* Leading gutter reserved for the Story-1.5 drag handle / move
+                           controls — render nothing here now, just hold the space. *@
+                        <span class="w-4 flex-shrink-0" aria-hidden="true"></span>
+                        @* Order badge: primary-filled numbered circle (UX-DR2). The
+                           descriptive "Stop X of Y" label conveys the position; the
+                           bare numeral is hidden so it isn't read twice. The number is
+                           the presented routed order over the placeable subset —
+                           contiguous 1..M ([TRIP-ORDER-UNPLACE-01]). *@
+                        <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary text-on-primary text-xs font-bold flex-shrink-0"
+                              aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripStopBadgeAria, number, Vm.OrderedStops.Count)">
+                            <span aria-hidden="true">@number</span>
+                        </span>
+                        <span class="flex-1 min-w-0 truncate text-sm text-on-surface" title="@row.Name">@row.Name</span>
+                        @* Inert placeholders (Epic 2 computes the real values). *@
+                        <span class="text-xs text-on-surface-variant flex-shrink-0"
+                              aria-label="@UiStrings.TripDwellAria">@UiStrings.TripDwellPlaceholder</span>
+                        <span class="text-xs text-on-surface-variant flex-shrink-0 w-6 text-right"
+                              aria-label="@UiStrings.TripTimelineAria">@UiStrings.TripTimelinePlaceholder</span>
+                    </li>
+                }
             }
         </ul>
     }

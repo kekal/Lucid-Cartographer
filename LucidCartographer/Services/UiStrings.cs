@@ -88,6 +88,13 @@ public static class UiStrings
     // {2} = POI name.
     public const string TripStopRowAria = "Stop {0} of {1}: {2}";
 
+    // Trip View — unplaceable stops (Story 1.6, [TRIP-PLACE-05]). Honest,
+    // factual, provenance-aware copy (UX-DR11): the POI is kept in the
+    // collection, excluded from the route — never silently dropped (UX-DR10).
+    public const string TripStopNotPlaceable = "Not placeable";
+    public const string TripStopNotPlaceableDetail = "Not placeable — no coordinates. Kept in the collection, excluded from the route.";
+    public const string TripStopNotPlaceableAria = "Not placeable: this stop has no coordinates and is excluded from the route, but kept in the collection.";
+
     // Data Sources Page
     public const string DataSourcesPageTitle = "Data Sources - Lucid Cartographer";
     public const string DataAndImports = "Data & Imports";
