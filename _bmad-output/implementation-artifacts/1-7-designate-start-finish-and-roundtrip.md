@@ -4,7 +4,7 @@ baseline_commit: 7a1fe590269371b7a6fbe9328fcf5e6e382a75e2
 
 # Story 1.7: Designate Start, Finish and roundtrip
 
-Status: review
+Status: done
 
 ## Story
 
@@ -54,6 +54,14 @@ This story is the Start/Finish designation layer of Epic 1. It is an **additive 
   - [x] `TripStopList` bUnit tests: the Start row badge renders the Start glyph/ring, the Finish row badge renders the Finish glyph; Set/Unset Start and Finish controls render with `aria-label`s from `UiStrings`; "Set as Finish" is disabled on the current Start row (and vice versa); clicking a control invokes the corresponding `TripViewModel` method.
 - [x] **Integration tests — both surfaces** (AC: 1, 2, 3, 4)
   - [x] Desktop (`IntegrationTestBase`) and mobile (`MobileTestBase`): with Trip View on, designate a Start → it becomes stop 1 with the Start glyph and the loop anchors on it; leave Finish unset → roundtrip closing leg is drawn (N legs); set a distinct Finish → open path, no closing leg (N−1 legs), Finish is stop N with the Finish glyph; verify the controls exist and are operable on the mobile render path; verify the `aria-live` announcement fires on roundtrip↔open-path transitions.
+
+### Review Findings
+
+_Code review 2026-06-14 (bmad-code-review: Blind Hunter + Edge Case Hunter + Acceptance Auditor). 1 patch applied, 2 deferred, 11 dismissed across stories 1.5–1.7._
+
+- [x] [Review][Patch] Orphaned Start/Finish pin survives the pinned POI leaving the placeable stop set [LucidCartographer/Services/Trip/TripOrderingService.cs:114] — When a Finish-pinned POI became Unplaceable (coordinates cleared) or was removed from the collection, `FinishPoiId`/`StartPoiId` was never released. `IsRoundtrip` (FinishPoiId is null) then reported `false` while `BuildLegs` still appended the closing leg, so the map got `roundtrip=false` with an untagged closing leg (flag/geometry divergence, AC6) and the user had no visible Finish row to clear the phantom pin. Same root cause let a newly-appended stop demote a pinned Finish out of slot N. Fixed: `ReconcileOrderAsync` is now pin-aware (`TRIP-STARTFINISH-07`) — it releases pins whose POI is no longer a placeable Stop, keeps surviving pins arranged Start→1/Finish→N via the shared `ArrangeWithPins`, and resets newly-unplaceable rows' `OrderIndex` to 0. Covered by 3 new unit tests in `TripOrderingServiceTests`.
+- [x] [Review][Defer] Multi-context read-validate-write in the pin/order ops is not atomic under true concurrency [LucidCartographer/Services/Trip/TripOrderingService.cs:217] — deferred, pre-existing pattern across all ordering methods; `SqliteWriteLock` serializes the writes and the app is single-user self-hosted, so the read-validate window is not exploitable in practice.
+- [x] [Review][Defer] Trip View can remain enabled with only 1 placeable stop after a membership change drops below the ≥2 toggle gate [LucidCartographer/Components/Shared/Trip/TripViewModel.cs:507] — deferred, touches Story 1.2 toggle-persistence semantics; degenerate presentation (single stop, no legs), not a correctness break.
 
 ## Dev Notes
 

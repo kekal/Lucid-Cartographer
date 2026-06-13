@@ -3,7 +3,7 @@ baseline_commit: 979180b38b60d38ab0052b1afe25a15c12239406
 ---
 # Story 1.5: Reorder stops by drag and by keyboard
 
-Status: review
+Status: done
 
 ## Story
 
@@ -63,6 +63,10 @@ This story adds the two user-driven reorder paths — pointer drag and keyboard 
   - [x] **Unit** (`LucidCartographer.Tests/Services/TripOrderingServiceTests.cs`): renumber-on-move correctness; contiguity/gap-free/uniqueness invariant after move; move within interior window; **pinned-Start-only**, **pinned-Finish-only**, **both-pinned** cases (interior-only, pin stays at 1/N, drop-into-pinned-slot clamps); no-op short-circuits without writing; manual reorder overrides a prior order. Assert 1-based. [Source: architecture.md#Pattern Enforcement; epics.md#Story 1.5]
   - [x] **Component / bUnit** (`LucidCartographer.Tests/Components/TripStopListTests.cs`): move buttons present with correct `aria-label`s; activating move-up/down invokes the VM and the move buttons are keyboard-operable; `aria-live` region receives the announcement text; move-up disabled on first movable row, move-down on last, both disabled on pinned rows. [Source: architecture.md#Implementation Readiness (bUnit layer)]
   - [x] **Integration, both surfaces** (`LucidCartographer.Tests/Integration/…` desktop via `IntegrationTestBase`, mobile via `MobileTestBase`): drag a stop and assert persisted order + incremental redraw (no full reload); keyboard move on both surfaces produces identical `OrderIndex` and announcement; pinned Start/Finish unaffected. [Source: project-context.md#Testing Rules; architecture.md#File Organization]
+
+### Review Findings
+
+_Code review 2026-06-14 (bmad-code-review). No actionable findings against Story 1.5 — the reorder code (single-writer `ReorderStopAsync`, pin-aware interior clamp, no-op short-circuit) reviewed clean. A drag-target fragility note (presented vs stored order index) was dismissed as correct-as-written; the one cross-cutting pin-lifecycle patch landed under Story 1.7's findings (it touches `ReconcileOrderAsync`)._
 
 ## Dev Notes
 

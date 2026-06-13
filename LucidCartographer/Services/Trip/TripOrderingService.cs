@@ -126,8 +126,37 @@ public sealed class TripOrderingService(
         var appended = rows.Where(r => r.Placeable && r.Order == 0)
             .OrderBy(r => r.AddedDate)
             .ThenBy(r => r.PoiId);
+        var sequence = ordered.Concat(appended).ToList();
 
-        await SetOrderAsync(collectionId, Renumber(ordered.Concat(appended)), ct);
+        // TRIP-STARTFINISH-07 ([Review][Patch]): reconcile the Start/Finish pins
+        // against the live placeable membership. A pin whose POI is no longer a
+        // placeable Stop — coordinates cleared (now Unplaceable, OrderIndex 0) or
+        // removed from this collection — is RELEASED. An orphaned pin would leave
+        // IsRoundtrip (FinishPoiId is null) disagreeing with the drawn closing leg
+        // (BuildLegs falls back to a closing leg when the Finish is not a real
+        // stop), producing a "phantom open path" with no visible Finish row to
+        // clear it (Story 1.7 AC6 "no orphaned pins"). Surviving pins are then
+        // arranged into their slots (Start → 1, Finish → N) so a newly appended
+        // Stop never demotes a pinned Finish out of the last slot.
+        var (startPoiId, finishPoiId) = await ReadPinsAsync(collectionId, ct);
+        var live = sequence.Select(r => r.PoiId).ToHashSet();
+        var reconciledStart = startPoiId is { } sid && live.Contains(sid) ? startPoiId : null;
+        var reconciledFinish = finishPoiId is { } fid && live.Contains(fid) ? finishPoiId : null;
+        if (reconciledStart != startPoiId || reconciledFinish != finishPoiId)
+        {
+            await WritePinsAsync(collectionId, reconciledStart, reconciledFinish, ct);
+        }
+
+        var desired = Renumber(ArrangeWithPins(sequence, reconciledStart, reconciledFinish));
+        // A POI that just became Unplaceable may still carry a stale OrderIndex
+        // from when it was a Stop — reset it to 0 ("not a stop"), mirroring
+        // SeedOrderAsync, so the stored order never disagrees with placeability.
+        foreach (var row in rows.Where(r => !r.Placeable))
+        {
+            desired[row.PoiId] = 0;
+        }
+
+        await SetOrderAsync(collectionId, desired, ct);
     }
 
     public async Task ReorderStopAsync(int collectionId, int poiId, int targetOrderIndex, CancellationToken ct = default)
@@ -293,21 +322,34 @@ public sealed class TripOrderingService(
             .ThenBy(r => r.PoiId)
             .ToList();
 
-        var start = startPoiId is { } sid ? stops.FirstOrDefault(s => s.PoiId == sid) : null;
-        var finish = finishPoiId is { } fid ? stops.FirstOrDefault(s => s.PoiId == fid) : null;
+        await SetOrderAsync(collectionId, Renumber(ArrangeWithPins(stops, startPoiId, finishPoiId)), ct);
+    }
 
-        var sequence = new List<ItemRow>(stops.Count);
+    /// <summary>
+    /// Arranges an already-ordered Stop sequence with the pinned endpoints in
+    /// their slots: pinned Start first, pinned Finish last, every other Stop in
+    /// its given relative order. A pin whose POI is not in the sequence is simply
+    /// ignored (the caller is responsible for releasing orphaned pins). Shared by
+    /// the reconcile and designation paths so the "Start→1 / Finish→N" rule has a
+    /// single implementation.
+    /// </summary>
+    private static List<ItemRow> ArrangeWithPins(IReadOnlyList<ItemRow> stopsInOrder, int? startPoiId, int? finishPoiId)
+    {
+        var start = startPoiId is { } sid ? stopsInOrder.FirstOrDefault(s => s.PoiId == sid) : null;
+        var finish = finishPoiId is { } fid ? stopsInOrder.FirstOrDefault(s => s.PoiId == fid) : null;
+
+        var sequence = new List<ItemRow>(stopsInOrder.Count);
         if (start is not null)
         {
             sequence.Add(start);
         }
-        sequence.AddRange(stops.Where(s => s != start && s != finish));
+        sequence.AddRange(stopsInOrder.Where(s => s != start && s != finish));
         if (finish is not null)
         {
             sequence.Add(finish);
         }
 
-        await SetOrderAsync(collectionId, Renumber(sequence), ct);
+        return sequence;
     }
 
     /// <summary>

@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-11
-last_updated: 2026-06-12
+last_updated: 2026-06-14
 project: maps_editor
 # story 1-4 moved to done on 2026-06-12 via bmad-code-review (1 patch applied, 3 deferred, 3 re-surfaced already-tracked, ~15 dismissed; 54/54 Trip tests green)
 # story 1-2 moved to review on 2026-06-12 via bmad-dev-story
@@ -50,6 +50,7 @@ project: maps_editor
 # stories 1-5 and 1-6 moved to review on 2026-06-12 via bmad-dev-story (1-5: 654/654 green; 1-6: 647/647 green; merged to master, post-merge 672/673 with one unrelated Union_ShowsAllUniquePois flake passing in isolation)
 # story 1-7 moved to in-progress on 2026-06-12 via bmad-dev-story (subagent in worktree story/1-7)
 # story 1-7 moved to review on 2026-06-12 via bmad-dev-story (709/710 green; known Union_ShowsAllUniquePois flake passes in isolation; merged to master)
+# stories 1-5/1-6/1-7 moved to done on 2026-06-14 via bmad-code-review (3-layer review; 1 patch applied [TRIP-STARTFINISH-07 orphaned-pin reconcile + 3 new tests], 2 deferred, 11 dismissed; full suite 713/713 green)
 project_key: NOKEY
 tracking_system: file-system
 story_location: "{project-root}/_bmad-output/implementation-artifacts"
@@ -61,9 +62,9 @@ development_status:
   1-2-toggle-trip-view-and-seed-stop-order: done
   1-3-render-ordered-stops-connecting-legs-and-the-stop-panel: done
   1-4-two-way-list-map-selection-sync: done
-  1-5-reorder-stops-by-drag-and-by-keyboard: review
-  1-6-flag-unplaceable-stops: review
-  1-7-designate-start-finish-and-roundtrip: review
+  1-5-reorder-stops-by-drag-and-by-keyboard: done
+  1-6-flag-unplaceable-stops: done
+  1-7-designate-start-finish-and-roundtrip: done
   epic-1-retrospective: optional
 
   # Epic 2: Travel times, dwell & the honest itinerary timeline

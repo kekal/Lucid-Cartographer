@@ -4,7 +4,7 @@ baseline_commit: 979180b38b60d38ab0052b1afe25a15c12239406
 
 # Story 1.6: Flag unplaceable stops
 
-Status: review
+Status: done
 
 ## Story
 
@@ -155,6 +155,10 @@ reorder UI (Story 1.5), or Start/Finish designation (Story 1.7).
         stop-list and the mobile panel paths (mirror existing `Mobile*Tests` pattern). (AC6)
   - [x] Ensure `dotnet build` and `dotnet test` pass with warnings-as-errors and no group-B
         analyzer violations. (AC7)
+
+### Review Findings
+
+_Code review 2026-06-14 (bmad-code-review). No actionable findings against Story 1.6 — the single `StopPlaceability` predicate, placeable-only candidate accessor, contiguous presented numbering, and the dual-surface "Not placeable" treatment reviewed clean. The cross-cutting pin-lifecycle patch (a Finish/Start pin must be released when its POI becomes Unplaceable) interacts with this story's placeability rule but was fixed in `TripOrderingService.ReconcileOrderAsync` and is recorded under Story 1.7's findings._
 
 ## Dev Notes
 

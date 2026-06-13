@@ -219,6 +219,83 @@ public class TripOrderingServiceTests
         order.Values.Should().BeEquivalentTo(new[] { 1, 2, 3 });
     }
 
+    // === Review [Patch] TRIP-STARTFINISH-07: reconcile releases orphaned pins ===
+
+    [Fact]
+    public async Task Reconcile_ReleasesFinishPin_WhenFinishPoiBecomesUnplaceable()
+    {
+        var (factory, service) = await SeededFourAsync();
+        await service.SetFinishAsync(CollectionId, 4); // Finish pinned at Order N=4
+
+        // The Finish POI loses its coordinates — it is now Unplaceable and no
+        // longer a routing Stop. (A real enrichment/edit clearing lat/lon.)
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var poi = await db.Pois.FirstAsync(p => p.Id == 4);
+            poi.Latitude = null;
+            poi.Longitude = null;
+            await db.SaveChangesAsync();
+        }
+
+        await service.ReconcileOrderAsync(CollectionId);
+
+        (await ReadPinsAsync(factory)).Finish.Should().BeNull(
+            "an orphaned Finish pin (POI no longer placeable) is released so IsRoundtrip and the drawn closing leg cannot disagree");
+        var order = await ReadOrderAsync(factory);
+        order[1].Should().Be(1);
+        order[2].Should().Be(2);
+        order[3].Should().Be(3);
+        order[4].Should().Be(0, "the now-unplaceable POI holds OrderIndex 0 (not a stop)");
+    }
+
+    [Fact]
+    public async Task Reconcile_ReleasesStartPin_WhenStartPoiRemovedFromCollection()
+    {
+        var (factory, service) = await SeededFourAsync();
+        await service.SetStartAsync(CollectionId, 1); // Start pinned at Order 1
+
+        // The Start POI is removed from THIS collection (the PoiCollectionItem is
+        // deleted; the Poi row survives, so the FK SetNull on Poi delete never
+        // fires — exactly the gap this patch closes).
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var item = await db.PoiCollectionItems.FirstAsync(ci => ci.PoiId == 1 && ci.PoiCollectionId == CollectionId);
+            db.PoiCollectionItems.Remove(item);
+            await db.SaveChangesAsync();
+        }
+
+        await service.ReconcileOrderAsync(CollectionId);
+
+        (await ReadPinsAsync(factory)).Start.Should().BeNull(
+            "a Start pin whose POI left the collection is released");
+        var order = await ReadOrderAsync(factory);
+        order.Values.Where(v => v > 0).Should().BeEquivalentTo(new[] { 1, 2, 3 },
+            "surviving placeable stops renumber contiguous 1..N");
+    }
+
+    [Fact]
+    public async Task Reconcile_KeepsSurvivingFinishAtLastSlot_AfterAppend()
+    {
+        var (factory, service) = await SeededFourAsync();
+        await service.SetFinishAsync(CollectionId, 4); // Finish at Order 4
+
+        // A new placeable POI is added while Finish is pinned.
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.Pois.Add(new Poi { Id = 5, Name = "P5", Latitude = 50, Longitude = 20, AddedDate = new DateTime(2025, 1, 9) });
+            db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = 5, PoiCollectionId = CollectionId });
+            await db.SaveChangesAsync();
+        }
+
+        await service.ReconcileOrderAsync(CollectionId);
+
+        (await ReadPinsAsync(factory)).Finish.Should().Be(4, "the Finish pin is still valid and retained");
+        var order = await ReadOrderAsync(factory);
+        order[5].Should().Be(4, "the appended stop lands in the interior, NOT past the pinned Finish");
+        order[4].Should().Be(5, "the pinned Finish stays in the last slot (Order N) after an append");
+        order.Values.Should().BeEquivalentTo(new[] { 1, 2, 3, 4, 5 });
+    }
+
     // === Story 1.5: ReorderStopAsync (single writer, pin-aware, no-op safe) ===
 
     // Wraps the InMemory factory and counts SaveChanges commits so the no-op
