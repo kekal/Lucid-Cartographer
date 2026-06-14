@@ -426,6 +426,11 @@ public sealed class TripViewModel(
     /// <summary>
     /// Updates only the placeable count (e.g. as the viewport filter changes)
     /// without re-reading persisted state. Re-evaluates the availability gate.
+    /// Does NOT auto-disable Trip View: the count fed here is the transient
+    /// visible/filtered count (0 mid-load, dropping when a search narrows the
+    /// set), so acting on a dip would persist Trip View off on a reopen or
+    /// search. The genuine "content dropped below the gate" signal is a
+    /// membership change — see <see cref="RefreshAfterMembershipChangeAsync"/>.
     /// </summary>
     public void UpdatePlaceableCount(int placeableCount)
     {
@@ -436,6 +441,42 @@ public sealed class TripViewModel(
 
         PlaceableCount = placeableCount;
         Notify();
+    }
+
+    /// <summary>
+    /// [TRIP-GATE-01] When the active collection falls below the ≥2-placeable
+    /// availability gate (UX-DR1) while Trip View is on, turn Trip View off and
+    /// persist the flag — otherwise the overlays (badges, legs, Start/Finish
+    /// controls) would strand on a sub-trip with the toggle itself gone, leaving
+    /// no way to dismiss them. Returns true when it disabled the view. Caller
+    /// raises <see cref="StateChanged"/>.
+    /// </summary>
+    private async Task<bool> AutoDisableBelowGateAsync()
+    {
+        if (!IsTripViewEnabled || ActiveCollectionId is not { } collectionId || PlaceableCount >= 2)
+        {
+            return false;
+        }
+
+        try
+        {
+            await PersistTripViewEnabledAsync(collectionId, enabled: false);
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to persist Trip View off below the placeable gate for collection {CollectionId}", collectionId);
+            // Fall through: still drop the in-memory overlays so nothing is
+            // stranded; the next LoadAsync re-applies the gate against the flag.
+        }
+
+        IsTripViewEnabled = false;
+        ClearProjections();
+        Announcement = UiStrings.TripViewAutoDisabledAnnouncement;
+        return true;
     }
 
     /// <summary>
@@ -509,6 +550,15 @@ public sealed class TripViewModel(
         PlaceableCount = placeableCount;
 
         if (ActiveCollectionId is not { } collectionId || !IsTripViewEnabled)
+        {
+            Notify();
+            return;
+        }
+
+        // [TRIP-GATE-01] A removal / un-enrichment that drops below the ≥2 gate
+        // auto-disables Trip View rather than reconciling a sub-trip the user
+        // can no longer toggle off.
+        if (await AutoDisableBelowGateAsync())
         {
             Notify();
             return;

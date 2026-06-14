@@ -64,6 +64,11 @@ public static class UiStrings
     public const string TripViewToggleAria = "Toggle Trip View — order the visible places into a trip";
     public const string TripViewEnabledAnnouncement = "Trip View on. Places are ordered as a trip.";
     public const string TripViewDisabledAnnouncement = "Trip View off. Showing the plain collection.";
+    // [TRIP-GATE-01] Announced when Trip View turns itself off because the
+    // collection dropped below the two-placeable-stop minimum (e.g. a stop was
+    // removed or lost its coordinates). Honest, factual — no hype, never silent.
+    public const string TripViewAutoDisabledAnnouncement =
+        "Trip View off — fewer than two placeable stops remain.";
     // {0} = stop number; used as the order badge's screen-reader label.
     public const string StopOrderBadgeAria = "Stop {0}";
 

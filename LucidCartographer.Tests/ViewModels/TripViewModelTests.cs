@@ -163,6 +163,80 @@ public class TripViewModelTests
         vm.IsToggleAvailable.Should().BeFalse();
     }
 
+    // === [TRIP-GATE-01] Auto-disable below the ≥2 placeable gate ===
+    // Only the membership-change signal (real add/remove, fired after the
+    // filtered set is refreshed) auto-disables — never the transient
+    // visible/filtered count fed to LoadAsync/UpdatePlaceableCount.
+
+    [Fact]
+    public async Task RefreshAfterMembershipChange_AutoDisables_WhenRemovalDropsBelowGate()
+    {
+        var factory = SeedFactory(placeable: 2);
+        await using var vm = CreateVm(factory);
+        await vm.LoadAsync(CollectionId, 2);
+        await vm.ToggleAsync(); // on, seeds 1..2
+
+        // Remove a placeable POI, leaving a single stop.
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var item = await db.PoiCollectionItems.FirstAsync(ci => ci.PoiId == 2 && ci.PoiCollectionId == CollectionId);
+            db.PoiCollectionItems.Remove(item);
+            await db.SaveChangesAsync();
+        }
+
+        await vm.RefreshAfterMembershipChangeAsync(1);
+
+        vm.IsTripViewEnabled.Should().BeFalse("a removal below the ≥2 gate auto-disables Trip View");
+        vm.StopOrders.Should().BeEmpty();
+        vm.Announcement.Should().Be(UiStrings.TripViewAutoDisabledAnnouncement);
+
+        await using var db2 = await factory.CreateDbContextAsync();
+        (await db2.PoiCollections.FirstAsync(c => c.Id == CollectionId)).TripViewEnabled.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RefreshAfterMembershipChange_StaysEnabled_WhenRemovalLeavesTwoPlaceable()
+    {
+        var factory = SeedFactory(placeable: 3);
+        await using var vm = CreateVm(factory);
+        await vm.LoadAsync(CollectionId, 3);
+        await vm.ToggleAsync(); // on, seeds 1..3
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var item = await db.PoiCollectionItems.FirstAsync(ci => ci.PoiId == 3 && ci.PoiCollectionId == CollectionId);
+            db.PoiCollectionItems.Remove(item);
+            await db.SaveChangesAsync();
+        }
+
+        await vm.RefreshAfterMembershipChangeAsync(2);
+
+        vm.IsTripViewEnabled.Should().BeTrue("two placeable stops still clear the ≥2 gate");
+        vm.StopOrders.Should().HaveCount(2, "the order re-compacts to the remaining stops");
+    }
+
+    [Fact]
+    public async Task Load_DoesNotPersistOff_OnTransientLowCount_WhenPersistedOn()
+    {
+        // Regression guard: a reopen can momentarily report a low placeable
+        // count before the POIs finish loading. LoadAsync must restore the
+        // persisted-on state from the order it finds — never auto-disable on
+        // that transient count (which would persist Trip View off across reopen).
+        var factory = SeedFactory(placeable: 2, tripViewEnabled: true);
+        var ordering = new TripOrderingService(factory, new SqliteWriteLock(), NullLogger<TripOrderingService>.Instance);
+        await ordering.SeedOrderAsync(CollectionId);
+
+        await using var vm = CreateVm(factory);
+        await vm.LoadAsync(CollectionId, 0); // transient: count not yet populated
+
+        vm.IsTripViewEnabled.Should().BeTrue("a transient low count must not drop the persisted-on state");
+        vm.StopOrders.Should().HaveCount(2);
+
+        await using var db = await factory.CreateDbContextAsync();
+        (await db.PoiCollections.FirstAsync(c => c.Id == CollectionId)).TripViewEnabled
+            .Should().BeTrue("Trip View off is never persisted from a load-time transient count");
+    }
+
     // === Story 1.3: OrderedLegs / OrderedStops projections ===
 
     [Fact]
