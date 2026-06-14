@@ -314,6 +314,50 @@ public class TravelTimeComputationBackgroundServiceTests
         measured.DurationSeconds.Should().Be(999);
     }
 
+    // Story 4.1 (TRIP-OSRM-01, AC3): end-to-end degradation with the REAL OSRM
+    // provider. When OSRM returns code "NoRoute" the provider throws, and the loop's
+    // existing TRIP-DEGRADE-01 catch writes an Estimated row stamped
+    // Source = EstimatedFallback (never blank, never errors). Confirms the AC3 wiring
+    // through the production degradation branch — not a generic throwing stub.
+    private sealed class OsrmStubHandler(System.Net.HttpStatusCode status, string body) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(status)
+            {
+                Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
+            });
+    }
+
+    private sealed class OsrmStubFactory(HttpMessageHandler handler) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => new(handler);
+    }
+
+    [Fact]
+    public async Task ProcessOnce_OsrmProviderNoRoute_DegradesToEstimatedFallback()
+    {
+        var factory = SeedDriveOpenPath(stops: 2);
+        var osrmProvider = new OsrmTravelTimeProvider(
+            new OsrmStubFactory(new OsrmStubHandler(
+                System.Net.HttpStatusCode.OK, "{\"code\":\"NoRoute\",\"routes\":[]}")),
+            Options.Create(new OsrmOptions { DriveBaseUrl = "http://osrm-car:5000" }),
+            Options.Create(new TravelTimeOptions { DriveSpeedMetersPerSecond = 20.0 }),
+            NullLogger<OsrmTravelTimeProvider>.Instance);
+
+        var service = BuildService(factory, new SqliteWriteLock(),
+            provider: osrmProvider, pipelines: NoRetryPipelines());
+
+        var act = async () => await service.ProcessOnceAsync(CancellationToken.None);
+        await act.Should().NotThrowAsync("a no-route leg degrades, never errors out of the loop");
+
+        await using var db = await factory.CreateDbContextAsync();
+        var row = await db.RouteSegments.SingleAsync();
+        row.Fidelity.Should().Be(Fidelity.Estimated, "the OSRM no-route leg falls back to a haversine estimate");
+        row.Source.Should().Be(TravelTimeSource.EstimatedFallback);
+        row.DurationSeconds.Should().BeGreaterThan(0, "never blank");
+        row.DistanceMeters.Should().BeGreaterThan(0);
+    }
+
     // TRIP-DEGRADE-01 (AC5) / TRIP-MANUAL-01 (Story 2.2 AC6): drive the
     // no-downgrade guard DIRECTLY. The production loop never re-queues an existing
     // key, so this is the only path that actually enters the guard branch — it is

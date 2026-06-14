@@ -67,10 +67,34 @@ public static class TripServicesExtensions
     {
         services.AddTripServices();
 
-        // Exactly one active provider — the haversine Mock by default. The hosted
-        // service does the off-circuit compute and is the only consumer of both the
-        // provider and the "travel-time" resilience pipeline.
-        services.AddSingleton<ITravelTimeProvider, MockTravelTimeProvider>();
+        // TRIP-OSRM-01 (Story 4.1): exactly one active provider, selected by config.
+        // The DEFAULT (missing / "Mock" / anything unrecognized) stays the haversine
+        // Mock (NFR9 — OSRM is opt-in, never the default). Only "Osrm" swaps in the
+        // self-hosted OSRM provider. The hosted service is the sole consumer of both
+        // the provider and the "travel-time" resilience pipeline.
+        var providerId = configuration["TravelTime:Provider"];
+        if (string.Equals(providerId, "Osrm", StringComparison.OrdinalIgnoreCase))
+        {
+            // Bind the per-profile OSRM options and register a named IHttpClientFactory
+            // client "osrm" (timeout from options, a LucidCartographer User-Agent),
+            // mirroring the PoiServicesExtensions named-client pattern. NFR7: OSRM is
+            // self-hosted, so these calls never leave the deployment — no egress guard.
+            services.Configure<OsrmOptions>(configuration.GetSection("TravelTime:Osrm"));
+
+            var timeoutSeconds = configuration.GetValue<int?>("TravelTime:Osrm:RequestTimeoutSeconds") ?? 10;
+            services.AddHttpClient(OsrmTravelTimeProvider.HttpClientName, c =>
+            {
+                c.Timeout = TimeSpan.FromSeconds(Math.Max(1, timeoutSeconds));
+                c.DefaultRequestHeaders.UserAgent.ParseAdd("LucidCartographer/1.0 (+osrm-routing)");
+            });
+
+            services.AddSingleton<ITravelTimeProvider, OsrmTravelTimeProvider>();
+        }
+        else
+        {
+            services.AddSingleton<ITravelTimeProvider, MockTravelTimeProvider>();
+        }
+
         services.AddHostedService<TravelTimeComputationBackgroundService>();
         services.Configure<TravelTimeOptions>(configuration.GetSection("TravelTime"));
         return services;

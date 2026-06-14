@@ -25,6 +25,13 @@ public static class TravelTimeSource
     public const string Manual = "Manual";
 
     /// <summary>
+    /// TRIP-OSRM-01 (Story 4.1): the optional self-hosted OSRM provider measured
+    /// this leg from the real road network (<see cref="Data.Entities.Fidelity.Measured"/>,
+    /// with encoded road geometry). Opt-in per deployment — never the default.
+    /// </summary>
+    public const string Osrm = "OSRM";
+
+    /// <summary>
     /// A degraded leg: the active provider failed and the compute service
     /// substituted a haversine <see cref="Data.Entities.Fidelity.Estimated"/> value.
     /// </summary>

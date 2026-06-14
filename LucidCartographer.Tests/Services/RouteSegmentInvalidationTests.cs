@@ -126,4 +126,39 @@ public class RouteSegmentInvalidationTests
         var deleted = await Service(factory).InvalidateRecomputableForCollectionAsync(CollectionId, CancellationToken.None);
         deleted.Should().Be(0);
     }
+
+    // Story 4.1 (TRIP-OSRM-01, AC7 / Epic-3 retro A6): an EstimatedFallback row is
+    // recompute-eligible — it carries Fidelity.Estimated, so the existing
+    // (Fidelity != Manual && != Measured) predicate already includes it. This is the
+    // load-bearing assertion that, once OSRM is enabled, a degraded straight-line leg
+    // is cleared and refilled (as Measured) by the next compute pass, while an
+    // already-Measured OSRM row is preserved (never silently downgraded).
+    [Fact]
+    public async Task InvalidateRecomputable_EstimatedFallbackRow_IsEligible_MeasuredPreserved()
+    {
+        var factory = Seed();
+        await AddAsync(factory,
+            Row(1, 2, Fidelity.Estimated),    // an EstimatedFallback leg (source stamped below) — DELETE
+            Row(2, 3, Fidelity.Measured));    // an existing OSRM Measured leg — KEEP
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var fallback = await db.RouteSegments.FirstAsync(r => r.FromPoiId == 1 && r.ToPoiId == 2);
+            fallback.Source = TravelTimeSource.EstimatedFallback;
+            var measured = await db.RouteSegments.FirstAsync(r => r.FromPoiId == 2 && r.ToPoiId == 3);
+            measured.Source = TravelTimeSource.Osrm;
+            await db.SaveChangesAsync();
+        }
+
+        var deleted = await Service(factory).InvalidateRecomputableForCollectionAsync(CollectionId, CancellationToken.None);
+
+        deleted.Should().Be(1, "the EstimatedFallback row is recompute-eligible");
+
+        await using var verify = await factory.CreateDbContextAsync();
+        var remaining = await verify.RouteSegments.AsNoTracking().ToListAsync();
+        remaining.Should().ContainSingle()
+            .Which.Should().Match<RouteSegment>(r =>
+                r.Fidelity == Fidelity.Measured && r.Source == TravelTimeSource.Osrm,
+                "the Measured OSRM row survives recompute");
+    }
 }

@@ -36,6 +36,9 @@
 
 generated: 2026-06-11
 last_updated: 2026-06-14
+# epic-4 activated (backlog → in-progress) and story 4-1 created via bmad-create-story on 2026-06-14 (status backlog → ready-for-dev); manual cycle (no tmux — Windows). Story 4.1 = OsrmTravelTimeProvider on the existing per-leg ITravelTimeProvider seam (/route per leg, encoded polyline geometry, Measured fidelity, car/foot/bike profiles), config-selected (TravelTime:Provider Mock|Osrm, default Mock), Any/Air never routed, no-route THROWS into the existing TRIP-DEGRADE-01 fallback (A6 real no-route signal); profile-gated docker-compose sidecar (opt-in). NEW prod files: OsrmTravelTimeProvider + OsrmOptions. Decisions flagged: encoded polyline (not geojson) for GeometryPolyline; /table OUT of scope (per-leg /route satisfies FR-6, matrix is cache-built). No EF migration.
+# story 4-1 moved to review on 2026-06-14 via bmad-dev-story (OsrmTravelTimeProvider + OsrmOptions + OsrmRouteUnavailableException + TravelTimeSource.Osrm; config switch in AddTripServices(IConfiguration) only [default Mock], named "osrm" HttpClient; appsettings Provider/Osrm block; profile-gated OSRM docker-compose sidecars [pinned v6.0.0, off by default] + docs/osrm.md; AC7 EstimatedFallback recompute-eligibility confirmed+tested; A6 scope-invalidation + /table deferred. No EF migration, no VM-ctor change. 758 fast + 19 Trip integration green)
+# story 4-1 moved to done on 2026-06-14 via fresh-context adversarial review (0 CRIT/0 HIGH/2 MED/LOW). MED-1 FIXED: a code:"Ok" OSRM route with null/empty geometry was silently persisted as Measured-with-no-polyline (AC1 violation; Measured never re-invalidates → would starve Story 4.2) — MapResponse now throws on blank geometry → leg degrades to Estimated, +regression test. MED-2 accepted (timeout option mirrored by same-key registration read, no divergence). File List == git. Full suite 905/905 green incl. Trip integration. A9 (directional cache) honored: each A→B is its own /route, never mirrored.
 # epic-3 activated (backlog → in-progress) and story 3-1 created via bmad-create-story on 2026-06-14 (status backlog → ready-for-dev); manual cycle (no tmux — Windows). Two NEW files planned: DistanceMatrixService + SortTravelingSalesmanAsync on TripOrderingService (NN+2-opt, D5/D11)
 # story 3-1 moved to review on 2026-06-14 via bmad-dev-story (TSP-Sort: new DistanceMatrixService [D11 on-demand N×N over shared RouteSegment cache, estimate-fill, no cache writes] + pure TspSolver [NN+2-opt, full-cost eval for asymmetric directional matrix] on TripOrderingService.SortTravelingSalesmanAsync via the single OrderIndex write path; pins honored, never-worse guard, button on both surfaces. DistanceMatrixService registered in parameterless AddTripServices to keep the integration host wiring TripOrderingService; VM ctor unchanged. Full suite 867/867 green incl. Trip integration)
 # story 3-1 moved to done on 2026-06-14 via bmad-story-automator-review (adversarial fresh-context: 0 CRITICAL/0 HIGH/1 MED/2 LOW; MED auto-fixed [no-op sort no longer announces a reorder that didn't happen — matches MoveStopToAsync no-op silence, +1 guard test], 2 LOW accepted [position-0 anchor never-worse; announcement-not-cleared pre-existing pattern]; File List == git; full suite 869/869 green incl. Trip integration)
@@ -108,7 +111,7 @@ development_status:
   epic-3-retrospective: done
 
   # Epic 4: Measured road routing via OSRM (Phase 2, optional)
-  epic-4: backlog
-  4-1-osrm-measured-travel-time-provider: backlog
+  epic-4: in-progress
+  4-1-osrm-measured-travel-time-provider: done
   4-2-draw-road-shaped-legs-and-osm-attribution: backlog
   epic-4-retrospective: optional

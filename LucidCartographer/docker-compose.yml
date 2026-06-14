@@ -41,9 +41,61 @@ services:
       - Auth__TrustedNetworks__0=172.16.0.0/12
       - Auth__TrustedNetworks__1=10.0.0.0/8
       - Auth__TrustedNetworks__2=192.168.0.0/16
+      # --- OPTIONAL: OSRM measured travel times (Story 4.1, TRIP-OSRM-01) ---
+      # Uncomment to flip the active provider to the self-hosted OSRM sidecars
+      # below. Each ground mode talks to its own per-profile backend (Drive->car,
+      # Walk->foot, Cycle->bike); a mode left unset degrades to a straight-line
+      # estimate. Start the sidecars with: docker compose --profile osrm up
+      # See docs/osrm.md for the one-time extract-prep steps. NFR7: OSRM is
+      # self-hosted, so coordinates never leave the deployment (no egress).
+      # NFR8: enabling OSRM brings the OSM/ODbL attribution obligation (Story 4.2
+      # renders it).
+      # - TravelTime__Provider=Osrm
+      # - TravelTime__Osrm__DriveBaseUrl=http://osrm-car:5000
+      # - TravelTime__Osrm__WalkBaseUrl=http://osrm-foot:5000
+      # - TravelTime__Osrm__CycleBaseUrl=http://osrm-bike:5000
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  # --- OPTIONAL OSRM sidecars (Story 4.1, TRIP-OSRM-01) ---------------------
+  # Gated behind the "osrm" compose profile, so the default `docker compose up`
+  # (the Mock deployment) starts NONE of these. Enable with:
+  #   docker compose --profile osrm up
+  # One container per profile the operator wants. Each runs osrm-routed (MLD
+  # algorithm) against a region extract mounted READ-ONLY, on a distinct host
+  # port. Image is VERSION-PINNED (not :latest). Prepare the .osrm files once per
+  # profile (osrm-extract/-partition/-customize) per docs/osrm.md. The extracts
+  # live under ./appdata/osrm/<profile>/ — adjust paths/region to your deployment.
+  osrm-car:
+    image: ghcr.io/project-osrm/osrm-backend:v6.0.0
+    profiles: ["osrm"]
+    command: osrm-routed --algorithm mld /data/region.osrm
+    volumes:
+      - ./appdata/osrm/car:/data:ro
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+
+  osrm-foot:
+    image: ghcr.io/project-osrm/osrm-backend:v6.0.0
+    profiles: ["osrm"]
+    command: osrm-routed --algorithm mld /data/region.osrm
+    volumes:
+      - ./appdata/osrm/foot:/data:ro
+    ports:
+      - "5001:5000"
+    restart: unless-stopped
+
+  osrm-bike:
+    image: ghcr.io/project-osrm/osrm-backend:v6.0.0
+    profiles: ["osrm"]
+    command: osrm-routed --algorithm mld /data/region.osrm
+    volumes:
+      - ./appdata/osrm/bike:/data:ro
+    ports:
+      - "5002:5000"
+    restart: unless-stopped
