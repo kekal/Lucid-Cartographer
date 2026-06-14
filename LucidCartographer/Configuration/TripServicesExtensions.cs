@@ -28,6 +28,14 @@ public static class TripServicesExtensions
         services.TryAddSingletonWriteLock();
         services.AddScoped<ITripOrderingService, TripOrderingService>();
 
+        // TRIP-INVALIDATE-01 (Story 2.4): the cache-invalidation service is VM- and
+        // edit-path facing (no provider / Polly / hosted dependency), so it lives in
+        // this parameterless overload — the integration host that composes services
+        // by hand can resolve it, and the production overload inherits it. It deletes
+        // stale RouteSegment rows under the shared SqliteWriteLock; the existing
+        // background compute refills them on the next trigger.
+        services.AddScoped<IRouteSegmentInvalidationService, RouteSegmentInvalidationService>();
+
         // Singletons shared between the VM and the hosted compute loop. Safe to
         // register without the provider/hosted service: the VM only signals the
         // trigger and reads the progress count — nothing here resolves the Polly

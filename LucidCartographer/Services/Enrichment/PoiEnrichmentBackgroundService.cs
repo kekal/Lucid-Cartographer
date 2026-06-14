@@ -4,7 +4,9 @@ using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
 using LucidCartographer.Services.Import;
 using LucidCartographer.Services.Operations;
+using LucidCartographer.Services.Trip;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.Playwright;
 using Polly;
@@ -39,6 +41,10 @@ public class PoiEnrichmentBackgroundService : BackgroundService
     private readonly EnrichmentTrigger _trigger;
     private readonly DedupTrigger _dedupTrigger;
     private readonly SqliteWriteLock _writeLock;
+    // TRIP-INVALIDATE-01 (Story 2.4): the invalidation service is Scoped, so this
+    // singleton hosted worker resolves it per-write from a fresh scope rather than
+    // capturing it in the constructor.
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<PoiEnrichmentBackgroundService> _logger;
     private readonly ResiliencePipeline _pipeline;
     private readonly EnrichmentOptions _options;
@@ -58,6 +64,7 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         EnrichmentTrigger trigger,
         DedupTrigger dedupTrigger,
         SqliteWriteLock writeLock,
+        IServiceScopeFactory scopeFactory,
         ResiliencePipelineProvider<string> pipelineProvider,
         IOptions<EnrichmentOptions> options,
         ILogger<PoiEnrichmentBackgroundService> logger)
@@ -67,6 +74,7 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         _trigger = trigger;
         _dedupTrigger = dedupTrigger;
         _writeLock = writeLock;
+        _scopeFactory = scopeFactory;
         _logger = logger;
         _pipeline = pipelineProvider.GetPipeline("enrichment");
         _options = options.Value;
@@ -445,11 +453,17 @@ public class PoiEnrichmentBackgroundService : BackgroundService
 
             // Enrichment's !3d!4d coords are always more authoritative
             // than whatever we had.
+            // TRIP-INVALIDATE-01 (Story 2.4): capture the pre-write coords so cached
+            // legs are invalidated only when enrichment ACTUALLY moves the point
+            // (the common "an unplaceable stop got coordinates" / "pin moved" path).
+            var oldLatitude = poi.Latitude;
+            var oldLongitude = poi.Longitude;
             if (details is { Latitude: not null, Longitude: not null })
             {
                 poi.Latitude = details.Latitude.Value;
                 poi.Longitude = details.Longitude.Value;
             }
+            var coordsChanged = oldLatitude != poi.Latitude || oldLongitude != poi.Longitude;
 
             // Upgrade to a proper /maps/place/ URL when the enricher found one.
             if (!string.IsNullOrEmpty(details.GoogleMapsUrl)
@@ -482,6 +496,16 @@ public class PoiEnrichmentBackgroundService : BackgroundService
                 hasUsefulData ? "" : " — needs manual URL");
 
             await SaveChangesWithWriteLockAsync(db, ct);
+
+            // TRIP-INVALIDATE-01 (Story 2.4): after the coord write lands, drop the
+            // POI's stale non-Manual cached legs so the compute service refills them.
+            // A newly-placeable stop has no prior rows ⇒ this is a harmless no-op.
+            if (coordsChanged)
+            {
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var invalidation = scope.ServiceProvider.GetRequiredService<IRouteSegmentInvalidationService>();
+                await invalidation.InvalidateForPoiAsync(poiId, ct);
+            }
 
             var merged = await PoiPostEnrichmentDedup.MergeIfDuplicateAsync(db, poi, ct, _writeLock.Gate);
             if (merged)

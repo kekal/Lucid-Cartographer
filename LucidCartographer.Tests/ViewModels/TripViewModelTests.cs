@@ -43,7 +43,7 @@ public class TripViewModelTests
     {
         var writeLock = new SqliteWriteLock();
         var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
-        return new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), NullLogger<TripViewModel>.Instance);
+        return new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), TestDbHelper.CreateInvalidationService(factory), NullLogger<TripViewModel>.Instance);
     }
 
     [Fact]

@@ -1,11 +1,15 @@
 using System.Text.RegularExpressions;
 using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
+using LucidCartographer.Services.Trip;
 using Microsoft.EntityFrameworkCore;
 
 namespace LucidCartographer.Services;
 
-public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiService> logger) : IPoiService
+public class PoiService(
+    IDbContextFactory<AppDbContext> factory,
+    IRouteSegmentInvalidationService routeSegmentInvalidation,
+    ILogger<PoiService> logger) : IPoiService
 {
     // [REVIEW-5] Regex matches only #RRGGBB (7 chars). MaxLength on entity aligned to 7.
     private static readonly Regex HexColorRegex = new("^#[0-9a-fA-F]{6}$", RegexOptions.Compiled);
@@ -116,6 +120,12 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
             throw new InvalidOperationException($"POI {poi.Id} not found");
         }
 
+        // TRIP-INVALIDATE-01 (Story 2.4): capture the pre-edit coordinates so we only
+        // invalidate cached legs when they ACTUALLY change — an unchanged save must
+        // not churn the cache.
+        var oldLatitude = existing.Latitude;
+        var oldLongitude = existing.Longitude;
+
         // Apply all incoming values; Version and AddedDate are intentionally excluded.
         existing.Name = poi.Name;
         existing.Latitude = poi.Latitude;
@@ -134,6 +144,13 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
         existing.Region = poi.Region;
 
         await db.SaveChangesAsync(cancellationToken);
+
+        // TRIP-INVALIDATE-01 (Story 2.4): coordinates drive every cached leg touching
+        // this POI — invalidate them so they recompute, but only on a real change.
+        if (oldLatitude != existing.Latitude || oldLongitude != existing.Longitude)
+        {
+            await routeSegmentInvalidation.InvalidateForPoiAsync(poi.Id, cancellationToken);
+        }
     }
 
     /// <summary>
@@ -519,6 +536,10 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
             logger.LogWarning("ReplacePoiGoogleMapsUrlAsync: POI {PoiId} not found", poiId);
             return;
         }
+        // TRIP-INVALIDATE-01 (Story 2.4): capture coords before clearing so a
+        // previously-placed POI's stale cached legs are invalidated below.
+        var hadCoords = poi.Latitude is not null || poi.Longitude is not null;
+
         // Drop the stale coords so the BG service treats this as a fresh
         // place — otherwise the wrong (lat,lon) would still be on the row
         // until enrichment overwrote it.
@@ -533,6 +554,13 @@ public class PoiService(IDbContextFactory<AppDbContext> factory, ILogger<PoiServ
         // Keep the current photo until enrichment from the new URL succeeds —
         // BackfillImageAsync replaces it in place once it has the new bytes.
         await db.SaveChangesAsync(cancellationToken);
+
+        // TRIP-INVALIDATE-01 (Story 2.4): clearing coordinates is a real change —
+        // the POI's cached non-Manual legs no longer reflect a placed point.
+        if (hadCoords)
+        {
+            await routeSegmentInvalidation.InvalidateForPoiAsync(poiId, cancellationToken);
+        }
     }
 
     public async Task<int> MarkCollectionForReEnrichmentAsync(int collectionId, CancellationToken cancellationToken = default)

@@ -43,6 +43,7 @@ public class TripViewModelTravelTimeTests
         var vm = new TripViewModel(
             ordering, factory, writeLock,
             new TravelTimeTrigger(), new TravelTimeProgressService(),
+            TestDbHelper.CreateInvalidationService(factory),
             NullLogger<TripViewModel>.Instance);
         await vm.LoadAsync(CollectionId, placeable);
         await vm.ToggleAsync();

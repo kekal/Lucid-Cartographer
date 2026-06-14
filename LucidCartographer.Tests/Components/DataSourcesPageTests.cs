@@ -22,6 +22,8 @@ public class DataSourcesPageTests : BunitTestContext
     {
         _factory = TestDbHelper.CreateFactory();
         Services.AddSingleton(_factory);
+        Services.AddSingleton<SqliteWriteLock>();
+        Services.AddScoped<LucidCartographer.Services.Trip.IRouteSegmentInvalidationService, LucidCartographer.Services.Trip.RouteSegmentInvalidationService>();
         Services.AddScoped<IPoiService, PoiService>();
         Services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         Services.AddScoped<IFileImporter, GpxImporter>();

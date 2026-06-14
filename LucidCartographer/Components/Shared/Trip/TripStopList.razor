@@ -39,6 +39,19 @@
                 @TravelTimeFormatting.Duration(Vm.TotalTravelTimeSeconds)
             </span>
         </div>
+
+        @* TRIP-RECOMPUTE-01 (Story 2.4, AC4): explicit on-demand recompute. Kept in
+           the header area, NOT inside the clickable stop rows (a wide element over
+           the row centre breaks Playwright row selection — 2.2 regression). *@
+        <div class="px-3 py-1.5 border-b border-surface-container-high flex-shrink-0">
+            <button type="button"
+                    class="text-xs text-primary hover:underline disabled:opacity-50 disabled:no-underline"
+                    aria-label="@UiStrings.TripRecomputeAria"
+                    disabled="@Vm.IsAnyLegComputing"
+                    @onclick="Vm.RecomputeTravelTimesAsync">
+                @UiStrings.TripRecomputeLabel
+            </button>
+        </div>
     }
 
     @* TRIP-TRAVELTIME-01 (AC6): announce the computing state while legs await the

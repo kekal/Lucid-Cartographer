@@ -43,6 +43,8 @@ last_updated: 2026-06-14
 # story 2-2 moved to done on 2026-06-14 via bmad-story-automator-review (adversarial review: 2 CRITICAL/1 MED/2 LOW; fixed AC4 honesty bug [computed Placeholder leg showed a real time+total] + strengthened guard tests, capped manual-minutes overflow, removed dead constant, fixed a self-introduced selection regression; 608 unit/component + 19 Trip integration green)
 # story 2-3 moved to review on 2026-06-14 via bmad-dev-story (provider-exception → haversine Estimated fallback, approximate note both surfaces, Manual/Measured no-downgrade guard, Any/Air Placeholder untouched; 625 unit/component + 19 Trip integration green)
 # story 2-3 moved to done on 2026-06-14 via bmad-story-automator-review (adversarial review: 0 CRITICAL/0 HIGH/0 MED/3 LOW; made the Measured/Manual no-downgrade guard genuinely testable + direct Theory, 2 LOW test-fidelity notes accepted; 627 unit/component green)
+# story 2-4 moved to review on 2026-06-14 via bmad-dev-story (RouteSegmentInvalidationService + coord-change invalidation at PoiService/enrichment, explicit Recompute action both surfaces, Estimated→Measured upgrade mechanism, no-op-reorder preserved; no migration; 641 unit/component + 19 Trip integration green)
+# story 2-4 moved to done on 2026-06-14 via bmad-story-automator-review (adversarial review: 0 CRITICAL/0 HIGH/0 MED/2 LOW accepted; enrichment write-lock re-entrancy + cross-collection shared-row seams explicitly cleared; 641 unit/component green)
 project: maps_editor
 # story 1-4 moved to done on 2026-06-12 via bmad-code-review (1 patch applied, 3 deferred, 3 re-surfaced already-tracked, ~15 dismissed; 54/54 Trip tests green)
 # story 1-2 moved to review on 2026-06-12 via bmad-dev-story
@@ -80,7 +82,7 @@ development_status:
   2-1-per-leg-travel-time-from-the-provider-fidelity-badged: done
   2-2-select-travel-mode-and-enter-a-manual-any-air-time: done
   2-3-graceful-degradation-to-straight-line-estimates: done
-  2-4-cache-invalidation-recompute-estimated-measured-upgrade: backlog
+  2-4-cache-invalidation-recompute-estimated-measured-upgrade: done
   2-5-set-dwell-time-per-stop: backlog
   2-6-compute-the-honest-itinerary-timeline: backlog
   epic-2-retrospective: optional

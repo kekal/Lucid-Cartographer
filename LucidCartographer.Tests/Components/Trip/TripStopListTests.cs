@@ -51,7 +51,7 @@ public class TripStopListTests : BunitTestContext
         }
         var writeLock = new SqliteWriteLock();
         var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
-        var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), NullLogger<TripViewModel>.Instance);
+        var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), TestDbHelper.CreateInvalidationService(factory), NullLogger<TripViewModel>.Instance);
         await vm.LoadAsync(CollectionId, placeable);
         await vm.ToggleAsync(); // seed + enable so OrderedStops is populated
         return vm;
@@ -93,7 +93,7 @@ public class TripStopListTests : BunitTestContext
         var factory = SeedFactory(placeable: 2);
         var writeLock = new SqliteWriteLock();
         var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
-        await using var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), NullLogger<TripViewModel>.Instance);
+        await using var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), TestDbHelper.CreateInvalidationService(factory), NullLogger<TripViewModel>.Instance);
         await vm.LoadAsync(CollectionId, 2);
 
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
@@ -546,7 +546,7 @@ public class TripStopListTests : BunitTestContext
 
         var writeLock = new SqliteWriteLock();
         var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
-        var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), NullLogger<TripViewModel>.Instance);
+        var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), TestDbHelper.CreateInvalidationService(factory), NullLogger<TripViewModel>.Instance);
         await vm.LoadAsync(CollectionId, 2);
         await vm.ToggleAsync();
         return vm;
@@ -648,7 +648,7 @@ public class TripStopListTests : BunitTestContext
         }
         var writeLock = new SqliteWriteLock();
         var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
-        var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), NullLogger<TripViewModel>.Instance);
+        var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), TestDbHelper.CreateInvalidationService(factory), NullLogger<TripViewModel>.Instance);
         await vm.LoadAsync(CollectionId, placeable);
         await vm.ToggleAsync();
         return vm;
@@ -750,5 +750,44 @@ public class TripStopListTests : BunitTestContext
 
         var aria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripManualMinutesAria, "P1");
         cut.Find($"input[aria-label=\"{aria}\"]").GetAttribute("value").Should().Be("75");
+    }
+
+    // === Story 2.4 (TRIP-RECOMPUTE-01, AC4): the Recompute button, both surfaces ===
+
+    [Theory]
+    [InlineData(typeof(TripStopList))]
+    [InlineData(typeof(MobileTripPanel))]
+    public async Task Recompute_Button_Renders_UiStringsLabelled_OutsideRows(Type surface)
+    {
+        await using var vm = await EnabledVmAsync(placeable: 2);
+
+        var cut = surface == typeof(TripStopList)
+            ? (IRenderedFragment)RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm))
+            : RenderComponent<MobileTripPanel>(p => p.Add(x => x.Vm, vm));
+
+        var button = cut.Find($"button[aria-label=\"{UiStrings.TripRecomputeAria}\"]");
+        button.TextContent.Trim().Should().Be(UiStrings.TripRecomputeLabel);
+        // Placed outside the clickable stop rows so it never breaks row selection.
+        button.Closest("li").Should().BeNull("the Recompute button must not sit inside a stop row (2.2 regression)");
+    }
+
+    [Theory]
+    [InlineData(typeof(TripStopList))]
+    [InlineData(typeof(MobileTripPanel))]
+    public async Task Recompute_Button_Click_InvokesVm_AndKeepsRowSelectionWorking(Type surface)
+    {
+        await using var vm = await EnabledVmAsync(placeable: 2);
+
+        var cut = surface == typeof(TripStopList)
+            ? (IRenderedFragment)RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm))
+            : RenderComponent<MobileTripPanel>(p => p.Add(x => x.Vm, vm));
+
+        // Clicking Recompute invokes the VM (no exception; the VM stays usable).
+        cut.Find($"button[aria-label=\"{UiStrings.TripRecomputeAria}\"]").Click();
+
+        // Row selection still works after the recompute click — the button did not
+        // capture the row's click target.
+        vm.SelectStop(1, TripSelectionSource.List);
+        vm.SelectedStopPoiId.Should().Be(1, "selecting a stop still works alongside the Recompute control");
     }
 }

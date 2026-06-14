@@ -17,7 +17,7 @@ public class PoiServiceTests
         await using var db = await factory.CreateDbContextAsync();
         seed(db);
         await db.SaveChangesAsync();
-        var service = new PoiService(factory, NullLogger);
+        var service = new PoiService(factory, TestDbHelper.CreateInvalidationService(factory), NullLogger);
         return (service, factory);
     }
 

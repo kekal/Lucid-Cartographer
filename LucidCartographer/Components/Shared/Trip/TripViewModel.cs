@@ -28,6 +28,7 @@ public sealed class TripViewModel(
     SqliteWriteLock writeLock,
     TravelTimeTrigger travelTimeTrigger,
     TravelTimeProgressService travelTimeProgress,
+    IRouteSegmentInvalidationService routeSegmentInvalidation,
     ILogger<TripViewModel> logger) : IAsyncDisposable
 {
     private static readonly IReadOnlyDictionary<int, int> NoStops =
@@ -1171,6 +1172,47 @@ public sealed class TripViewModel(
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to clear manual leg time {From}->{To} for collection {CollectionId}", fromPoiId, toPoiId, collectionId);
+            return;
+        }
+
+        Notify();
+    }
+
+    /// <summary>
+    /// TRIP-RECOMPUTE-01 (Story 2.4, AC4/5/6): user-initiated "Recompute travel
+    /// times" for the active trip. Invalidates the recompute-eligible cached rows
+    /// (Estimated/Placeholder/EstimatedFallback — never the user's Manual entries,
+    /// never a higher-fidelity Measured row) then refreshes the projections. The
+    /// now-missing rows make a leg "computing", so <see cref="RefreshProjectionsAsync"/>
+    /// already signals the off-circuit compute (no unconditional Signal added) — and
+    /// when the background service writes a higher-fidelity row, the existing
+    /// progress→<see cref="RefreshLegsFromCacheAsync"/> subscription upgrades the leg
+    /// (Estimated→Measured: solid line + secondary badge) via <see cref="StateChanged"/>,
+    /// never a silent mutation on a stale screen. On-demand only — never automatic.
+    /// Mirrors the 2.2 Set/ClearManualLegTimeAsync write-then-refresh-then-Notify shape.
+    /// </summary>
+    public async Task RecomputeTravelTimesAsync()
+    {
+        if (ActiveCollectionId is not { } collectionId || !IsTripViewEnabled)
+        {
+            return;
+        }
+
+        try
+        {
+            await routeSegmentInvalidation.InvalidateRecomputableForCollectionAsync(collectionId, _cts.Token);
+            // Refresh rebuilds the legs from the now-thinned cache; any leg without a
+            // row flips IsAnyLegComputing ⇒ RefreshProjectionsAsync Signal()s the
+            // background compute. No unconditional Signal here (AC1 stays intact).
+            await RefreshProjectionsAsync(collectionId);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to recompute travel times for collection {CollectionId}", collectionId);
             return;
         }
 

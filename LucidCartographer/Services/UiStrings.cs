@@ -153,6 +153,12 @@ public static class UiStrings
     // Trip total travel time. {0} = formatted total; the label introduces the value.
     public const string TripTotalTravelTimeLabel = "Total travel time";
     public const string TripTotalTravelTimeAria = "Total travel time {0}";
+    // TRIP-RECOMPUTE-01 (Story 2.4, AC4/UX-DR9): the explicit "Recompute travel
+    // times" control in the trip header area (both surfaces). Visible label + the
+    // accessible name; on-demand only — invalidates the eligible cached legs and
+    // re-requests them (never the user's Manual entries, never a Measured row).
+    public const string TripRecomputeLabel = "Recompute travel times";
+    public const string TripRecomputeAria = "Recompute travel times";
     // UI-edge duration/distance format patterns (TravelTimeFormatting). Kept here
     // so the unit words ("h"/"m"/"km") and the sub-minute/zero tokens are localizable
     // rather than hardcoded at the conversion site. {0}/{1} = numeric parts.

@@ -78,7 +78,7 @@ public class PoiWriteToolsTests
             await db.SaveChangesAsync();
         }
 
-        var service = new PoiService(factory, NullLoggerFactory.Instance.CreateLogger<PoiService>());
+        var service = new PoiService(factory, TestDbHelper.CreateInvalidationService(factory), NullLoggerFactory.Instance.CreateLogger<PoiService>());
         return (service, factory);
     }
 
@@ -229,7 +229,7 @@ public class PoiWriteToolsTests
             db.PoiCollections.Add(new PoiCollection { Id = 1, Name = "Col", Color = "#005bbf", CreatedDate = DateTime.UtcNow });
             await db.SaveChangesAsync();
         }
-        var service = new PoiService(factory, NullLoggerFactory.Instance.CreateLogger<PoiService>());
+        var service = new PoiService(factory, TestDbHelper.CreateInvalidationService(factory), NullLoggerFactory.Instance.CreateLogger<PoiService>());
 
         var dto = await PoiWriteTools.CreatePoi(service, factory, Http,
             collectionId: 1, name: "2026-07-18 · Reenactment", latitude: 53.488, longitude: 20.087,
@@ -252,7 +252,7 @@ public class PoiWriteToolsTests
             db.PoiCollections.Add(new PoiCollection { Id = 1, Name = "Col", Color = "#005bbf", CreatedDate = DateTime.UtcNow });
             await db.SaveChangesAsync();
         }
-        var service = new PoiService(factory, NullLoggerFactory.Instance.CreateLogger<PoiService>());
+        var service = new PoiService(factory, TestDbHelper.CreateInvalidationService(factory), NullLoggerFactory.Instance.CreateLogger<PoiService>());
 
         var dto = await PoiWriteTools.CreatePoi(service, factory, PngHttp(),
             collectionId: 1, name: "WithPhoto", imageUrl: "https://example.com/p.png");
@@ -276,7 +276,7 @@ public class PoiWriteToolsTests
             db.PoiCollections.Add(new PoiCollection { Id = 1, Name = "Col", Color = "#005bbf", CreatedDate = DateTime.UtcNow });
             await db.SaveChangesAsync();
         }
-        var service = new PoiService(factory, NullLoggerFactory.Instance.CreateLogger<PoiService>());
+        var service = new PoiService(factory, TestDbHelper.CreateInvalidationService(factory), NullLoggerFactory.Instance.CreateLogger<PoiService>());
 
         var act = () => PoiWriteTools.CreatePoi(service, factory, ErrorHttp(HttpStatusCode.NotFound),
             collectionId: 1, name: "ShouldNotExist", imageUrl: "https://example.com/missing.png");

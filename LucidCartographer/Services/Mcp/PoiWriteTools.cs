@@ -157,6 +157,15 @@ public static class PoiWriteTools
         if (phone is not null) poi.Phone = NullIfEmpty(phone);
         if (country is not null) poi.Country = NullIfEmpty(country);
         if (region is not null) poi.Region = NullIfEmpty(region);
+        // MA0026 (TODO) is suppressed deliberately: this is a tracked,
+        // story-referenced deferral, not an oversight.
+#pragma warning disable MA0026
+        // TODO TRIP-INVALIDATE-01 (Story 2.4, deferred): when this MCP coord write
+        // actually changes lat/lon, route it through IRouteSegmentInvalidationService
+        // .InvalidateForPoiAsync so agent-driven coordinate edits invalidate the
+        // POI's cached legs too (today the user can force a Recompute). Deferred:
+        // agent-driven coordinate edits are rare and the explicit Recompute covers it.
+#pragma warning restore MA0026
         if (latitude is not null) poi.Latitude = latitude;
         if (longitude is not null) poi.Longitude = longitude;
         if (rating is not null) poi.Rating = rating;
