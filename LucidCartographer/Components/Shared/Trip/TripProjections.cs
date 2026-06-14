@@ -90,9 +90,16 @@ public sealed record TripStop(
 /// a gap). The stored <c>OrderIndex</c> (owned by TripOrderingService) is not
 /// affected — this is presentation state only. The row components render this
 /// state verbatim; the placeability decision is made in TripViewModel.
+/// <para>
+/// TRIP-DWELL-01 (Story 2.5): <see cref="DwellMinutes"/> carries the per-membership
+/// dwell time in canonical minutes (<c>null</c> = unset, contributes zero) read from
+/// <c>PoiCollectionItem.DwellMinutes</c>. Present on placeable and unplaceable rows
+/// alike; presentation only — the timeline that consumes it is Story 2.6.
+/// </para>
 /// </summary>
 public sealed record TripStopRow(
     int? DisplayOrder,
     int PoiId,
     string Name,
-    bool IsPlaceable);
+    bool IsPlaceable,
+    int? DwellMinutes = null);

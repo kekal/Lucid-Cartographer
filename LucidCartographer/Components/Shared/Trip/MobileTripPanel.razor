@@ -102,6 +102,16 @@
                             <div class="name" style="color:var(--text-2)">@row.Name</div>
                             <div class="sub">@UiStrings.TripStopNotPlaceable</div>
                         </div>
+                        @* TRIP-DWELL-01 (Story 2.5, AC4): an unplaceable stop still
+                           carries dwell. Not selectable ⇒ no stopPropagation needed.
+                           Tokens only, no raw hex. *@
+                        <input type="number" min="0" max="@TripViewModel.MaxDwellMinutes" inputmode="numeric"
+                               class="trailing"
+                               placeholder="@UiStrings.TripDwellPlaceholder"
+                               aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDwellAria, row.Name)"
+                               value="@DwellMinutes(row)"
+                               style="width:56px;text-align:right;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-elev-1);color:var(--text-1)"
+                               @onchange="e => OnDwellMinutesChangedAsync(row.PoiId, e.Value)" />
                     </div>
                 }
                 else
@@ -183,8 +193,20 @@
                                 <div class="sub" aria-label="@UiStrings.TripLegNoTravelTimeAria">@UiStrings.TripLegTimeUnknown</div>
                             }
                         </div>
-                        @* Inert dwell placeholder (Story 2.5 sets dwell). *@
-                        <div class="trailing" aria-label="@UiStrings.TripDwellAria">@UiStrings.TripDwellPlaceholder</div>
+                        @* TRIP-DWELL-01 (Story 2.5): per-stop dwell minutes input, on
+                           every row (placeable AND unplaceable). Prefills the persisted
+                           value; empty clears (null). stopPropagation so editing dwell
+                           never selects/reorders the row; compact, no layout-shifting
+                           sibling (2.2 selection lesson). Tokens only, no raw hex. *@
+                        <input type="number" min="0" max="@TripViewModel.MaxDwellMinutes" inputmode="numeric"
+                               class="trailing"
+                               placeholder="@UiStrings.TripDwellPlaceholder"
+                               aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDwellAria, row.Name)"
+                               value="@DwellMinutes(row)"
+                               style="width:56px;text-align:right;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-elev-1);color:var(--text-1)"
+                               @onchange="e => OnDwellMinutesChangedAsync(row.PoiId, e.Value)"
+                               @onclick:stopPropagation
+                               @onkeydown:stopPropagation />
                         @* TRIP-ORDER-03: keyboard/touch move controls — identical
                            semantics to the desktop surface (same VM methods, same
                            aria-labels), ≥44px touch targets (NFR4 / UX-DR12).
@@ -255,6 +277,28 @@
     // TRIP-TRAVELTIME-01: the leg departing a given stop (mirrors desktop).
     private TripLeg? LegFrom(int poiId) =>
         Vm.OrderedLegs.FirstOrDefault(l => l.FromPoiId == poiId);
+
+    // TRIP-DWELL-01 (Story 2.5): current dwell minutes for a row, or empty when unset.
+    private static string DwellMinutes(TripStopRow row) =>
+        row.DwellMinutes is { } m
+            ? m.ToString(System.Globalization.CultureInfo.CurrentCulture)
+            : string.Empty;
+
+    // TRIP-DWELL-01: parse + persist via the VM; empty/blank clears the dwell (null).
+    private async Task OnDwellMinutesChangedAsync(int poiId, object? raw)
+    {
+        var text = raw?.ToString();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            await Vm.SetDwellMinutesAsync(poiId, null);
+            return;
+        }
+
+        if (int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.CurrentCulture, out var minutes) && minutes >= 0)
+        {
+            await Vm.SetDwellMinutesAsync(poiId, minutes);
+        }
+    }
 
     // TRIP-MANUAL-01: current manual minutes for an Any/Air leg (mirrors desktop).
     private static string ManualMinutes(TripLeg leg) =>

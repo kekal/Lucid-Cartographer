@@ -81,8 +81,11 @@ public static class UiStrings
     public const string TripStopListEmpty = "No placeable stops yet.";
     // {0} = this stop's number, {1} = total stops. Row-level screen-reader label.
     public const string TripStopBadgeAria = "Stop {0} of {1}";
-    public const string TripDwellPlaceholder = "—";
-    public const string TripDwellAria = "Dwell time (set in a later step)";
+    // TRIP-DWELL-01 (Story 2.5): the dwell-minutes input on each stop row. {0} = the
+    // stop's POI name, giving the input a per-stop accessible name. The placeholder
+    // hints the unit on an empty field (the old "—" placeholder string is superseded).
+    public const string TripDwellPlaceholder = "min";
+    public const string TripDwellAria = "Dwell time in minutes at {0}";
     public const string TripTimelinePlaceholder = "—";
     public const string TripTimelineAria = "Arrival time (computed in a later step)";
 

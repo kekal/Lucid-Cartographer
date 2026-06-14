@@ -741,6 +741,8 @@ public sealed class TripViewModel(
                 ci.Poi.Latitude,
                 ci.Poi.Longitude,
                 ci.Poi.AddedDate,
+                // TRIP-DWELL-01 (Story 2.5): carry the per-membership dwell minutes.
+                ci.DwellMinutes,
             })
             .ToListAsync(_cts.Token);
 
@@ -766,10 +768,20 @@ public sealed class TripViewModel(
             .Where(r => !StopPlaceability.IsPlaceable(r.Latitude, r.Longitude))
             .OrderBy(r => r.AddedDate)
             .ThenBy(r => r.PoiId)
-            .Select(r => new TripStopRow(DisplayOrder: null, r.PoiId, r.Name, IsPlaceable: false));
+            // TRIP-DWELL-01: an unplaceable stop still carries its membership dwell.
+            .Select(r => new TripStopRow(DisplayOrder: null, r.PoiId, r.Name, IsPlaceable: false, r.DwellMinutes));
+
+        // TRIP-DWELL-01: dwell minutes per membership, keyed by PoiId, so placeable
+        // rows (built from the ordered stop projection) can carry it too.
+        var dwellByPoiId = members.ToDictionary(r => r.PoiId, r => r.DwellMinutes);
 
         var rows = stops
-            .Select(s => new TripStopRow(s.OrderIndex, s.PoiId, s.Name, IsPlaceable: true))
+            .Select(s => new TripStopRow(
+                s.OrderIndex,
+                s.PoiId,
+                s.Name,
+                IsPlaceable: true,
+                dwellByPoiId.TryGetValue(s.PoiId, out var dwell) ? dwell : null))
             .Concat(unplaceable)
             .ToList();
 
@@ -1144,6 +1156,80 @@ public sealed class TripViewModel(
         }
 
         Notify();
+    }
+
+    /// <summary>
+    /// Upper bound on a per-stop dwell time: 60 days in minutes — generous enough for
+    /// any real overnight/multi-day stay, but rejects absurd input so the future
+    /// minutes→seconds conversion (Story 2.6) can never overflow <see cref="int"/>.
+    /// Mirrors the <see cref="MaxManualLegMinutes"/> precedent.
+    /// </summary>
+    internal const int MaxDwellMinutes = 60 * 24 * 60;
+
+    /// <summary>
+    /// TRIP-DWELL-01 (Story 2.5): sets the dwell time (minutes) on the active
+    /// collection's membership for <paramref name="poiId"/>. <paramref name="minutes"/>
+    /// is stored verbatim on <c>PoiCollectionItem.DwellMinutes</c>; <c>null</c> clears
+    /// it (unset ⇒ contributes zero). Written under the shared write lock so it survives
+    /// reorder/recompute, then refresh + Notify. Dwell is independent of route segments:
+    /// this path itself touches NO <see cref="RouteSegment"/> and never invalidates or
+    /// recomputes a cached leg (it makes no provider call). The shared
+    /// <c>RefreshProjectionsAsync</c> it calls may still wake the compute loop if some
+    /// leg is genuinely uncomputed (the pre-existing <c>IsAnyLegComputing</c> behavior) —
+    /// that is a harmless no-op re-check, not a dwell-driven recompute. Guards: active
+    /// collection + Trip View on; rejects out-of-range minutes (negative or
+    /// &gt; <see cref="MaxDwellMinutes"/>).
+    /// </summary>
+    public async Task SetDwellMinutesAsync(int poiId, int? minutes)
+    {
+        if (ActiveCollectionId is not { } collectionId || !IsTripViewEnabled
+            || minutes is < 0 or > MaxDwellMinutes)
+        {
+            return;
+        }
+
+        try
+        {
+            await PersistDwellMinutesAsync(collectionId, poiId, minutes);
+            await RefreshProjectionsAsync(collectionId);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to set dwell minutes for POI {PoiId} in collection {CollectionId}", poiId, collectionId);
+            return;
+        }
+
+        Notify();
+    }
+
+    // TRIP-DWELL-01: load the (collection, poi) membership and write its DwellMinutes
+    // under the shared write lock (serialized with the background writers, like the
+    // manual-leg/travel-mode persists). No-op when the membership is absent.
+    private async Task PersistDwellMinutesAsync(int collectionId, int poiId, int? minutes)
+    {
+        await using var db = await factory.CreateDbContextAsync(_cts.Token);
+        var membership = await db.PoiCollectionItems.FirstOrDefaultAsync(
+            ci => ci.PoiCollectionId == collectionId && ci.PoiId == poiId, _cts.Token);
+        if (membership is null)
+        {
+            return;
+        }
+
+        membership.DwellMinutes = minutes;
+
+        await writeLock.Gate.WaitAsync(_cts.Token);
+        try
+        {
+            await db.SaveChangesAsync(_cts.Token);
+        }
+        finally
+        {
+            writeLock.Gate.Release();
+        }
     }
 
     /// <summary>

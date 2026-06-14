@@ -114,6 +114,15 @@
                               aria-hidden="true">—</span>
                         <span class="flex-1 min-w-0 truncate text-sm text-on-surface-variant" title="@row.Name">@row.Name</span>
                         <span class="text-xs text-on-surface-variant flex-shrink-0">@UiStrings.TripStopNotPlaceable</span>
+                        @* TRIP-DWELL-01 (Story 2.5, AC4): an unplaceable stop has no
+                           travel time but still carries dwell. The row is not
+                           selectable, so no stopPropagation is needed here. *@
+                        <input type="number" min="0" max="@TripViewModel.MaxDwellMinutes" inputmode="numeric"
+                               class="w-10 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface flex-shrink-0"
+                               placeholder="@UiStrings.TripDwellPlaceholder"
+                               aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDwellAria, row.Name)"
+                               value="@DwellMinutes(row)"
+                               @onchange="e => OnDwellMinutesChangedAsync(row.PoiId, e.Value)" />
                     </li>
                 }
                 else
@@ -171,9 +180,19 @@
                             <span class="material-symbols-outlined text-on-surface-variant flex-shrink-0" style="font-size:16px" aria-hidden="true">sports_score</span>
                         }
                         <span class="flex-1 min-w-0 truncate text-sm text-on-surface" title="@row.Name">@row.Name</span>
-                        @* Inert dwell placeholder (Story 2.5 sets dwell). *@
-                        <span class="text-xs text-on-surface-variant flex-shrink-0"
-                              aria-label="@UiStrings.TripDwellAria">@UiStrings.TripDwellPlaceholder</span>
+                        @* TRIP-DWELL-01 (Story 2.5): per-stop dwell minutes input,
+                           on every row (placeable AND unplaceable). Prefills the
+                           persisted value; empty clears (null). stopPropagation so
+                           editing dwell never selects/reorders the row; kept compact
+                           with no layout-shifting sibling (2.2 selection lesson). *@
+                        <input type="number" min="0" max="@TripViewModel.MaxDwellMinutes" inputmode="numeric"
+                               class="w-10 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface flex-shrink-0"
+                               placeholder="@UiStrings.TripDwellPlaceholder"
+                               aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDwellAria, row.Name)"
+                               value="@DwellMinutes(row)"
+                               @onchange="e => OnDwellMinutesChangedAsync(row.PoiId, e.Value)"
+                               @onclick:stopPropagation
+                               @onkeydown:stopPropagation />
                         @* TRIP-TRAVELTIME-01 (AC4): the leg DEPARTING this stop —
                            travel time + distance + Fidelity badge. No cache row yet
                            ⇒ "—" + computing. Placeholder/null fidelity ⇒ no badge. *@
@@ -316,6 +335,29 @@
         if (int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.CurrentCulture, out var minutes) && minutes >= 0)
         {
             await Vm.SetManualLegTimeAsync(leg.FromPoiId, leg.ToPoiId, minutes);
+        }
+    }
+
+    // TRIP-DWELL-01: the current dwell minutes for a row, or empty when unset.
+    private static string DwellMinutes(TripStopRow row) =>
+        row.DwellMinutes is { } m
+            ? m.ToString(System.Globalization.CultureInfo.CurrentCulture)
+            : string.Empty;
+
+    // TRIP-DWELL-01: parse the entered minutes and persist via the VM. Empty/blank
+    // clears the dwell (null). A non-numeric value is ignored (no write).
+    private async Task OnDwellMinutesChangedAsync(int poiId, object? raw)
+    {
+        var text = raw?.ToString();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            await Vm.SetDwellMinutesAsync(poiId, null);
+            return;
+        }
+
+        if (int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.CurrentCulture, out var minutes) && minutes >= 0)
+        {
+            await Vm.SetDwellMinutesAsync(poiId, minutes);
         }
     }
 
