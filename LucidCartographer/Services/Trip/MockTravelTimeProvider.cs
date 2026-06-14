@@ -7,10 +7,13 @@ namespace LucidCartographer.Services.Trip;
 /// TRIP-TRAVELTIME-01: the shipping default travel-time provider (AR-2). Distance
 /// is the great-circle (haversine) distance between the two endpoints via the
 /// shared <see cref="GeoUtils.HaversineDistance"/> helper — no routing
-/// infrastructure required. Duration is distance ÷ a single configurable assumed
-/// speed (<see cref="TravelTimeOptions.AssumedSpeedMetersPerSecond"/>). The
-/// result is always <see cref="Fidelity.Estimated"/> with no road geometry
-/// (<c>GeometryPolyline = null</c>), and <see cref="Source"/> = "Mock".
+/// infrastructure required. Duration is distance ÷ a per-mode assumed speed
+/// (<see cref="TravelTimeOptions.SpeedFor"/>). The result carries no road geometry
+/// (<c>GeometryPolyline = null</c>) and <see cref="Source"/> = "Mock".
+/// TRIP-TRAVELMODE-01 (Story 2.2, AR-10): the fidelity is
+/// <see cref="Fidelity.Placeholder"/> for <see cref="TravelMode.AnyAir"/> (the UI
+/// shows "—" — never a real door-to-door time) and <see cref="Fidelity.Estimated"/>
+/// for Drive/Walk/Cycle.
 /// </summary>
 public sealed class MockTravelTimeProvider(IOptions<TravelTimeOptions> options) : ITravelTimeProvider
 {
@@ -28,16 +31,24 @@ public sealed class MockTravelTimeProvider(IOptions<TravelTimeOptions> options) 
         var meters = GeoUtils.HaversineDistance(
             from.Latitude, from.Longitude, to.Latitude, to.Longitude);
 
-        // Single assumed speed for every mode in this story; the per-mode speed
-        // table (AR-10) lands in Story 2.2. Guard against a zero/negative speed
-        // so a misconfigured value can't divide by zero.
-        var speed = options.Value.AssumedSpeedMetersPerSecond;
+        // TRIP-TRAVELMODE-01: pick the assumed speed by travel mode (AR-10).
+        // Guard against a zero/negative speed so a misconfigured value can't
+        // divide by zero.
+        var speed = options.Value.SpeedFor(travelMode);
         var seconds = speed > 0 ? (int)Math.Round(meters / speed) : 0;
+
+        // TRIP-TRAVELMODE-01: Any/Air carries Placeholder (the UI shows "—" — a
+        // straight-line air estimate is never presented as a real time; a manual
+        // entry overrides it). A duration is still computed so the leg/total has a
+        // value internally. Drive/Walk/Cycle stay Estimated.
+        var fidelity = travelMode == Data.Entities.TravelMode.AnyAir
+            ? Data.Entities.Fidelity.Placeholder
+            : Data.Entities.Fidelity.Estimated;
 
         var result = new TravelLegResult(
             DurationSeconds: seconds,
             DistanceMeters: meters,
-            Fidelity: Data.Entities.Fidelity.Estimated,
+            Fidelity: fidelity,
             GeometryPolyline: null);
 
         return Task.FromResult(result);

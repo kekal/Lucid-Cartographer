@@ -131,7 +131,10 @@ public sealed class TravelTimeComputationBackgroundService(
         }
 
         // Existing cache keys so we never recompute a leg that already has a row
-        // (invalidation is Story 2.4). Tuple set keyed (From, To, Mode).
+        // (invalidation is Story 2.4). Tuple set keyed (From, To, Mode). This
+        // already covers TRIP-MANUAL-01 (Story 2.2): a manually-entered Any/Air
+        // leg is just a RouteSegment row, so its key is "present" here and the leg
+        // is never re-queued — the user's manual time is preserved.
         var existing = await db.RouteSegments
             .AsNoTracking()
             .Select(r => new { r.FromPoiId, r.ToPoiId, r.TravelMode })
@@ -212,6 +215,17 @@ public sealed class TravelTimeComputationBackgroundService(
                  && r.ToPoiId == leg.To.PoiId
                  && r.TravelMode == leg.TravelMode,
             ct);
+
+        // TRIP-MANUAL-01 (Story 2.2, AC6): never overwrite a user's manual entry.
+        // LoadPendingLegsAsync already skips any pair that has a row, so a compute
+        // pass should not reach here for a Manual leg — but this explicit guard
+        // makes the protection defensive against a future recompute path (Story
+        // 2.4) that might re-queue an existing key. A Manual row is changed/cleared
+        // only by the user (TripViewModel.Set/ClearManualLegTimeAsync).
+        if (existing is not null && existing.Fidelity == Fidelity.Manual)
+        {
+            return;
+        }
 
         if (existing is null)
         {

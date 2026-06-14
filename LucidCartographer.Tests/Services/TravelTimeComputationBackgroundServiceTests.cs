@@ -79,7 +79,8 @@ public class TravelTimeComputationBackgroundServiceTests
 
         var leg = rows.First(r => r.FromPoiId == 1 && r.ToPoiId == 2);
         leg.TravelMode.Should().Be(TravelMode.AnyAir);
-        leg.Fidelity.Should().Be(Fidelity.Estimated);
+        // Story 2.2 (TRIP-TRAVELMODE-01): Any/Air legs from the Mock are Placeholder.
+        leg.Fidelity.Should().Be(Fidelity.Placeholder);
         leg.Source.Should().Be("Mock");
         leg.GeometryPolyline.Should().BeNull();
         leg.DistanceMeters.Should().BeGreaterThan(0);
@@ -117,5 +118,34 @@ public class TravelTimeComputationBackgroundServiceTests
 
         await using var verify = await factory.CreateDbContextAsync();
         (await verify.RouteSegments.CountAsync()).Should().Be(0);
+    }
+
+    // Story 2.2 (AC6, TRIP-MANUAL-01): a user's Manual row is never recomputed or
+    // overwritten by a compute pass — its duration/fidelity/source stay intact.
+    [Fact]
+    public async Task ProcessOnce_DoesNotOverwrite_ManualRow()
+    {
+        var factory = SeedTwoStopRoundtrip();
+        // Seed a Manual row for the 1→2 Any/Air leg the user entered (e.g. a flight).
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.RouteSegments.Add(new RouteSegment
+            {
+                FromPoiId = 1, ToPoiId = 2, TravelMode = TravelMode.AnyAir,
+                DurationSeconds = 5400, DistanceMeters = 123456,
+                Fidelity = Fidelity.Manual, Source = "Manual", ComputedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = BuildService(factory, new SqliteWriteLock());
+        await service.ProcessOnceAsync(CancellationToken.None);
+
+        await using var verify = await factory.CreateDbContextAsync();
+        var manual = await verify.RouteSegments.FirstAsync(r => r.FromPoiId == 1 && r.ToPoiId == 2);
+        manual.Fidelity.Should().Be(Fidelity.Manual, "the manual entry is protected from recompute");
+        manual.Source.Should().Be("Manual");
+        manual.DurationSeconds.Should().Be(5400, "the user's flight time is untouched");
+        manual.DistanceMeters.Should().Be(123456);
     }
 }

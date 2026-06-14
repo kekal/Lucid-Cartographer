@@ -167,6 +167,22 @@ public static class UiStrings
     // "computing" state — there is simply no hop to time here.
     public const string TripLegNoTravelTimeAria = "No travel time";
 
+    // Trip View — travel-mode selector (Story 2.2, TRIP-TRAVELMODE-01). Segment
+    // labels + the radiogroup's accessible name. The active segment is styled
+    // primary; the choice is per-trip (persisted to PoiCollection.TravelMode).
+    public const string TripTravelModeSelectorAria = "Travel mode";
+    public const string TripTravelModeAnyAir = "Any/Air";
+    public const string TripTravelModeDrive = "Drive";
+    public const string TripTravelModeWalk = "Walk";
+    public const string TripTravelModeCycle = "Cycle";
+
+    // Trip View — manual Any/Air leg time (Story 2.2, TRIP-MANUAL-01). The numeric
+    // minutes input shown only on Any/Air legs; entering a value carries
+    // Fidelity.Manual and overrides the placeholder. {0} = POI name of the leg's
+    // origin stop, giving the input a per-leg accessible name.
+    public const string TripManualMinutesPlaceholder = "min";
+    public const string TripManualMinutesAria = "Manual travel time in minutes for the leg departing {0}";
+
     // Data Sources Page
     public const string DataSourcesPageTitle = "Data Sources - Lucid Cartographer";
     public const string DataAndImports = "Data & Imports";

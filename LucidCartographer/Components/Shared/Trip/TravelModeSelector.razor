@@ -1,0 +1,45 @@
+@implements IDisposable
+@using LucidCartographer.Data.Entities
+@using LucidCartographer.Services.Trip
+
+@* TRIP-TRAVELMODE-01 (Story 2.2): segmented Travel-Mode control — Any/Air · Drive
+   · Walk · Cycle. The active segment is styled `primary`; the choice is per-trip
+   (persisted to PoiCollection.TravelMode via the VM). role=radiogroup + per-option
+   aria-pressed/aria-checked expose the selection to AT. Markup + a thin VM bridge
+   only — all persistence/recompute logic lives in TripViewModel.SetTravelModeAsync.
+   Dark mode is first-class: every colour is a token, never a raw hex. *@
+
+<div role="radiogroup" aria-label="@UiStrings.TripTravelModeSelectorAria"
+     class="inline-flex items-center rounded-md border border-surface-container-high overflow-hidden">
+    @foreach (var (mode, label) in Modes)
+    {
+        var active = Vm.TravelMode == mode;
+        <button type="button"
+                role="radio"
+                aria-checked="@(active ? "true" : "false")"
+                aria-pressed="@(active ? "true" : "false")"
+                aria-label="@label"
+                class="px-2 py-1 text-xs font-medium border-r border-surface-container-high last:border-r-0 @(active ? "bg-primary text-on-primary" : "bg-surface-container-low text-on-surface-variant hover:bg-surface-container")"
+                @onclick="() => Vm.SetTravelModeAsync(mode)">
+            @label
+        </button>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public TripViewModel Vm { get; set; } = null!;
+
+    private static readonly (string Mode, string Label)[] Modes =
+    [
+        (TravelMode.AnyAir, UiStrings.TripTravelModeAnyAir),
+        (TravelMode.Drive, UiStrings.TripTravelModeDrive),
+        (TravelMode.Walk, UiStrings.TripTravelModeWalk),
+        (TravelMode.Cycle, UiStrings.TripTravelModeCycle),
+    ];
+
+    protected override void OnInitialized() => Vm.StateChanged += OnVmChanged;
+
+    private void OnVmChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Vm.StateChanged -= OnVmChanged;
+}

@@ -25,6 +25,12 @@
    background provider — same VM-backed signal as the desktop surface. *@
 <span class="sr-only" role="status" aria-live="polite">@(Vm.IsAnyLegComputing ? UiStrings.TripLegComputingAnnouncement : null)</span>
 
+@* TRIP-TRAVELMODE-01 (Story 2.2, AC1): per-trip travel-mode selector — same VM-
+   backed control as the desktop surface (UX-DR12). *@
+<div style="display:flex;justify-content:center;padding:8px 12px;border-bottom:1px solid var(--border)">
+    <TravelModeSelector Vm="Vm" />
+</div>
+
 @* TRIP-TRAVELTIME-01 (AC5): trip total travel time, rendered once. Partial ⇒ "—". *@
 @if (Vm.OrderedLegs.Count > 0)
 {
@@ -130,6 +136,19 @@
                                     <span aria-label="@(leg.DurationSeconds is null ? UiStrings.TripLegComputingAria : string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegTravelTimeAria, TravelTimeFormatting.Duration(leg.DurationSeconds)))">@TravelTimeFormatting.Duration(leg.DurationSeconds)</span>
                                     <span aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegDistanceAria, TravelTimeFormatting.Distance(leg.DistanceMeters))" style="opacity:.8">@TravelTimeFormatting.Distance(leg.DistanceMeters)</span>
                                     <FidelityBadge Fidelity="@leg.Fidelity" />
+                                    @* TRIP-MANUAL-01 (AC5): manual minutes input —
+                                       only under Any/Air. Tokens only, no raw hex. *@
+                                    @if (Vm.TravelMode == LucidCartographer.Data.Entities.TravelMode.AnyAir)
+                                    {
+                                        <input type="number" min="0" max="@TripViewModel.MaxManualLegMinutes" inputmode="numeric"
+                                               placeholder="@UiStrings.TripManualMinutesPlaceholder"
+                                               aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripManualMinutesAria, row.Name)"
+                                               value="@ManualMinutes(leg)"
+                                               style="width:56px;text-align:right;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-elev-1);color:var(--text-1)"
+                                               @onchange="e => OnManualMinutesChangedAsync(leg, e.Value)"
+                                               @onclick:stopPropagation
+                                               @onkeydown:stopPropagation />
+                                    }
                                 </div>
                             }
                             else
@@ -209,6 +228,28 @@
     // TRIP-TRAVELTIME-01: the leg departing a given stop (mirrors desktop).
     private TripLeg? LegFrom(int poiId) =>
         Vm.OrderedLegs.FirstOrDefault(l => l.FromPoiId == poiId);
+
+    // TRIP-MANUAL-01: current manual minutes for an Any/Air leg (mirrors desktop).
+    private static string ManualMinutes(TripLeg leg) =>
+        leg.Fidelity == LucidCartographer.Data.Entities.Fidelity.Manual && leg.DurationSeconds is { } s
+            ? (s / 60).ToString(System.Globalization.CultureInfo.CurrentCulture)
+            : string.Empty;
+
+    // TRIP-MANUAL-01: parse + persist via the VM; empty clears the manual entry.
+    private async Task OnManualMinutesChangedAsync(TripLeg leg, object? raw)
+    {
+        var text = raw?.ToString();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            await Vm.ClearManualLegTimeAsync(leg.FromPoiId, leg.ToPoiId);
+            return;
+        }
+
+        if (int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.CurrentCulture, out var minutes) && minutes >= 0)
+        {
+            await Vm.SetManualLegTimeAsync(leg.FromPoiId, leg.ToPoiId, minutes);
+        }
+    }
 
     // Mobile rows are <div role="button" tabindex="0"> — Enter/Space mirror the tap.
     private void OnRowKeyDown(KeyboardEventArgs e, int poiId)

@@ -101,6 +101,27 @@ public class TripViewModelTravelTimeTests
     }
 
     [Fact]
+    public async Task ComputedPlaceholderLeg_HidesDuration_AndIsNotComputing()
+    {
+        // TRIP-TRAVELMODE-01 (AC4): once the background service computes an Any/Air
+        // leg it writes a Placeholder row carrying a real straight-line air estimate.
+        // That estimate must NEVER surface — the leg's display duration is null (⇒
+        // "—"), the total is "—", but the leg is NOT "computing" (its row exists).
+        var factory = Seed(placeable: 2);
+        await AddSegmentAsync(factory, 1, 2, 720, 9000, Fidelity.Placeholder);
+        await AddSegmentAsync(factory, 2, 1, 720, 9000, Fidelity.Placeholder);
+
+        await using var vm = await EnabledVmAsync(factory, 2);
+
+        var leg = vm.OrderedLegs.First(l => l.FromPoiId == 1 && l.ToPoiId == 2);
+        leg.Fidelity.Should().Be(Fidelity.Placeholder, "the row exists and is Placeholder");
+        leg.DurationSeconds.Should().BeNull("a Placeholder air estimate is never shown as a real time");
+        leg.DistanceMeters.Should().Be(9000, "the haversine distance is real and may show");
+        vm.IsAnyLegComputing.Should().BeFalse("a computed Placeholder leg is not still computing");
+        vm.TotalTravelTimeSeconds.Should().BeNull("a Placeholder leg keeps the total honest ('—')");
+    }
+
+    [Fact]
     public async Task IsMeasured_TrueOnlyForMeasuredFidelity()
     {
         var factory = Seed(placeable: 2);

@@ -111,6 +111,14 @@ public sealed class TripViewModel(
     /// <summary>Localized on/off text for the aria-live announcement region; null until first toggle.</summary>
     public string? Announcement { get; private set; }
 
+    /// <summary>
+    /// TRIP-TRAVELMODE-01: the active collection's persisted travel mode (one of
+    /// <see cref="TravelMode"/>; defaults <see cref="TravelMode.AnyAir"/>). Drives
+    /// the segmented selector's active segment and gates the per-leg manual entry
+    /// (only shown under Any/Air). Cleared (back to AnyAir) when projections clear.
+    /// </summary>
+    public string TravelMode { get; private set; } = Data.Entities.TravelMode.AnyAir;
+
     // TRIP-SELECT-01: bidirectional list ↔ map selection. A single transient
     // (never persisted) selection that both surfaces read and write through
     // SelectStop. Independent of MapPageViewModel.SelectedPoiId (the non-trip
@@ -614,6 +622,10 @@ public sealed class TripViewModel(
         // TRIP-TRAVELTIME-01: travel-time totals are scoped to an enabled Trip.
         TotalTravelTimeSeconds = null;
         IsAnyLegComputing = false;
+        // TRIP-TRAVELMODE-01: the surfaced mode is read state scoped to an enabled
+        // Trip (the persisted PoiCollection.TravelMode is untouched) — reset the
+        // selector's active segment to the default alongside the projections.
+        TravelMode = Data.Entities.TravelMode.AnyAir;
         // TRIP-SELECT-01: selection is transient and only valid while Trip View
         // is on — drop it (and its announcement) whenever the projections clear
         // so toggling off never leaves a stale SelectedStopPoiId (AC4).
@@ -657,6 +669,9 @@ public sealed class TripViewModel(
         // duration/distance/fidelity has been computed so far. A leg with no
         // cache row keeps null fields ⇒ the UI shows "—" + computing.
         var travelMode = await ReadTravelModeAsync(collectionId);
+        // TRIP-TRAVELMODE-01: surface the persisted mode so the selector restores
+        // its active segment and the per-leg manual entry gates on Any/Air.
+        TravelMode = travelMode;
         var cache = await ReadRouteSegmentsAsync(collectionId, travelMode);
         OrderedLegs = BuildLegs(stops, finishPoiId, cache);
         RecomputeTotal();
@@ -767,7 +782,7 @@ public sealed class TripViewModel(
             .Where(c => c.Id == collectionId)
             .Select(c => c.TravelMode)
             .FirstOrDefaultAsync(_cts.Token);
-        return mode ?? TravelMode.AnyAir;
+        return mode ?? Data.Entities.TravelMode.AnyAir;
     }
 
     /// <summary>
@@ -917,23 +932,38 @@ public sealed class TripViewModel(
     {
         cache.TryGetValue((from.PoiId, to.PoiId), out var seg);
         var fidelity = seg?.Fidelity;
+        // TRIP-TRAVELMODE-01 (Story 2.2, AC4): a Placeholder leg (Any/Air with no
+        // Manual entry) carries an internal straight-line air estimate, but it must
+        // NEVER surface as a real door-to-door time. Null its DURATION at the
+        // projection edge so the time slot renders "—" and the trip total stays
+        // unknown ("—"), while keeping the distance (a real haversine value) and the
+        // Placeholder fidelity (the badge renders nothing for it). A leg that simply
+        // has no cache row yet keeps a null fidelity — that is the "computing" state,
+        // kept distinct from Placeholder so the aria-live computing announcement does
+        // not fire forever on Any/Air.
+        var displayDuration = fidelity == Fidelity.Placeholder ? null : seg?.DurationSeconds;
         return new TripLeg(
             from.PoiId, to.PoiId, from.Lat, from.Lon, to.Lat, to.Lon,
             IsMeasured: fidelity == Fidelity.Measured,
-            DurationSeconds: seg?.DurationSeconds,
+            DurationSeconds: displayDuration,
             DistanceMeters: seg?.DistanceMeters,
             Fidelity: fidelity);
     }
 
     /// <summary>
-    /// TRIP-TRAVELTIME-01 (AC5): Σ of the legs' durations. If any leg is
-    /// uncomputed (null duration) the total is null (rendered "—" — no false
-    /// precision). Also refreshes <see cref="IsAnyLegComputing"/>.
+    /// TRIP-TRAVELTIME-01 (AC5): Σ of the legs' durations. The total is null
+    /// (rendered "—" — no false precision) whenever any leg lacks a known duration,
+    /// which covers both an uncomputed leg and a Placeholder Any/Air leg (both carry
+    /// a null <see cref="TripLeg.DurationSeconds"/> at the projection edge).
+    /// <see cref="IsAnyLegComputing"/> is driven by row PRESENCE (null fidelity =
+    /// no cache row yet), NOT by a null duration — a computed Placeholder leg is not
+    /// "computing" (TRIP-TRAVELMODE-01 / AC4).
     /// </summary>
     private void RecomputeTotal()
     {
-        IsAnyLegComputing = OrderedLegs.Any(l => l.DurationSeconds is null);
-        TotalTravelTimeSeconds = OrderedLegs.Count > 0 && !IsAnyLegComputing
+        IsAnyLegComputing = OrderedLegs.Any(l => l.Fidelity is null);
+        var allDurationsKnown = OrderedLegs.Count > 0 && OrderedLegs.All(l => l.DurationSeconds is not null);
+        TotalTravelTimeSeconds = allDurationsKnown
             ? OrderedLegs.Sum(l => l.DurationSeconds!.Value)
             : null;
     }
@@ -962,6 +992,234 @@ public sealed class TripViewModel(
 
         // Serialize with the background enrichment / dedup writers via the shared
         // gate so this user-initiated commit never hits "database is locked".
+        await writeLock.Gate.WaitAsync(_cts.Token);
+        try
+        {
+            await db.SaveChangesAsync(_cts.Token);
+        }
+        finally
+        {
+            writeLock.Gate.Release();
+        }
+    }
+
+    // --- Travel Mode + manual Any/Air time (Story 2.2) ---
+
+    /// <summary>
+    /// TRIP-TRAVELMODE-01: persists a new travel mode for the active collection
+    /// and triggers a recompute. Mirrors the <see cref="PersistTripViewEnabledAsync"/>
+    /// write path (factory + <see cref="SqliteWriteLock"/>). No-ops when the mode
+    /// is invalid or already active (selecting the active segment does nothing —
+    /// no write, no recompute). After a change: re-read projections (the directional
+    /// cache key naturally selects the new mode's rows; legs with no row yet render
+    /// "—" + computing), signal the background trigger to fill missing legs, Notify.
+    /// </summary>
+    public async Task SetTravelModeAsync(string mode)
+    {
+        if (ActiveCollectionId is not { } collectionId || !IsTripViewEnabled)
+        {
+            return;
+        }
+
+        // Reject unknown modes and short-circuit the already-active mode (SM-C2:
+        // recomputation stays rare — re-selecting the current mode is a no-op).
+        if (!Data.Entities.TravelMode.IsValid(mode) || mode == TravelMode)
+        {
+            return;
+        }
+
+        try
+        {
+            await PersistTravelModeAsync(collectionId, mode);
+            // Re-read projections under the new mode; the cache read now filters
+            // r.TravelMode == mode so the legs switch to the new mode's rows.
+            await RefreshProjectionsAsync(collectionId);
+            // Any leg missing a row under the new mode is already kicked by
+            // RefreshProjectionsAsync (IsAnyLegComputing ⇒ Signal); signal once
+            // more unconditionally so a switch to an all-cached mode still wakes
+            // the loop to compute any newly-needed closing leg. Cheap + idempotent.
+            travelTimeTrigger.Signal();
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to set travel mode {Mode} for collection {CollectionId}", mode, collectionId);
+            return;
+        }
+
+        Notify();
+    }
+
+    private async Task PersistTravelModeAsync(int collectionId, string mode)
+    {
+        await using var db = await factory.CreateDbContextAsync(_cts.Token);
+        var collection = await db.PoiCollections.FirstOrDefaultAsync(c => c.Id == collectionId, _cts.Token);
+        if (collection is null || collection.TravelMode == mode)
+        {
+            return;
+        }
+
+        collection.TravelMode = mode;
+
+        await writeLock.Gate.WaitAsync(_cts.Token);
+        try
+        {
+            await db.SaveChangesAsync(_cts.Token);
+        }
+        finally
+        {
+            writeLock.Gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// TRIP-MANUAL-01 (AC5): upserts a manual travel time for an Any/Air leg. The
+    /// minutes entered at the UI edge are converted to canonical seconds (×60,
+    /// AR-11) and stored on the directional <c>(from, to, AnyAir)</c>
+    /// <see cref="RouteSegment"/> row with <see cref="Fidelity.Manual"/>,
+    /// <c>Source = "Manual"</c>, <c>GeometryPolyline = null</c>, and the haversine
+    /// distance for display. Persisted under the shared write lock so it survives
+    /// reorder and recompute. After the write: refresh + Notify.
+    /// </summary>
+    /// <summary>
+    /// Upper bound on a manual leg time: 60 days in minutes. Generous enough for any
+    /// real flight/overnight-haul entry, but rejects absurd input so the ×60 seconds
+    /// conversion can never overflow <see cref="int"/> or poison the cached total.
+    /// </summary>
+    internal const int MaxManualLegMinutes = 60 * 24 * 60;
+
+    public async Task SetManualLegTimeAsync(int fromPoiId, int toPoiId, int minutes)
+    {
+        if (ActiveCollectionId is not { } collectionId || !IsTripViewEnabled
+            || minutes < 0 || minutes > MaxManualLegMinutes)
+        {
+            return;
+        }
+
+        var from = OrderedStops.FirstOrDefault(s => s.PoiId == fromPoiId);
+        var to = OrderedStops.FirstOrDefault(s => s.PoiId == toPoiId);
+        if (from is null || to is null)
+        {
+            return;
+        }
+
+        var meters = GeoUtils.HaversineDistance(from.Lat, from.Lon, to.Lat, to.Lon);
+        // Convert minutes ↔ seconds only here, at the UI edge (AR-11).
+        var seconds = minutes * 60;
+
+        try
+        {
+            await UpsertManualSegmentAsync(fromPoiId, toPoiId, seconds, meters);
+            await RefreshProjectionsAsync(collectionId);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to set manual leg time {From}->{To} for collection {CollectionId}", fromPoiId, toPoiId, collectionId);
+            return;
+        }
+
+        Notify();
+    }
+
+    /// <summary>
+    /// TRIP-MANUAL-01: clears a manual Any/Air leg time. Deletes the
+    /// <c>(from, to, AnyAir)</c> cache row so the leg reverts to the Placeholder
+    /// the Mock recomputes (shown "—"). The background trigger is signalled to
+    /// refill the now-missing row. No-op when no row exists.
+    /// </summary>
+    public async Task ClearManualLegTimeAsync(int fromPoiId, int toPoiId)
+    {
+        if (ActiveCollectionId is not { } collectionId || !IsTripViewEnabled)
+        {
+            return;
+        }
+
+        try
+        {
+            await DeleteSegmentAsync(fromPoiId, toPoiId);
+            await RefreshProjectionsAsync(collectionId);
+            travelTimeTrigger.Signal();
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to clear manual leg time {From}->{To} for collection {CollectionId}", fromPoiId, toPoiId, collectionId);
+            return;
+        }
+
+        Notify();
+    }
+
+    private async Task UpsertManualSegmentAsync(int fromPoiId, int toPoiId, int seconds, double meters)
+    {
+        await using var db = await factory.CreateDbContextAsync(_cts.Token);
+        var existing = await db.RouteSegments.FirstOrDefaultAsync(
+            r => r.FromPoiId == fromPoiId
+                 && r.ToPoiId == toPoiId
+                 && r.TravelMode == Data.Entities.TravelMode.AnyAir,
+            _cts.Token);
+
+        if (existing is null)
+        {
+            db.RouteSegments.Add(new RouteSegment
+            {
+                FromPoiId = fromPoiId,
+                ToPoiId = toPoiId,
+                TravelMode = Data.Entities.TravelMode.AnyAir,
+                DurationSeconds = seconds,
+                DistanceMeters = meters,
+                GeometryPolyline = null,
+                Fidelity = Data.Entities.Fidelity.Manual,
+                Source = "Manual",
+                ComputedAt = DateTime.UtcNow,
+            });
+        }
+        else
+        {
+            existing.DurationSeconds = seconds;
+            existing.DistanceMeters = meters;
+            existing.GeometryPolyline = null;
+            existing.Fidelity = Data.Entities.Fidelity.Manual;
+            existing.Source = "Manual";
+            existing.ComputedAt = DateTime.UtcNow;
+        }
+
+        await writeLock.Gate.WaitAsync(_cts.Token);
+        try
+        {
+            await db.SaveChangesAsync(_cts.Token);
+        }
+        finally
+        {
+            writeLock.Gate.Release();
+        }
+    }
+
+    private async Task DeleteSegmentAsync(int fromPoiId, int toPoiId)
+    {
+        await using var db = await factory.CreateDbContextAsync(_cts.Token);
+        var existing = await db.RouteSegments.FirstOrDefaultAsync(
+            r => r.FromPoiId == fromPoiId
+                 && r.ToPoiId == toPoiId
+                 && r.TravelMode == Data.Entities.TravelMode.AnyAir,
+            _cts.Token);
+        if (existing is null)
+        {
+            return;
+        }
+
+        db.RouteSegments.Remove(existing);
+
         await writeLock.Gate.WaitAsync(_cts.Token);
         try
         {

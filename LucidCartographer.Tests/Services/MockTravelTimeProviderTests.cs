@@ -7,51 +7,91 @@ using Microsoft.Extensions.Options;
 namespace LucidCartographer.Tests;
 
 /// <summary>
-/// Story 2.1 (AC 1, 2, 3): the haversine Mock returns the great-circle distance
-/// in meters and a duration = distance ÷ assumed speed in seconds, always
-/// Fidelity.Estimated with null geometry, Source "Mock".
+/// Story 2.1 (AC 1, 2, 3) + Story 2.2 (AC 3, 4): the haversine Mock returns the
+/// great-circle distance in meters and a duration = distance ÷ a PER-MODE assumed
+/// speed in seconds, with null geometry + Source "Mock". TRIP-TRAVELMODE-01:
+/// Any/Air carries Fidelity.Placeholder; Drive/Walk/Cycle carry Fidelity.Estimated.
 /// </summary>
 public class MockTravelTimeProviderTests
 {
-    private static MockTravelTimeProvider Provider(double speedMps) =>
-        new(Options.Create(new TravelTimeOptions { AssumedSpeedMetersPerSecond = speedMps }));
+    private static readonly TravelEndpoint From = new(1, 50.0, 20.0);
+    private static readonly TravelEndpoint To = new(2, 51.0, 21.0);
+
+    private static MockTravelTimeProvider Provider(TravelTimeOptions options) =>
+        new(Options.Create(options));
+
+    private static MockTravelTimeProvider DefaultProvider() => Provider(new TravelTimeOptions
+    {
+        AssumedSpeedMetersPerSecond = 13.8889,
+        DriveSpeedMetersPerSecond = 20.0,
+        WalkSpeedMetersPerSecond = 1.4,
+        CycleSpeedMetersPerSecond = 4.2,
+    });
 
     [Fact]
-    public async Task GetLeg_KnownCoords_MatchesHaversineAndAssumedSpeed()
+    public async Task GetLeg_AnyAir_MatchesHaversineAndAnyAirSpeed_AndIsPlaceholder()
     {
-        // Two arbitrary placeable points.
-        var from = new TravelEndpoint(1, 50.0, 20.0);
-        var to = new TravelEndpoint(2, 51.0, 21.0);
-        const double speed = 13.8889; // ~50 km/h
-
-        var expectedMeters = GeoUtils.HaversineDistance(from.Latitude, from.Longitude, to.Latitude, to.Longitude);
+        const double speed = 13.8889; // Any/Air assumed speed
+        var expectedMeters = GeoUtils.HaversineDistance(From.Latitude, From.Longitude, To.Latitude, To.Longitude);
         var expectedSeconds = (int)Math.Round(expectedMeters / speed);
 
-        var result = await Provider(speed).GetLegAsync(from, to, TravelMode.AnyAir, CancellationToken.None);
+        var result = await DefaultProvider().GetLegAsync(From, To, TravelMode.AnyAir, CancellationToken.None);
 
         result.DistanceMeters.Should().BeApproximately(expectedMeters, 0.001);
         result.DurationSeconds.Should().Be(expectedSeconds);
+        // TRIP-TRAVELMODE-01: Any/Air is Placeholder (UI shows "—"), never Estimated.
+        result.Fidelity.Should().Be(Fidelity.Placeholder);
+        result.GeometryPolyline.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(TravelMode.Drive)]
+    [InlineData(TravelMode.Walk)]
+    [InlineData(TravelMode.Cycle)]
+    public async Task GetLeg_GroundModes_AreEstimated(string mode)
+    {
+        var result = await DefaultProvider().GetLegAsync(From, To, mode, CancellationToken.None);
+
         result.Fidelity.Should().Be(Fidelity.Estimated);
         result.GeometryPolyline.Should().BeNull();
     }
 
     [Fact]
+    public async Task GetLeg_PerModeSpeed_ProducesDistinctDurations_ForSameDistance()
+    {
+        var options = new TravelTimeOptions
+        {
+            DriveSpeedMetersPerSecond = 20.0,
+            CycleSpeedMetersPerSecond = 5.0,
+            WalkSpeedMetersPerSecond = 1.0,
+        };
+        var provider = Provider(options);
+
+        var drive = await provider.GetLegAsync(From, To, TravelMode.Drive, CancellationToken.None);
+        var cycle = await provider.GetLegAsync(From, To, TravelMode.Cycle, CancellationToken.None);
+        var walk = await provider.GetLegAsync(From, To, TravelMode.Walk, CancellationToken.None);
+
+        // Same distance, slower mode ⇒ longer duration. Strictly increasing.
+        drive.DistanceMeters.Should().Be(cycle.DistanceMeters).And.Be(walk.DistanceMeters);
+        drive.DurationSeconds.Should().BeLessThan(cycle.DurationSeconds);
+        cycle.DurationSeconds.Should().BeLessThan(walk.DurationSeconds);
+    }
+
+    [Fact]
     public void Source_IsMock()
     {
-        Provider(13.8889).Source.Should().Be("Mock");
+        DefaultProvider().Source.Should().Be("Mock");
         MockTravelTimeProvider.ProviderId.Should().Be("Mock");
     }
 
     [Fact]
     public async Task GetLeg_IdenticalEndpoints_ZeroDistanceZeroDuration()
     {
-        var p = new TravelEndpoint(1, 50.0, 20.0);
-
-        var result = await Provider(13.8889).GetLegAsync(p, p, TravelMode.AnyAir, CancellationToken.None);
+        var result = await DefaultProvider().GetLegAsync(From, From, TravelMode.AnyAir, CancellationToken.None);
 
         result.DistanceMeters.Should().Be(0);
         result.DurationSeconds.Should().Be(0);
-        result.Fidelity.Should().Be(Fidelity.Estimated);
+        result.Fidelity.Should().Be(Fidelity.Placeholder);
         result.GeometryPolyline.Should().BeNull();
     }
 }

@@ -23,6 +23,11 @@
         </span>
     </header>
 
+    @* TRIP-TRAVELMODE-01 (Story 2.2, AC1): per-trip travel-mode selector. *@
+    <div class="px-3 py-2 border-b border-surface-container-high flex-shrink-0">
+        <TravelModeSelector Vm="Vm" />
+    </div>
+
     @* TRIP-TRAVELTIME-01 (AC5): trip total travel time, rendered once. A partial
        trip (any uncomputed leg) shows the em-dash — no false precision. *@
     @if (Vm.OrderedLegs.Count > 0)
@@ -159,6 +164,20 @@
                                     </span>
                                 </span>
                                 <FidelityBadge Fidelity="@leg.Fidelity" />
+                                @* TRIP-MANUAL-01 (AC5): manual minutes input — only
+                                   under Any/Air. Entering a value upserts a Manual
+                                   leg (minutes→seconds at this UI edge). *@
+                                @if (Vm.TravelMode == LucidCartographer.Data.Entities.TravelMode.AnyAir)
+                                {
+                                    <input type="number" min="0" max="@TripViewModel.MaxManualLegMinutes" inputmode="numeric"
+                                           class="w-12 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
+                                           placeholder="@UiStrings.TripManualMinutesPlaceholder"
+                                           aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripManualMinutesAria, row.Name)"
+                                           value="@ManualMinutes(leg)"
+                                           @onchange="e => OnManualMinutesChangedAsync(leg, e.Value)"
+                                           @onclick:stopPropagation
+                                           @onkeydown:stopPropagation />
+                                }
                             }
                             else
                             {
@@ -246,6 +265,31 @@
     // next, or the roundtrip closing leg from the last stop back to the Start).
     private TripLeg? LegFrom(int poiId) =>
         Vm.OrderedLegs.FirstOrDefault(l => l.FromPoiId == poiId);
+
+    // TRIP-MANUAL-01: the current manual minutes for an Any/Air leg (seconds÷60),
+    // or empty when the leg has no Manual row yet. Only a Manual fidelity row
+    // pre-fills the input — a Placeholder/computing leg shows an empty field.
+    private static string ManualMinutes(TripLeg leg) =>
+        leg.Fidelity == LucidCartographer.Data.Entities.Fidelity.Manual && leg.DurationSeconds is { } s
+            ? (s / 60).ToString(System.Globalization.CultureInfo.CurrentCulture)
+            : string.Empty;
+
+    // TRIP-MANUAL-01: parse the entered minutes and persist via the VM. An empty
+    // value clears the manual entry (reverts to the Placeholder).
+    private async Task OnManualMinutesChangedAsync(TripLeg leg, object? raw)
+    {
+        var text = raw?.ToString();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            await Vm.ClearManualLegTimeAsync(leg.FromPoiId, leg.ToPoiId);
+            return;
+        }
+
+        if (int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.CurrentCulture, out var minutes) && minutes >= 0)
+        {
+            await Vm.SetManualLegTimeAsync(leg.FromPoiId, leg.ToPoiId, minutes);
+        }
+    }
 
     // Rows are <li role="button" tabindex="0"> — map Enter/Space onto the same
     // selection the click does, so keyboard users get the list→map sync (AC3).

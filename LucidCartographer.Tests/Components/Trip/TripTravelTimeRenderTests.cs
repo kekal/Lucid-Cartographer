@@ -127,19 +127,31 @@ public class TripTravelTimeRenderTests : BunitTestContext
     }
 
     [Fact]
-    public async Task TripStopList_NeverRendersPlaceholderBadge()
+    public async Task TripStopList_ComputedPlaceholderLeg_ShowsEmDash_NoBadge_NoRealTime()
     {
         var factory = Seed();
-        // A Placeholder fidelity must NOT surface as a badge.
+        // TRIP-TRAVELMODE-01 (AC4): a COMPUTED Placeholder row carries a real
+        // straight-line air estimate (600s = "10m" each). The UI must show "—" for
+        // the time and "—" for the total — never the air estimate — and never a badge.
         await AddSegmentAsync(factory, 1, 2, 600, 8000, Fidelity.Placeholder);
         await AddSegmentAsync(factory, 2, 1, 600, 8000, Fidelity.Placeholder);
         await using var vm = await EnabledVmAsync(factory);
 
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
 
+        // No badge for Placeholder.
         cut.Markup.Should().NotContain(Fidelity.Placeholder, "Placeholder is internal-only — never a badge");
         var provenanceAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripFidelityAria, Fidelity.Placeholder);
         cut.FindAll($"[aria-label=\"{provenanceAria}\"]").Should().BeEmpty();
+        // The air estimate must NOT be rendered as a real time.
+        cut.Markup.Should().NotContain("10m", "a Placeholder air estimate is never shown as a real leg time");
+        cut.Markup.Should().NotContain("20m", "the trip total must not sum Placeholder air estimates");
+        // The trip total slot is the honest em-dash.
+        var totalAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripTotalTravelTimeAria, UiStrings.TripLegTimeUnknown);
+        cut.Find($"[aria-label=\"{totalAria}\"]").TextContent.Trim().Should().Be(UiStrings.TripLegTimeUnknown);
+        // ...and a computed Placeholder leg is NOT announced as "computing".
+        cut.FindAll("[aria-live='polite']")
+            .Should().NotContain(r => r.TextContent.Contains(UiStrings.TripLegComputingAnnouncement, StringComparison.Ordinal));
     }
 
     [Fact]

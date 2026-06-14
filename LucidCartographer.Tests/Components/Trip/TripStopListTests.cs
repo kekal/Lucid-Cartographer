@@ -633,4 +633,122 @@ public class TripStopListTests : BunitTestContext
         var badge1 = string.Format(CultureInfo.CurrentCulture, UiStrings.StopOrderBadgeAria, 1);
         cut.Find($"[aria-label=\"{badge1}\"]").Should().NotBeNull();
     }
+
+    // === Story 2.2: travel-mode selector + manual Any/Air leg time ===
+
+    /// <summary>Sets the persisted TravelMode on the collection before enabling.</summary>
+    private static async Task<TripViewModel> EnabledVmWithModeAsync(int placeable, string mode)
+    {
+        var factory = SeedFactory(placeable);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var c = await db.PoiCollections.FirstAsync(x => x.Id == CollectionId);
+            c.TravelMode = mode;
+            await db.SaveChangesAsync();
+        }
+        var writeLock = new SqliteWriteLock();
+        var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
+        var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), NullLogger<TripViewModel>.Instance);
+        await vm.LoadAsync(CollectionId, placeable);
+        await vm.ToggleAsync();
+        return vm;
+    }
+
+    [Theory]
+    [InlineData(typeof(TripStopList))]
+    [InlineData(typeof(MobileTripPanel))]
+    public async Task Selector_RendersFourSegments_WithPersistedModeActive(Type surface)
+    {
+        await using var vm = await EnabledVmWithModeAsync(placeable: 2, mode: TravelMode.Drive);
+
+        var cut = surface == typeof(TripStopList)
+            ? (IRenderedFragment)RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm))
+            : RenderComponent<MobileTripPanel>(p => p.Add(x => x.Vm, vm));
+
+        var group = cut.Find("[role=radiogroup]");
+        var radios = group.QuerySelectorAll("[role=radio]");
+        radios.Should().HaveCount(4);
+        // The persisted Drive segment is the active (checked) one.
+        var active = cut.Find($"button[aria-label=\"{UiStrings.TripTravelModeDrive}\"]");
+        active.GetAttribute("aria-checked").Should().Be("true");
+        cut.Find($"button[aria-label=\"{UiStrings.TripTravelModeAnyAir}\"]").GetAttribute("aria-checked").Should().Be("false");
+    }
+
+    [Fact]
+    public async Task Selector_Switching_InvokesVm_AndPersists()
+    {
+        await using var vm = await EnabledVmWithModeAsync(placeable: 2, mode: TravelMode.AnyAir);
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        cut.Find($"button[aria-label=\"{UiStrings.TripTravelModeWalk}\"]").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            vm.TravelMode.Should().Be(TravelMode.Walk);
+            cut.Find($"button[aria-label=\"{UiStrings.TripTravelModeWalk}\"]").GetAttribute("aria-checked").Should().Be("true");
+        });
+    }
+
+    [Fact]
+    public async Task ManualInput_Present_UnderAnyAir_Absent_UnderDrive()
+    {
+        await using var anyAir = await EnabledVmWithModeAsync(placeable: 2, mode: TravelMode.AnyAir);
+        var cutAir = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, anyAir));
+        var aria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripManualMinutesAria, "P1");
+        cutAir.FindAll($"input[aria-label=\"{aria}\"]").Should().NotBeEmpty("Any/Air legs carry the manual minutes input");
+
+        await using var drive = await EnabledVmWithModeAsync(placeable: 2, mode: TravelMode.Drive);
+        var cutDrive = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, drive));
+        cutDrive.FindAll("input[type=number]").Should().BeEmpty("the manual input is hidden under non-Any/Air modes");
+    }
+
+    [Fact]
+    public async Task AnyAir_NoManual_Leg_ShowsEmDash_NoBadge()
+    {
+        // A Placeholder Any/Air row ⇒ the time slot shows "—" and no fidelity badge.
+        await using var vm = await EnabledVmWithModeAsync(placeable: 2, mode: TravelMode.AnyAir);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        // With no cache rows the leg is uncomputed ⇒ "—" in the time slot. The
+        // FidelityBadge renders nothing for Placeholder/null, so no provenance pill
+        // appears (asserted via the badge's "Provenance: …" aria-label, which is
+        // distinct from the manual input's own aria text).
+        cut.Markup.Should().Contain(UiStrings.TripLegTimeUnknown);
+        var manualProvenance = string.Format(CultureInfo.CurrentCulture, UiStrings.TripFidelityAria, UiStrings.TripFidelityManual);
+        var estimatedProvenance = string.Format(CultureInfo.CurrentCulture, UiStrings.TripFidelityAria, UiStrings.TripFidelityEstimated);
+        cut.FindAll($"[aria-label=\"{manualProvenance}\"]").Should().BeEmpty("no Manual badge on an unentered Any/Air leg");
+        cut.FindAll($"[aria-label=\"{estimatedProvenance}\"]").Should().BeEmpty("Any/Air legs are never Estimated");
+    }
+
+    [Fact]
+    public async Task ManualEntry_ShowsManualBadge_AndUpdatesTotal()
+    {
+        await using var vm = await EnabledVmWithModeAsync(placeable: 2, mode: TravelMode.AnyAir);
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        var aria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripManualMinutesAria, "P1");
+        cut.Find($"input[aria-label=\"{aria}\"]").Change("90");
+
+        cut.WaitForAssertion(() =>
+        {
+            // The 1→2 leg now carries the Manual badge.
+            cut.Markup.Should().Contain(UiStrings.TripFidelityManual);
+            var leg = vm.OrderedLegs.First(l => l.FromPoiId == 1 && l.ToPoiId == 2);
+            leg.Fidelity.Should().Be(Fidelity.Manual);
+            leg.DurationSeconds.Should().Be(5400);
+        });
+    }
+
+    [Fact]
+    public async Task ManualInput_PrefillsExistingManualMinutes()
+    {
+        await using var vm = await EnabledVmWithModeAsync(placeable: 2, mode: TravelMode.AnyAir);
+        await vm.SetManualLegTimeAsync(1, 2, minutes: 75);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        var aria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripManualMinutesAria, "P1");
+        cut.Find($"input[aria-label=\"{aria}\"]").GetAttribute("value").Should().Be("75");
+    }
 }

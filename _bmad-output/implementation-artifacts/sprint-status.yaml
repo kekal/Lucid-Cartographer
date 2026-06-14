@@ -39,6 +39,8 @@ last_updated: 2026-06-14
 # epic-2 activated and story 2-1 created via bmad-create-story on 2026-06-14 (status backlog → ready-for-dev)
 # story 2-1 moved to review on 2026-06-14 via bmad-dev-story (build clean; 589 unit/component + 19 Trip integration green; caught+fixed an integration-host DI regression — AddTripServices split so the hosted travel-time loop/pipeline only registers in production, not the test host)
 # story 2-1 moved to done on 2026-06-14 via bmad-story-automator-review (adversarial fresh-context review: 0 CRITICAL/0 HIGH/1 MED/3 LOW; 2 auto-fixed [UiStrings i18n for duration/distance formats, empty-leg aria-label], 2 LOW accepted as matching the enrichment single-writer pattern; rebuild clean, 589 green)
+# story 2-2 moved to review on 2026-06-14 via bmad-dev-story (travel-mode selector + per-mode speed + Any/Air Placeholder + manual time; 607 unit/component + 19 Trip integration green)
+# story 2-2 moved to done on 2026-06-14 via bmad-story-automator-review (adversarial review: 2 CRITICAL/1 MED/2 LOW; fixed AC4 honesty bug [computed Placeholder leg showed a real time+total] + strengthened guard tests, capped manual-minutes overflow, removed dead constant, fixed a self-introduced selection regression; 608 unit/component + 19 Trip integration green)
 project: maps_editor
 # story 1-4 moved to done on 2026-06-12 via bmad-code-review (1 patch applied, 3 deferred, 3 re-surfaced already-tracked, ~15 dismissed; 54/54 Trip tests green)
 # story 1-2 moved to review on 2026-06-12 via bmad-dev-story
@@ -74,7 +76,7 @@ development_status:
   # Epic 2: Travel times, dwell & the honest itinerary timeline
   epic-2: in-progress
   2-1-per-leg-travel-time-from-the-provider-fidelity-badged: done
-  2-2-select-travel-mode-and-enter-a-manual-any-air-time: backlog
+  2-2-select-travel-mode-and-enter-a-manual-any-air-time: done
   2-3-graceful-degradation-to-straight-line-estimates: backlog
   2-4-cache-invalidation-recompute-estimated-measured-upgrade: backlog
   2-5-set-dwell-time-per-stop: backlog
