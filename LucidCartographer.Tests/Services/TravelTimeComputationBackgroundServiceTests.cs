@@ -192,6 +192,7 @@ public class TravelTimeComputationBackgroundServiceTests
     private sealed class ThrowingProvider : ITravelTimeProvider
     {
         public string Source => "Throwing";
+        public string? Attribution => null;
         public Task<TravelLegResult> GetLegAsync(TravelEndpoint from, TravelEndpoint to, string travelMode, CancellationToken ct) =>
             throw new InvalidOperationException("routing engine unreachable");
     }
@@ -200,6 +201,7 @@ public class TravelTimeComputationBackgroundServiceTests
     private sealed class ThrowOnFirstLegProvider(MockTravelTimeProvider inner) : ITravelTimeProvider
     {
         public string Source => inner.Source;
+        public string? Attribution => null;
         public Task<TravelLegResult> GetLegAsync(TravelEndpoint from, TravelEndpoint to, string travelMode, CancellationToken ct) =>
             from.PoiId == 1
                 ? throw new InvalidOperationException("routing engine unreachable for the first leg")

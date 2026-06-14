@@ -51,6 +51,18 @@ public static class TripServicesExtensions
         // pipeline, so a host that omits the compute service still boots.
         services.AddSingleton<TravelTimeTrigger>();
         services.AddSingleton<TravelTimeProgressService>();
+
+        // TRIP-OSRM-02 (Story 4.2): TripViewModel now reads the active provider's
+        // routing Attribution (AC4), so a provider MUST be resolvable in this
+        // parameterless overload — the integration host composes by hand and calls it,
+        // and without a provider the VM ctor would fail to construct (A3 gate). The
+        // haversine Mock is the only provider with no Polly/hosted/HTTP dependency, and
+        // it declares a null Attribution (haversine isn't OSM-derived), so it is the
+        // correct default here: no routing attribution under the default wiring. The
+        // production IConfiguration overload re-registers the config-selected provider
+        // AFTER calling this overload, and the last ITravelTimeProvider registration
+        // wins on resolve — so "Osrm" still swaps in cleanly in production.
+        services.AddSingleton<ITravelTimeProvider, MockTravelTimeProvider>();
         return services;
     }
 

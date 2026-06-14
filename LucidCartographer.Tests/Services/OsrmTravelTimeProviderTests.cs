@@ -71,6 +71,17 @@ public class OsrmTravelTimeProviderTests
         provider.Source.Should().Be(TravelTimeSource.Osrm);
     }
 
+    [Fact]
+    public void Attribution_IsOsmOdblRoutingString()
+    {
+        // TRIP-OSRM-02 (Story 4.2, AC4, NFR8): OSRM routes over OpenStreetMap data, so
+        // it declares the OSM/ODbL routing attribution — sourced from UiStrings (NFR5),
+        // never a hardcoded literal here.
+        var provider = Build(new StubHandler((_, _) => Json(HttpStatusCode.OK, OkBody)));
+        provider.Attribution.Should().Be(Services.UiStrings.TripRoutingAttributionOsm);
+        provider.Attribution.Should().NotBeNullOrWhiteSpace();
+    }
+
     [Theory]
     [InlineData(TravelMode.Drive, "car")]
     [InlineData(TravelMode.Walk, "foot")]

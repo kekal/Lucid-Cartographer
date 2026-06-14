@@ -56,6 +56,16 @@ public interface IMapService
     Task ClearTripAsync();
 
     /// <summary>
+    /// TRIP-OSRM-02 (Story 4.2, AC4, NFR8): set the routing-data attribution on the
+    /// map's attribution control. When <paramref name="html"/> is non-null (an
+    /// OSM-based routing provider such as OSRM is active) the OSM/ODbL routing
+    /// attribution is added on top of the base OSM tile attribution; when null (the
+    /// default Mock declares none) any prior routing attribution is removed. One call
+    /// covers both surfaces — desktop and mobile share the single Leaflet map.
+    /// </summary>
+    Task SetRoutingAttributionAsync(string? html);
+
+    /// <summary>
     /// Emphasise the selected Trip Stop marker, or clear emphasis when
     /// <paramref name="poiId"/> is null. At most one marker is emphasised; the
     /// prior emphasis is removed. Additive to the existing marker popup/click —

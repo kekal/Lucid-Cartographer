@@ -343,6 +343,86 @@ public class TripViewIntegrationTests : IntegrationTestBase
         Assert.Equal(names[1], restored[0]);
     }
 
+    // === Story 4.2 (TRIP-OSRM-02): geometry through the DTO + the upgrade re-push ===
+
+    // Waits until the StubMapService recorded a leg-geometries push whose entries
+    // satisfy the predicate (e.g. "all non-null"). Returns the match or null on timeout.
+    private async Task<IReadOnlyList<string?>?> WaitForLegGeometriesAsync(
+        Func<IReadOnlyList<string?>, bool> predicate, int timeoutMs = 10000)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTime.UtcNow < deadline)
+        {
+            var g = StubMapService.LastTripLegGeometries;
+            if (g is not null && g.Count > 0 && predicate(g))
+            {
+                return g;
+            }
+            await Page.WaitForTimeoutAsync(100);
+        }
+        return StubMapService.LastTripLegGeometries;
+    }
+
+    [Fact]
+    public async Task EstimatedLegs_PushNullGeometry_ThenMeasuredCacheFill_RePushesPolyline()
+    {
+        StubMapService.ResetTripRecording();
+        await EnableTripViewAsync();
+        var names = await StopNamesAsync();
+        Assert.True(names.Count >= 3);
+
+        // Initial draw: no cache rows ⇒ every leg pushes null geometry (dashed/muted).
+        var initial = await WaitForLegGeometriesAsync(g => g.All(x => x is null));
+        Assert.NotNull(initial);
+        Assert.All(initial!, x => Assert.Null(x));
+
+        // A precision-5 encoded polyline (Google/OSRM reference sample).
+        const string encoded = "_p~iF~ps|U_ulLnnqC_mqNvxq`@";
+
+        // Fill the cache with Measured rows (carrying geometry) for EVERY directional
+        // placeable pair — the active roundtrip legs are a subset, so this guarantees
+        // each drawn leg now has a row. Mirrors what the OSRM background compute would
+        // persist when OSRM becomes available (Estimated→Measured upgrade, UX-DR9).
+        await SeedDataAsync(async db =>
+        {
+            var col = db.PoiCollections.Single();
+            var poiIds = db.PoiCollectionItems
+                .Where(i => i.PoiCollectionId == col.Id)
+                .Select(i => i.PoiId)
+                .ToList();
+            foreach (var from in poiIds)
+            {
+                foreach (var to in poiIds)
+                {
+                    if (from == to)
+                    {
+                        continue;
+                    }
+                    db.RouteSegments.Add(new Data.Entities.RouteSegment
+                    {
+                        FromPoiId = from, ToPoiId = to, TravelMode = col.TravelMode,
+                        DurationSeconds = 600, DistanceMeters = 8000,
+                        Fidelity = Data.Entities.Fidelity.Measured,
+                        Source = LucidCartographer.Services.Trip.TravelTimeSource.Osrm,
+                        GeometryPolyline = encoded, ComputedAt = DateTime.UtcNow,
+                    });
+                }
+            }
+            await db.SaveChangesAsync();
+        });
+
+        // Signal progress (a leg landed in the cache). The circuit VM observes the
+        // shared TravelTimeProgressService singleton, re-reads the cache, rebuilds the
+        // legs WITH geometry, and re-pushes — the AC3 dedup must NOT swallow this
+        // (LegsEqual compares GeometryPolyline + IsMeasured). Use a non-zero value so
+        // BehaviorSubject emits a real change past the Skip(1).
+        GetAppService<LucidCartographer.Services.Trip.TravelTimeProgressService>().Set(1);
+
+        var upgraded = await WaitForLegGeometriesAsync(g => g.All(x => x == encoded));
+        Assert.NotNull(upgraded);
+        Assert.All(upgraded!, x => Assert.Equal(encoded, x));
+    }
+
     [Fact]
     public async Task TripViewState_PersistsAcrossReopen()
     {

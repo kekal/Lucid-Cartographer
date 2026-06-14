@@ -494,6 +494,16 @@ else
             // legs onto the freshly-seeded markers (no-op when Trip View is off).
             await PushTripAsync();
 
+            // TRIP-OSRM-02 (Story 4.2, AC4): once the map is live, push the active
+            // routing provider's OSM/ODbL attribution to Leaflet's attribution control
+            // (null under the default Mock ⇒ nothing added). Runs per map instance, so
+            // it re-applies after a desktop<->mobile viewport flip — one call covers
+            // both surfaces (they share the single LeafletMap). The JS side dedups, so
+            // a repeat call never double-prints the attribution. Read off the VM
+            // (RoutingAttributionHtml → ITravelTimeProvider.Attribution) to keep the
+            // Component → ViewModel → Service layering — no config sniffing in the page.
+            await _leafletMap.SetRoutingAttributionAsync(TripVm.RoutingAttributionHtml);
+
             // Mobile: ask for GPS access and drop a "you are here" star. This
             // runs once per map instance (the block is gated on a fresh
             // _wiredMap ref). recenter:false — we request the location and mark
@@ -723,7 +733,7 @@ else
         if (legs is { Count: > 0 })
         {
             var dtos = legs
-                .Select(l => new TripLegDto(l.FromLat, l.FromLon, l.ToLat, l.ToLon, l.IsMeasured))
+                .Select(l => new TripLegDto(l.FromLat, l.FromLon, l.ToLat, l.ToLon, l.IsMeasured, l.GeometryPolyline))
                 .ToList();
             await _leafletMap.DrawTripLegsAsync(dtos, roundtrip);
         }
@@ -747,7 +757,13 @@ else
         }
         for (var i = 0; i < ca; i++)
         {
-            // TripLeg is a record — value equality compares every endpoint + flag.
+            // TripLeg is a record — value equality compares EVERY field, which now
+            // includes IsMeasured AND GeometryPolyline (TRIP-OSRM-02). That is the
+            // load-bearing dedup guarantee for AC3: an Estimated→Measured upgrade that
+            // keeps the same endpoints but gains road geometry (and flips IsMeasured)
+            // is NOT equal to the prior dashed leg, so the no-redraw guard does not
+            // swallow it — the leg redraws solid/road-shaped live via the StateChanged
+            // path. (Were equality coordinate-only, the upgrade would be silently lost.)
             if (!a![i].Equals(b![i]))
             {
                 return false;

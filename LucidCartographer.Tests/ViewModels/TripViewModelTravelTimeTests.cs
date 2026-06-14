@@ -52,7 +52,7 @@ public class TripViewModelTravelTimeTests
 
     private static async Task AddSegmentAsync(
         IDbContextFactory<AppDbContext> factory, int from, int to, int seconds, double meters, string fidelity,
-        string source = "Mock")
+        string source = "Mock", string? geometry = null)
     {
         await using var db = await factory.CreateDbContextAsync();
         db.RouteSegments.Add(new RouteSegment
@@ -60,8 +60,52 @@ public class TripViewModelTravelTimeTests
             FromPoiId = from, ToPoiId = to, TravelMode = TravelMode.AnyAir,
             DurationSeconds = seconds, DistanceMeters = meters,
             Fidelity = fidelity, Source = source, ComputedAt = DateTime.UtcNow,
+            GeometryPolyline = geometry,
         });
         await db.SaveChangesAsync();
+    }
+
+    // --- Story 4.2 (TRIP-OSRM-02): geometry flows into the leg projection ---
+
+    [Fact]
+    public async Task MeasuredLeg_WithGeometry_CarriesPolyline_AndIsMeasured()
+    {
+        var factory = Seed(placeable: 2);
+        // A Measured row with a precision-5 encoded polyline (the "_p~iF~ps|U" sample
+        // from the Google/OSRM algorithm reference). The other leg has none.
+        const string encoded = "_p~iF~ps|U_ulLnnqC_mqNvxq`@";
+        await AddSegmentAsync(factory, 1, 2, 600, 8000, Fidelity.Measured, TravelTimeSource.Osrm, encoded);
+        await AddSegmentAsync(factory, 2, 1, 600, 8000, Fidelity.Measured, TravelTimeSource.Osrm, encoded);
+
+        await using var vm = await EnabledVmAsync(factory, 2);
+
+        var leg = vm.OrderedLegs.First(l => l.FromPoiId == 1 && l.ToPoiId == 2);
+        leg.IsMeasured.Should().BeTrue();
+        leg.GeometryPolyline.Should().Be(encoded, "the measured road geometry threads through MakeLeg verbatim");
+    }
+
+    [Fact]
+    public async Task NonMeasuredRows_CarryNullGeometry()
+    {
+        var factory = Seed(placeable: 2);
+        // Estimated and Placeholder rows never carry road geometry.
+        await AddSegmentAsync(factory, 1, 2, 600, 8000, Fidelity.Estimated, TravelTimeSource.Mock);
+        await AddSegmentAsync(factory, 2, 1, 720, 9000, Fidelity.Placeholder, TravelTimeSource.Mock);
+
+        await using var vm = await EnabledVmAsync(factory, 2);
+
+        vm.OrderedLegs.Should().OnlyContain(l => l.GeometryPolyline == null,
+            "no road geometry for Estimated/Placeholder ⇒ dashed/muted render");
+    }
+
+    [Fact]
+    public async Task UncomputedLeg_HasNullGeometry()
+    {
+        var factory = Seed(placeable: 2);
+        // No cache rows at all — both roundtrip legs are uncomputed (Air/dashed).
+        await using var vm = await EnabledVmAsync(factory, 2);
+
+        vm.OrderedLegs.Should().OnlyContain(l => l.GeometryPolyline == null);
     }
 
     [Fact]

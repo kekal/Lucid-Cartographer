@@ -29,6 +29,7 @@ public class TripViewModelRecomputeTests
     private sealed class MeasuredProvider : ITravelTimeProvider
     {
         public string Source => "StubMeasured";
+        public string? Attribution => null;
         public Task<TravelLegResult> GetLegAsync(TravelEndpoint from, TravelEndpoint to, string travelMode, CancellationToken ct) =>
             Task.FromResult(new TravelLegResult(900, 12000, Fidelity.Measured, GeometryPolyline: null));
     }
@@ -39,6 +40,7 @@ public class TripViewModelRecomputeTests
     {
         public int Calls { get; private set; }
         public string Source => "Mock";
+        public string? Attribution => null;
         public Task<TravelLegResult> GetLegAsync(TravelEndpoint from, TravelEndpoint to, string travelMode, CancellationToken ct)
         {
             Calls++;

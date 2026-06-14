@@ -353,6 +353,12 @@ public abstract class IntegrationTestBase : IAsyncLifetime
 
     // === Data helpers ===
 
+    // Resolve a process-wide singleton from the application's root services (e.g.
+    // TravelTimeProgressService — shared between the test scope and the Blazor
+    // circuit), so a test can publish a progress signal the circuit's VM observes.
+    protected T GetAppService<T>() where T : notnull =>
+        _app.Services.GetRequiredService<T>();
+
     protected async Task SeedDataAsync(Func<AppDbContext, Task> seedAction)
     {
         Log("SEED: start");

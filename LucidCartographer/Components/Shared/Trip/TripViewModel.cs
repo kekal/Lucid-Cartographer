@@ -29,8 +29,28 @@ public sealed class TripViewModel(
     TravelTimeTrigger travelTimeTrigger,
     TravelTimeProgressService travelTimeProgress,
     IRouteSegmentInvalidationService routeSegmentInvalidation,
-    ILogger<TripViewModel> logger) : IAsyncDisposable
+    ILogger<TripViewModel> logger,
+    // TRIP-OSRM-02 (Story 4.2, AC4): the active travel-time provider, read ONLY for its
+    // declared routing Attribution. OPTIONAL with a null default so the parameterless
+    // construction paths (unit/component tests that compose the VM by hand) keep working
+    // unchanged — DI still injects the registered provider in the app and the integration
+    // host (AddTripServices registers the haversine Mock, which declares null
+    // attribution). A null provider here simply means no routing attribution is surfaced.
+    ITravelTimeProvider? travelTimeProvider = null) : IAsyncDisposable
 {
+    /// <summary>
+    /// TRIP-OSRM-02 (Story 4.2, AC4): the active travel-time provider's routing-data
+    /// attribution HTML, or <c>null</c> when the provider's data is not licence-bound
+    /// (the haversine Mock) or no provider was supplied. The page pushes it to Leaflet's
+    /// attribution control once after map init so an OSM-based routing provider (OSRM)
+    /// surfaces its OSM/ODbL obligation on top of the base tile attribution (NFR8); under
+    /// the default Mock it is null ⇒ nothing is added. Surfaced on the VM (rather than the
+    /// page sniffing the provider/config) to keep the Component → ViewModel → Service
+    /// layering, and read off <see cref="ITravelTimeProvider.Attribution"/> — the data
+    /// source declares its own licence.
+    /// </summary>
+    public string? RoutingAttributionHtml => travelTimeProvider?.Attribution;
+
     private static readonly IReadOnlyDictionary<int, int> NoStops =
         new ReadOnlyDictionary<int, int>(new Dictionary<int, int>());
 
@@ -1030,7 +1050,12 @@ public sealed class TripViewModel(
             DurationSeconds: displayDuration,
             DistanceMeters: seg?.DistanceMeters,
             Fidelity: fidelity,
-            IsFallback: isFallback);
+            IsFallback: isFallback,
+            // TRIP-OSRM-02 (Story 4.2): carry the measured road geometry through to
+            // the map projection. Already null for non-Measured rows (only OSRM
+            // writes it for a Measured leg); the JS side decodes the precision-5
+            // encoded polyline and gates "solid road" on its presence (AC1/AC5).
+            GeometryPolyline: seg?.GeometryPolyline);
     }
 
     /// <summary>

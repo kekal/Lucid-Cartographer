@@ -22,6 +22,13 @@ public sealed class MockTravelTimeProvider(IOptions<TravelTimeOptions> options) 
 
     public string Source => ProviderId;
 
+    /// <summary>
+    /// TRIP-OSRM-02 (Story 4.2, AC4): the haversine Mock is not OSM-derived, so it
+    /// declares no routing attribution — the base OSM tile attribution is the only
+    /// obligation under the default provider.
+    /// </summary>
+    public string? Attribution => null;
+
     public Task<TravelLegResult> GetLegAsync(
         TravelEndpoint from,
         TravelEndpoint to,

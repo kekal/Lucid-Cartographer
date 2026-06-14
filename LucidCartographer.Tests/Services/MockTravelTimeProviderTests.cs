@@ -29,6 +29,15 @@ public class MockTravelTimeProviderTests
     });
 
     [Fact]
+    public void Attribution_IsNull_HaversineIsNotOsmDerived()
+    {
+        // TRIP-OSRM-02 (Story 4.2, AC4): the Mock declares no routing attribution —
+        // a great-circle estimate is not OSM-derived, so only the base OSM tile
+        // attribution applies under the default provider.
+        DefaultProvider().Attribution.Should().BeNull();
+    }
+
+    [Fact]
     public async Task GetLeg_AnyAir_MatchesHaversineAndAnyAirSpeed_AndIsPlaceholder()
     {
         const double speed = 13.8889; // Any/Air assumed speed

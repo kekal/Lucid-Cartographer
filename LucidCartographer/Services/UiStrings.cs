@@ -128,6 +128,14 @@ public static class UiStrings
     public const string TripRoundtripAnnounce = "Roundtrip — returns to start";
     public const string TripOpenPathAnnounce = "Open path — ends at {0}";
 
+    // Trip View — routing-data attribution (Story 4.2, [TRIP-OSRM-02], NFR8).
+    // Displayed on the map's attribution control (in addition to the base OSM tile
+    // attribution) only when an OSM-based routing provider (OSRM) is active. Factual,
+    // licence-honest copy (UX-DR11) — names the routing engine and the OSM/ODbL data
+    // licence, no hype.
+    public const string TripRoutingAttributionOsm =
+        "Routing &copy; OSRM &middot; Map data &copy; OpenStreetMap contributors (ODbL)";
+
     // Trip View — unplaceable stops (Story 1.6, [TRIP-PLACE-05]). Honest,
     // factual, provenance-aware copy (UX-DR11): the POI is kept in the
     // collection, excluded from the route — never silently dropped (UX-DR10).

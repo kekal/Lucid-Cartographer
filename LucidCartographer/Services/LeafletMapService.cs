@@ -11,11 +11,21 @@ public record MarkerDto(int Id, string Name, double Latitude, double Longitude, 
 
 /// <summary>
 /// DTO for one Trip View connecting leg passed to the JS interop layer. Carries
-/// only the endpoint coordinates + fidelity flag the polyline needs (the POI ids
-/// the ViewModel-side <c>TripLeg</c> holds are not relevant to the draw). Property
-/// names serialize to camelCase to match leafletInterop.drawTripLegs.
+/// the endpoint coordinates + fidelity flag the polyline needs (the POI ids the
+/// ViewModel-side <c>TripLeg</c> holds are not relevant to the draw) plus the
+/// optional measured road geometry. Property names serialize to camelCase to match
+/// leafletInterop.drawTripLegs.
+/// <para>
+/// TRIP-OSRM-02 (Story 4.2): <see cref="GeometryPolyline"/> is the measured leg's
+/// road shape as an encoded polyline (precision 5, the encoding Story 4.1 produces —
+/// TRIP-OSRM-01); <c>null</c>/empty when no road geometry is known. The JS side
+/// decodes it and draws a solid, full-weight road line; with no geometry it draws the
+/// straight dashed + muted connector. Solidity keys off geometry presence, not
+/// <see cref="IsMeasured"/> alone.
+/// </para>
 /// </summary>
-public record TripLegDto(double FromLat, double FromLon, double ToLat, double ToLon, bool IsMeasured);
+public record TripLegDto(
+    double FromLat, double FromLon, double ToLat, double ToLon, bool IsMeasured, string? GeometryPolyline = null);
 
 public class LeafletMapService(IJSRuntime js) : IMapService, IAsyncDisposable
 {
@@ -80,6 +90,14 @@ public class LeafletMapService(IJSRuntime js) : IMapService, IAsyncDisposable
         await InvokeJsVoidAsync("leafletInterop.drawTripLegs", legs, isRoundtrip);
 
     public async Task ClearTripAsync() => await InvokeJsVoidAsync("leafletInterop.clearTripLegs");
+
+    // TRIP-OSRM-02 (Story 4.2, AC4): add the active OSM-based routing provider's
+    // OSM/ODbL attribution to Leaflet's attribution control (on top of the base OSM
+    // tile attribution), or remove the prior routing attribution when html is null
+    // (the default Mock declares none). One call covers both surfaces — desktop and
+    // mobile share the single LeafletMap.
+    public async Task SetRoutingAttributionAsync(string? html) =>
+        await InvokeJsVoidAsync("leafletInterop.setRoutingAttribution", html);
 
     // TRIP-SELECT-04: list ↔ map selection sync. Pass the int? straight through —
     // a null clears the emphasis JS-side.

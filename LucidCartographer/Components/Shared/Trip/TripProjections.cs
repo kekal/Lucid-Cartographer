@@ -61,7 +61,15 @@ public sealed record TripLeg(
     // TravelTimeSource.EstimatedFallback). Drives
     // TripViewModel.IsShowingApproximateEstimates and the honest "showing
     // straight-line estimates" note — distinct from a normally-Estimated Mock leg.
-    bool IsFallback = false);
+    bool IsFallback = false,
+    // TRIP-OSRM-02 (Story 4.2): the measured road geometry as an encoded polyline,
+    // precision 5 (the encoding Story 4.1's OsrmTravelTimeProvider produces via
+    // geometries=polyline — TRIP-OSRM-01). null/empty = no road geometry is known
+    // (Estimated / Manual / Placeholder / Air, or a cache row with no row yet) ⇒ the
+    // map draws a straight dashed + muted connector. Only a Measured leg carries it;
+    // its presence (not IsMeasured alone) is what makes the line render solid/road-
+    // shaped. Carried verbatim from RouteSegment.GeometryPolyline; decoded JS-side.
+    string? GeometryPolyline = null);
 
 /// <summary>
 /// One ordered, placeable stop projected for the stop-list panel and the

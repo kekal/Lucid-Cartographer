@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using LucidCartographer.Data.Entities;
+using LucidCartographer.Services;
 using Microsoft.Extensions.Options;
 
 namespace LucidCartographer.Services.Trip;
@@ -52,6 +53,14 @@ public sealed class OsrmTravelTimeProvider(
     };
 
     public string Source => TravelTimeSource.Osrm;
+
+    /// <summary>
+    /// TRIP-OSRM-02 (Story 4.2, AC4, NFR8): OSRM routes over OpenStreetMap data, so the
+    /// ODbL obligation applies to the routing geometry/times this provider produces. The
+    /// UI surfaces this OSM/ODbL routing attribution on the map (in addition to the base
+    /// OSM tile attribution) whenever OSRM is the active provider. Copy via UiStrings (NFR5).
+    /// </summary>
+    public string? Attribution => UiStrings.TripRoutingAttributionOsm;
 
     public async Task<TravelLegResult> GetLegAsync(
         TravelEndpoint from,

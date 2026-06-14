@@ -20,6 +20,18 @@ public interface ITravelTimeProvider
     string Source { get; }
 
     /// <summary>
+    /// TRIP-OSRM-02 (Story 4.2, AC4, NFR8): the routing-data attribution HTML this
+    /// provider's data obliges the UI to display, or <c>null</c> when the data is not
+    /// licence-bound. An OSM-based provider (OSRM) returns the OSM/ODbL routing
+    /// attribution (via <c>UiStrings</c>); the haversine <see cref="MockTravelTimeProvider"/>
+    /// returns <c>null</c> (a great-circle estimate is not OSM-derived). The attribution
+    /// lives with the provider so the data-licence obligation is declared where the data
+    /// source is — the UI renders whatever the active provider declares, with no config
+    /// sniffing.
+    /// </summary>
+    string? Attribution { get; }
+
+    /// <summary>
     /// Computes the leg from <paramref name="from"/> to <paramref name="to"/>
     /// under <paramref name="travelMode"/>. Directional: A→B need not equal B→A.
     /// </summary>

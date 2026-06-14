@@ -144,6 +144,19 @@
         await MapService.ClearTripAsync();
     }
 
+    // TRIP-OSRM-02 (Story 4.2, AC4): forward the active routing provider's OSM/ODbL
+    // attribution to the map's attribution control (null removes any prior routing
+    // attribution — the default Mock declares none).
+    public async Task SetRoutingAttributionAsync(string? html)
+    {
+        if (!IsInitialized)
+        {
+            return;
+        }
+
+        await MapService.SetRoutingAttributionAsync(html);
+    }
+
     public async Task EmphasizeStopAsync(int? poiId)
     {
         if (!IsInitialized)

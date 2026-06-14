@@ -207,6 +207,43 @@
         }
     }
 
+    // TRIP-OSRM-02 (Story 4.2): decode a Google/OSRM encoded polyline (PRECISION 5)
+    // into a [[lat,lon],...] vertex array for the measured road-shaped leg. This MUST
+    // stay in lockstep with Story 4.1's OsrmTravelTimeProvider, which requests
+    // geometries=polyline at OsrmOptions.GeometryPrecision (default 5 → factor 1e5).
+    // If 4.1 ever moves to precision 6 (polyline6), change the 1e5 factor here to 1e6
+    // (TRIP-OSRM-01). Self-contained — no bundled library, no CDN (ARCH-HIGH-07:
+    // Leaflet is self-hosted). Returns null on any malformed input so drawTripLegs
+    // falls back to the straight dashed connector and never throws.
+    function decodePolyline(encoded) {
+        if (typeof encoded !== 'string' || encoded.length === 0) return null;
+        try {
+            var points = [];
+            var index = 0, lat = 0, lng = 0;
+            var len = encoded.length;
+            while (index < len) {
+                var result = 0, shift = 0, b;
+                do {
+                    b = encoded.charCodeAt(index++) - 63;
+                    result |= (b & 0x1f) << shift;
+                    shift += 5;
+                } while (b >= 0x20 && index < len);
+                lat += ((result & 1) ? ~(result >> 1) : (result >> 1));
+                result = 0; shift = 0;
+                do {
+                    b = encoded.charCodeAt(index++) - 63;
+                    result |= (b & 0x1f) << shift;
+                    shift += 5;
+                } while (b >= 0x20 && index < len);
+                lng += ((result & 1) ? ~(result >> 1) : (result >> 1));
+                points.push([lat * 1e-5, lng * 1e-5]);
+            }
+            return points.length ? points : null;
+        } catch (_) {
+            return null;
+        }
+    }
+
     // Build the divIcon for a marker. When Trip View is on and this POI has a
     // Stop number, render a primary-filled numbered badge; otherwise the plain
     // colour dot. Kept in one place so addCollectionMarkers and setStopOrders
@@ -294,6 +331,10 @@
             // Prior map removed above took its overlay layers with it; drop the
             // stale trip-leg group handle so a fresh draw starts clean.
             state.tripLegLayer = null;
+            // TRIP-OSRM-02 (Story 4.2): the prior attribution control went away with
+            // the removed map, so forget the tracked routing attribution; MapPage
+            // re-pushes it once the fresh map is live (one call covers both surfaces).
+            state.routingAttribution = null;
             // The previous map (if any) was removed above, taking its geolocation
             // watch and user marker with it. Reset so locateUser starts cleanly
             // against the new map (e.g. after a desktop<->mobile viewport flip).
@@ -499,19 +540,27 @@
             var group = L.layerGroup();
             legs.forEach(function (leg, idx) {
                 var closing = !!roundtrip && idx === legs.length - 1;
-                // Line-solidity = geometric fidelity: only a Measured leg renders
-                // solid/full-weight; every Phase-1 leg is non-Measured → dashed +
-                // muted. The stroke colour comes from the .trip-leg-line CSS class
-                // (token palette, mirroring .stop-order-marker) — no hex is
-                // hardcoded here. The `measured` branch is reserved for Phase 2.
-                var measured = !!leg.isMeasured;
+                // TRIP-OSRM-02 (Story 4.2, AC1/AC5): line-solidity = geometric
+                // fidelity, and fidelity is proven by the PRESENCE OF ROAD GEOMETRY —
+                // NOT by leg.isMeasured alone. A leg whose geometryPolyline decodes to
+                // road vertices renders solid/full-weight/primary (the only solid
+                // state); every other leg (Estimated / Manual / Placeholder / Air, or a
+                // Measured leg that somehow lacks geometry, or a malformed polyline)
+                // falls back to the straight dashed + muted Phase-1 connector. The
+                // stroke colour comes from the CSS class (token palette, dark-mode
+                // aware) — no hex hardcoded here.
+                var roadPts = leg.geometryPolyline ? decodePolyline(leg.geometryPolyline) : null;
+                var hasGeometry = !!(roadPts && roadPts.length >= 2);
+                var latlngs = hasGeometry
+                    ? roadPts
+                    : [[leg.fromLat, leg.fromLon], [leg.toLat, leg.toLon]];
                 L.polyline(
-                    [[leg.fromLat, leg.fromLon], [leg.toLat, leg.toLon]],
+                    latlngs,
                     {
-                        className: (measured ? 'trip-leg-line trip-leg-measured' : 'trip-leg-line') + (closing ? ' trip-leg-closing' : ''),
-                        dashArray: measured ? null : '6 6',
-                        weight: measured ? 4 : 2,
-                        opacity: measured ? 1 : 0.7,
+                        className: (hasGeometry ? 'trip-leg-line trip-leg-measured' : 'trip-leg-line') + (closing ? ' trip-leg-closing' : ''),
+                        dashArray: hasGeometry ? null : '6 6',
+                        weight: hasGeometry ? 4 : 2,
+                        opacity: hasGeometry ? 1 : 0.7,
                         // Legs must never intercept clicks meant for the Stop
                         // markers above them (preserves marker-click selection — AC4).
                         interactive: false
@@ -520,6 +569,26 @@
             });
             group.addTo(state.map);
             state.tripLegLayer = group;
+        },
+
+        // TRIP-OSRM-02 (Story 4.2, AC4): add or remove the routing-data attribution on
+        // Leaflet's attribution control (on TOP of the base OSM tile attribution set in
+        // initMap). Called once per map instance from MapPage with the active provider's
+        // OSM/ODbL attribution HTML when an OSM-based provider (OSRM) is active, or null
+        // under the default Mock (which declares none). Idempotent: it removes any
+        // previously-added routing attribution first, so a repeat call (e.g. a
+        // desktop<->mobile viewport flip re-running it) never double-prints it.
+        setRoutingAttribution: function (html) {
+            if (!state.map || !state.map.attributionControl) return;
+            var ctrl = state.map.attributionControl;
+            if (state.routingAttribution) {
+                ctrl.removeAttribution(state.routingAttribution);
+                state.routingAttribution = null;
+            }
+            if (html) {
+                ctrl.addAttribution(html);
+                state.routingAttribution = html;
+            }
         },
 
         // Remove the trip-leg layer (Trip-View-off / collection hide). The
