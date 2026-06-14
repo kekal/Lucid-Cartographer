@@ -132,6 +132,41 @@ public static class UiStrings
     public const string TripStopNotPlaceableDetail = "Not placeable — no coordinates. Kept in the collection, excluded from the route.";
     public const string TripStopNotPlaceableAria = "Not placeable: this stop has no coordinates and is excluded from the route, but kept in the collection.";
 
+    // Trip View — per-leg travel time + Fidelity badge (Story 2.1,
+    // [TRIP-TRAVELTIME-01]). Times/distances are formatted at the UI edge only
+    // (canonical seconds/meters in the VM). "—" marks an as-yet-uncomputed leg
+    // or a partial total (no false precision).
+    public const string TripLegTimeUnknown = "—";
+    // {0} = formatted travel time (e.g. "1h 20m"). Per-leg time accessible name.
+    public const string TripLegTravelTimeAria = "Travel time {0}";
+    // {0} = formatted distance (e.g. "12 km"). Per-leg distance accessible name.
+    public const string TripLegDistanceAria = "Distance {0}";
+    // Fidelity badge visible text + accessible names. Placeholder/null never renders.
+    public const string TripFidelityMeasured = "Measured";
+    public const string TripFidelityEstimated = "Estimated";
+    public const string TripFidelityManual = "Manual";
+    // {0} = the fidelity word. Badge accessible name conveying provenance.
+    public const string TripFidelityAria = "Provenance: {0}";
+    // Announced via aria-live while one or more legs are still computing.
+    public const string TripLegComputingAnnouncement = "Computing travel times…";
+    public const string TripLegComputingAria = "Travel time computing";
+    // Trip total travel time. {0} = formatted total; the label introduces the value.
+    public const string TripTotalTravelTimeLabel = "Total travel time";
+    public const string TripTotalTravelTimeAria = "Total travel time {0}";
+    // UI-edge duration/distance format patterns (TravelTimeFormatting). Kept here
+    // so the unit words ("h"/"m"/"km") and the sub-minute/zero tokens are localizable
+    // rather than hardcoded at the conversion site. {0}/{1} = numeric parts.
+    public const string TripDurationHoursMinutes = "{0}h {1}m";
+    public const string TripDurationMinutes = "{0}m";
+    public const string TripDurationSubMinute = "<1m";
+    public const string TripDurationZero = "0m";
+    public const string TripDistanceKilometers = "{0:0.#} km";
+    public const string TripDistanceMeters = "{0:0} m";
+    // Accessible name for the leg-time slot of a stop that has NO departing leg
+    // (the last stop of an open path, or an unplaceable row). Distinct from the
+    // "computing" state — there is simply no hop to time here.
+    public const string TripLegNoTravelTimeAria = "No travel time";
+
     // Data Sources Page
     public const string DataSourcesPageTitle = "Data Sources - Lucid Cartographer";
     public const string DataAndImports = "Data & Imports";

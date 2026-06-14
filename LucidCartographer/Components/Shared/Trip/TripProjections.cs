@@ -24,17 +24,26 @@ public enum TripStopRole
     Finish,
 }
 
-// TRIP-LEG-01: Phase 1 — all legs straight + non-Measured. These immutable
-// projections are computed on the fly by TripViewModel from the seeded Stop
-// Order; nothing here is persisted (the RouteSegment cache is an Epic 2/4
-// concern). The line-solidity = geometric-fidelity rule means a leg renders
-// solid only when IsMeasured is true — and no leg is Measured in Phase 1, so
-// every leg draws dashed + muted.
+// TRIP-LEG-01: legs are straight skeletons computed on the fly by TripViewModel
+// from the seeded Stop Order. The geometry (FromLat..ToLon) is never persisted.
+// TRIP-TRAVELTIME-01 (Epic 2): the travel-time fields below ARE read back from
+// the persisted RouteSegment cache when a row exists for the leg's
+// (FromPoiId, ToPoiId, collection TravelMode) key — null until the background
+// service has computed it (render "—" + computing). The line-solidity =
+// geometric-fidelity rule still keys off IsMeasured (Measured fidelity only);
+// the haversine Mock yields Estimated, so legs stay dashed + muted for now.
 
 /// <summary>
 /// One straight connecting leg between two consecutive placeable stops (or the
-/// closing leg back to the Start on a Roundtrip). <see cref="IsMeasured"/> is
-/// always <c>false</c> in Phase 1 — the road-routing provider arrives in Epic 2/4.
+/// closing leg back to the Start on a Roundtrip).
+/// <para>
+/// TRIP-TRAVELTIME-01: <see cref="DurationSeconds"/> (canonical seconds),
+/// <see cref="DistanceMeters"/> (canonical meters) and <see cref="Fidelity"/>
+/// are populated from the RouteSegment cache; all three are <c>null</c> when no
+/// cache row exists yet (not-yet-computed ⇒ the UI renders an em-dash + computing
+/// state). <see cref="IsMeasured"/> is derived: true only when
+/// <see cref="Fidelity"/> equals <see cref="Data.Entities.Fidelity.Measured"/>.
+/// </para>
 /// </summary>
 public sealed record TripLeg(
     int FromPoiId,
@@ -43,7 +52,10 @@ public sealed record TripLeg(
     double FromLon,
     double ToLat,
     double ToLon,
-    bool IsMeasured);
+    bool IsMeasured,
+    int? DurationSeconds = null,
+    double? DistanceMeters = null,
+    string? Fidelity = null);
 
 /// <summary>
 /// One ordered, placeable stop projected for the stop-list panel and the

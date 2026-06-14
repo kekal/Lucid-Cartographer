@@ -51,7 +51,7 @@ public class TripStopListTests : BunitTestContext
         }
         var writeLock = new SqliteWriteLock();
         var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
-        var vm = new TripViewModel(ordering, factory, writeLock, NullLogger<TripViewModel>.Instance);
+        var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), NullLogger<TripViewModel>.Instance);
         await vm.LoadAsync(CollectionId, placeable);
         await vm.ToggleAsync(); // seed + enable so OrderedStops is populated
         return vm;
@@ -73,11 +73,15 @@ public class TripStopListTests : BunitTestContext
         var badgeAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripStopBadgeAria, 1, 3);
         cut.Find($"[aria-label=\"{badgeAria}\"]").TextContent.Trim().Should().Be("1");
 
-        // Both inert placeholders render an em-dash with their aria-labels.
+        // The dwell placeholder stays an inert em-dash (Story 2.5).
         var dwell = cut.Find($"[aria-label=\"{UiStrings.TripDwellAria}\"]");
         dwell.TextContent.Trim().Should().Be(UiStrings.TripDwellPlaceholder);
-        var timeline = cut.Find($"[aria-label=\"{UiStrings.TripTimelineAria}\"]");
-        timeline.TextContent.Trim().Should().Be(UiStrings.TripTimelinePlaceholder);
+        // Story 2.1: with no cached RouteSegment rows the leg slot shows the
+        // computing state (em-dash + TripLegComputingAria), superseding the inert
+        // timeline placeholder.
+        cut.FindAll($"[aria-label=\"{UiStrings.TripLegComputingAria}\"]")
+            .Should().NotBeEmpty();
+        cut.Markup.Should().Contain(UiStrings.TripLegTimeUnknown);
 
         cut.Markup.Should().Contain(UiStrings.TripStopList);
     }
@@ -89,7 +93,7 @@ public class TripStopListTests : BunitTestContext
         var factory = SeedFactory(placeable: 2);
         var writeLock = new SqliteWriteLock();
         var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
-        await using var vm = new TripViewModel(ordering, factory, writeLock, NullLogger<TripViewModel>.Instance);
+        await using var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), NullLogger<TripViewModel>.Instance);
         await vm.LoadAsync(CollectionId, 2);
 
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
@@ -542,7 +546,7 @@ public class TripStopListTests : BunitTestContext
 
         var writeLock = new SqliteWriteLock();
         var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
-        var vm = new TripViewModel(ordering, factory, writeLock, NullLogger<TripViewModel>.Instance);
+        var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), NullLogger<TripViewModel>.Instance);
         await vm.LoadAsync(CollectionId, 2);
         await vm.ToggleAsync();
         return vm;

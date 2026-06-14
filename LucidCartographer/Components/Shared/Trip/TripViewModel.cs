@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using LucidCartographer.Data;
+using LucidCartographer.Data.Entities;
 using LucidCartographer.Services;
 using LucidCartographer.Services.Trip;
 using Microsoft.EntityFrameworkCore;
@@ -25,6 +26,8 @@ public sealed class TripViewModel(
     ITripOrderingService ordering,
     IDbContextFactory<AppDbContext> factory,
     SqliteWriteLock writeLock,
+    TravelTimeTrigger travelTimeTrigger,
+    TravelTimeProgressService travelTimeProgress,
     ILogger<TripViewModel> logger) : IAsyncDisposable
 {
     private static readonly IReadOnlyDictionary<int, int> NoStops =
@@ -32,6 +35,11 @@ public sealed class TripViewModel(
 
     private readonly CancellationTokenSource _cts = new();
     private bool _disposed;
+
+    // TRIP-TRAVELTIME-01: subscription to the background compute progress. When
+    // the pending count changes (a leg just landed in the cache), re-read the
+    // projections off the circuit thread and Notify — never poll, never block.
+    private IDisposable? _progressSubscription;
 
     public event Action? StateChanged;
 
@@ -85,6 +93,20 @@ public sealed class TripViewModel(
     /// is non-Measured in Phase 1 (TRIP-LEG-01).
     /// </summary>
     public IReadOnlyList<TripLeg> OrderedLegs { get; private set; } = [];
+
+    /// <summary>
+    /// TRIP-TRAVELTIME-01 (AC5): the trip's total travel time in seconds — the Σ
+    /// of every leg's <see cref="TripLeg.DurationSeconds"/> — or <c>null</c> when
+    /// any leg is uncomputed (no cache row yet). A null total renders as an
+    /// em-dash so the UI never presents false precision over a partial trip.
+    /// </summary>
+    public int? TotalTravelTimeSeconds { get; private set; }
+
+    /// <summary>
+    /// TRIP-TRAVELTIME-01: true while at least one leg has no cache row yet, so
+    /// the UI can show the per-leg / total computing state via aria-live.
+    /// </summary>
+    public bool IsAnyLegComputing { get; private set; }
 
     /// <summary>Localized on/off text for the aria-live announcement region; null until first toggle.</summary>
     public string? Announcement { get; private set; }
@@ -589,6 +611,9 @@ public sealed class TripViewModel(
         OrderedStops = [];
         StopRows = [];
         OrderedLegs = [];
+        // TRIP-TRAVELTIME-01: travel-time totals are scoped to an enabled Trip.
+        TotalTravelTimeSeconds = null;
+        IsAnyLegComputing = false;
         // TRIP-SELECT-01: selection is transient and only valid while Trip View
         // is on — drop it (and its announcement) whenever the projections clear
         // so toggling off never leaves a stale SelectedStopPoiId (AC4).
@@ -610,6 +635,10 @@ public sealed class TripViewModel(
     /// </summary>
     private async Task RefreshProjectionsAsync(int collectionId)
     {
+        // TRIP-TRAVELTIME-01: subscribe once (lazily) to the background compute
+        // progress so freshly-cached legs re-read without polling the circuit.
+        EnsureProgressSubscription();
+
         var (startPoiId, finishPoiId) = await ReadStartFinishAsync(collectionId);
         // TRIP-STARTFINISH-01: surface the pins so the UI can derive per-stop
         // roles (StopRole) and the Roundtrip/open-path shape (IsRoundtrip).
@@ -622,7 +651,21 @@ public sealed class TripViewModel(
         StopOrders = stops.Count == 0
             ? NoStops
             : stops.ToDictionary(s => s.PoiId, s => s.OrderIndex);
-        OrderedLegs = BuildLegs(stops, finishPoiId);
+
+        // TRIP-TRAVELTIME-01: read the collection's persisted TravelMode and the
+        // matching RouteSegment cache rows, then build the legs with whatever
+        // duration/distance/fidelity has been computed so far. A leg with no
+        // cache row keeps null fields ⇒ the UI shows "—" + computing.
+        var travelMode = await ReadTravelModeAsync(collectionId);
+        var cache = await ReadRouteSegmentsAsync(collectionId, travelMode);
+        OrderedLegs = BuildLegs(stops, finishPoiId, cache);
+        RecomputeTotal();
+
+        // TRIP-TRAVELTIME-01: any uncomputed leg ⇒ kick the off-circuit compute.
+        if (IsAnyLegComputing)
+        {
+            travelTimeTrigger.Signal();
+        }
 
         // TRIP-SELECT-01: if the selected Stop was removed (membership change) it
         // is no longer a valid selection — clear it; otherwise refresh the cached
@@ -716,6 +759,108 @@ public sealed class TripViewModel(
         return (row?.StartPoiId, row?.FinishPoiId);
     }
 
+    /// <summary>TRIP-TRAVELTIME-01: the collection's persisted travel mode (entity default AnyAir).</summary>
+    private async Task<string> ReadTravelModeAsync(int collectionId)
+    {
+        await using var db = await factory.CreateDbContextAsync(_cts.Token);
+        var mode = await db.PoiCollections
+            .Where(c => c.Id == collectionId)
+            .Select(c => c.TravelMode)
+            .FirstOrDefaultAsync(_cts.Token);
+        return mode ?? TravelMode.AnyAir;
+    }
+
+    /// <summary>
+    /// TRIP-TRAVELTIME-01: reads the cached <see cref="RouteSegment"/> rows for
+    /// this collection's stops under <paramref name="travelMode"/>, keyed by the
+    /// directional (From, To) pair so <see cref="MakeLeg"/> can fold them in.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<(int From, int To), RouteSegment>> ReadRouteSegmentsAsync(
+        int collectionId, string travelMode)
+    {
+        await using var db = await factory.CreateDbContextAsync(_cts.Token);
+
+        var poiIds = await db.PoiCollectionItems
+            .AsNoTracking()
+            .Where(ci => ci.PoiCollectionId == collectionId)
+            .Select(ci => ci.PoiId)
+            .ToListAsync(_cts.Token);
+
+        if (poiIds.Count == 0)
+        {
+            return EmptyCache;
+        }
+
+        var rows = await db.RouteSegments
+            .AsNoTracking()
+            .Where(r => r.TravelMode == travelMode
+                        && poiIds.Contains(r.FromPoiId)
+                        && poiIds.Contains(r.ToPoiId))
+            .ToListAsync(_cts.Token);
+
+        return rows.ToDictionary(r => (r.FromPoiId, r.ToPoiId));
+    }
+
+    private static readonly IReadOnlyDictionary<(int From, int To), RouteSegment> EmptyCache =
+        new ReadOnlyDictionary<(int, int), RouteSegment>(new Dictionary<(int, int), RouteSegment>());
+
+    /// <summary>
+    /// TRIP-TRAVELTIME-01: idempotently subscribes to the background compute
+    /// progress. On a change (the pending count dropped because a leg landed in
+    /// the cache) it re-reads the projections off the circuit thread via
+    /// <see cref="Notify"/>'s host-driven redraw path — no polling, no blocking.
+    /// </summary>
+    private void EnsureProgressSubscription()
+    {
+        // Skip(1): Changes is a BehaviorSubject that replays its current value on
+        // subscribe. That initial replay is not a real progress event — reacting
+        // to it would race a fire-and-forget leg rebuild against the projection
+        // refresh that just ran. Only subsequent changes (a leg landed in the
+        // cache) should trigger a re-read.
+        _progressSubscription ??= System.Reactive.Linq.Observable
+            .Skip(travelTimeProgress.Changes, 1)
+            .Subscribe(onNext: _ => RefreshLegsFromCacheFireAndForget());
+    }
+
+    // Fire-and-forget bridge: the Rx subscription is synchronous, so kick the
+    // async cache re-read without awaiting (errors are logged inside).
+    private void RefreshLegsFromCacheFireAndForget()
+    {
+        _ = RefreshLegsFromCacheAsync();
+    }
+
+    /// <summary>
+    /// TRIP-TRAVELTIME-01: re-reads only the cached travel times for the current
+    /// stops and rebuilds the legs + total, then Notifies. Called when the
+    /// background service reports progress; a no-op when Trip View is off.
+    /// </summary>
+    private async Task RefreshLegsFromCacheAsync()
+    {
+        if (_disposed || ActiveCollectionId is not { } collectionId || !IsTripViewEnabled)
+        {
+            return;
+        }
+
+        try
+        {
+            var travelMode = await ReadTravelModeAsync(collectionId);
+            var cache = await ReadRouteSegmentsAsync(collectionId, travelMode);
+            OrderedLegs = BuildLegs(OrderedStops, FinishPoiId, cache);
+            RecomputeTotal();
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to refresh travel-time legs for collection {CollectionId}", collectionId);
+            return;
+        }
+
+        Notify();
+    }
+
     /// <summary>
     /// TRIP-LEG-02: builds the straight connecting legs from the ordered stops.
     /// Consecutive pairs (k → k+1) give N−1 legs; when there is no distinct
@@ -724,7 +869,10 @@ public sealed class TripViewModel(
     /// appended, giving N legs. A distinct Finish leaves the path open (N−1 legs,
     /// no closing leg). Every leg is non-Measured in Phase 1 (TRIP-LEG-01).
     /// </summary>
-    private static IReadOnlyList<TripLeg> BuildLegs(IReadOnlyList<TripStop> stops, int? finishPoiId)
+    private static IReadOnlyList<TripLeg> BuildLegs(
+        IReadOnlyList<TripStop> stops,
+        int? finishPoiId,
+        IReadOnlyDictionary<(int From, int To), RouteSegment> cache)
     {
         if (stops.Count < 2)
         {
@@ -734,7 +882,7 @@ public sealed class TripViewModel(
         var legs = new List<TripLeg>(stops.Count);
         for (var k = 0; k < stops.Count - 1; k++)
         {
-            legs.Add(MakeLeg(stops[k], stops[k + 1]));
+            legs.Add(MakeLeg(stops[k], stops[k + 1], cache));
         }
 
         // Roundtrip closes the loop with a leg from the last stop back to the
@@ -750,14 +898,45 @@ public sealed class TripViewModel(
             && stops.Any(s => s.PoiId == fid);
         if (!finishIsDistinctStop)
         {
-            legs.Add(MakeLeg(stops[^1], stops[0]));
+            legs.Add(MakeLeg(stops[^1], stops[0], cache));
         }
 
         return legs;
     }
 
-    private static TripLeg MakeLeg(TripStop from, TripStop to) =>
-        new(from.PoiId, to.PoiId, from.Lat, from.Lon, to.Lat, to.Lon, IsMeasured: false);
+    /// <summary>
+    /// TRIP-TRAVELTIME-01: builds a leg, folding in the cached
+    /// duration/distance/fidelity when a directional RouteSegment row exists for
+    /// the (from→to) pair; otherwise the travel-time fields stay null (the leg is
+    /// "computing"). <see cref="TripLeg.IsMeasured"/> is derived solely from the
+    /// cached fidelity (Measured only) — the Mock yields Estimated, so legs stay
+    /// non-Measured for now.
+    /// </summary>
+    private static TripLeg MakeLeg(
+        TripStop from, TripStop to, IReadOnlyDictionary<(int From, int To), RouteSegment> cache)
+    {
+        cache.TryGetValue((from.PoiId, to.PoiId), out var seg);
+        var fidelity = seg?.Fidelity;
+        return new TripLeg(
+            from.PoiId, to.PoiId, from.Lat, from.Lon, to.Lat, to.Lon,
+            IsMeasured: fidelity == Fidelity.Measured,
+            DurationSeconds: seg?.DurationSeconds,
+            DistanceMeters: seg?.DistanceMeters,
+            Fidelity: fidelity);
+    }
+
+    /// <summary>
+    /// TRIP-TRAVELTIME-01 (AC5): Σ of the legs' durations. If any leg is
+    /// uncomputed (null duration) the total is null (rendered "—" — no false
+    /// precision). Also refreshes <see cref="IsAnyLegComputing"/>.
+    /// </summary>
+    private void RecomputeTotal()
+    {
+        IsAnyLegComputing = OrderedLegs.Any(l => l.DurationSeconds is null);
+        TotalTravelTimeSeconds = OrderedLegs.Count > 0 && !IsAnyLegComputing
+            ? OrderedLegs.Sum(l => l.DurationSeconds!.Value)
+            : null;
+    }
 
     // --- TripViewEnabled persistence (collection-level Trip state) ---
 
@@ -805,6 +984,9 @@ public sealed class TripViewModel(
             return;
         }
         _disposed = true;
+        // TRIP-TRAVELTIME-01: stop reacting to compute progress before teardown.
+        _progressSubscription?.Dispose();
+        _progressSubscription = null;
         await _cts.CancelAsync();
         _cts.Dispose();
     }

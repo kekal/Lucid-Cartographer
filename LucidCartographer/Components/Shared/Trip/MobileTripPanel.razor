@@ -1,4 +1,5 @@
 @implements IDisposable
+@using LucidCartographer.Services.Trip
 
 @* Mobile Trip View stop-list panel (Story 1.3, AC2 / UX-DR12) — the MobileTrip*
    split of TripStopList. Same rows + placeholders in the mobile bottom-panel /
@@ -19,6 +20,22 @@
 @* TRIP-STARTFINISH-05: announces Start/Finish designation changes and the
    roundtrip ↔ open-path shape transitions — same VM-backed text as desktop. *@
 <span class="sr-only" role="status" aria-live="polite">@Vm.StartFinishAnnouncement</span>
+
+@* TRIP-TRAVELTIME-01 (AC6): announce the computing state while legs await the
+   background provider — same VM-backed signal as the desktop surface. *@
+<span class="sr-only" role="status" aria-live="polite">@(Vm.IsAnyLegComputing ? UiStrings.TripLegComputingAnnouncement : null)</span>
+
+@* TRIP-TRAVELTIME-01 (AC5): trip total travel time, rendered once. Partial ⇒ "—". *@
+@if (Vm.OrderedLegs.Count > 0)
+{
+    <div class="trip-total" style="display:flex;align-items:center;justify-content:space-between;padding:6px 12px;border-bottom:1px solid var(--border)">
+        <span class="sub">@UiStrings.TripTotalTravelTimeLabel</span>
+        <span class="name" style="text-align:right"
+              aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripTotalTravelTimeAria, TravelTimeFormatting.Duration(Vm.TotalTravelTimeSeconds))">
+            @TravelTimeFormatting.Duration(Vm.TotalTravelTimeSeconds)
+        </span>
+    </div>
+}
 
 <div class="scroll" style="flex:1">
     @* `trip-stop-list` scopes the JS scroll-into-view helper (TRIP-SELECT-05). *@
@@ -103,10 +120,24 @@
                         }
                         <div class="meta">
                             <div class="name">@row.Name</div>
-                            @* Inert timeline placeholder (Epic 2 computes arrival time). *@
-                            <div class="sub" aria-label="@UiStrings.TripTimelineAria">@UiStrings.TripTimelinePlaceholder</div>
+                            @* TRIP-TRAVELTIME-01 (AC4): the leg DEPARTING this stop —
+                               travel time + distance + Fidelity badge. No cache row
+                               yet ⇒ "—" + computing; Placeholder/null ⇒ no badge. *@
+                            @{ var leg = LegFrom(row.PoiId); }
+                            @if (leg is not null)
+                            {
+                                <div class="sub" style="display:flex;align-items:center;gap:6px">
+                                    <span aria-label="@(leg.DurationSeconds is null ? UiStrings.TripLegComputingAria : string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegTravelTimeAria, TravelTimeFormatting.Duration(leg.DurationSeconds)))">@TravelTimeFormatting.Duration(leg.DurationSeconds)</span>
+                                    <span aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegDistanceAria, TravelTimeFormatting.Distance(leg.DistanceMeters))" style="opacity:.8">@TravelTimeFormatting.Distance(leg.DistanceMeters)</span>
+                                    <FidelityBadge Fidelity="@leg.Fidelity" />
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="sub" aria-label="@UiStrings.TripLegNoTravelTimeAria">@UiStrings.TripLegTimeUnknown</div>
+                            }
                         </div>
-                        @* Inert dwell placeholder (Epic 2 sets dwell). *@
+                        @* Inert dwell placeholder (Story 2.5 sets dwell). *@
                         <div class="trailing" aria-label="@UiStrings.TripDwellAria">@UiStrings.TripDwellPlaceholder</div>
                         @* TRIP-ORDER-03: keyboard/touch move controls — identical
                            semantics to the desktop surface (same VM methods, same
@@ -174,6 +205,10 @@
     protected override void OnInitialized() => Vm.StateChanged += OnVmChanged;
 
     private void OnVmChanged() => InvokeAsync(StateHasChanged);
+
+    // TRIP-TRAVELTIME-01: the leg departing a given stop (mirrors desktop).
+    private TripLeg? LegFrom(int poiId) =>
+        Vm.OrderedLegs.FirstOrDefault(l => l.FromPoiId == poiId);
 
     // Mobile rows are <div role="button" tabindex="0"> — Enter/Space mirror the tap.
     private void OnRowKeyDown(KeyboardEventArgs e, int poiId)

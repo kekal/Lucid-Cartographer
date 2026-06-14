@@ -1,0 +1,47 @@
+@using LucidCartographer.Data.Entities
+
+@* TRIP-TRAVELTIME-01: small provenance pill qualifying a leg's travel time.
+   Measured → secondary, Estimated → on-surface-variant (the codebase's muted
+   token; the story names it "on-surface-muted" but no such token exists in
+   tailwind.config.js), Manual → primary. The internal "Placeholder" fidelity
+   (and a null/unknown fidelity) is NEVER shown as a badge — the leg renders an
+   em-dash in its time slot instead. text-xs so the pill never overpowers the
+   time it qualifies. *@
+
+@{
+    var label = Label(Fidelity);
+}
+@if (label is not null)
+{
+    <span class="@PillClass(Fidelity)"
+          aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripFidelityAria, label)"
+          title="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripFidelityAria, label)">
+        @label
+    </span>
+}
+
+@code {
+    /// <summary>The leg's cached fidelity (one of <see cref="Fidelity"/>), or null when uncomputed.</summary>
+    [Parameter, EditorRequired] public string? Fidelity { get; set; }
+
+    // Placeholder is internal-only and null is "not computed yet" — neither
+    // renders a badge (the time slot shows "—" instead).
+    private static string? Label(string? fidelity) => fidelity switch
+    {
+        Data.Entities.Fidelity.Measured => UiStrings.TripFidelityMeasured,
+        Data.Entities.Fidelity.Estimated => UiStrings.TripFidelityEstimated,
+        Data.Entities.Fidelity.Manual => UiStrings.TripFidelityManual,
+        _ => null,
+    };
+
+    private static string PillClass(string? fidelity)
+    {
+        var tone = fidelity switch
+        {
+            Data.Entities.Fidelity.Measured => "border-secondary text-secondary",
+            Data.Entities.Fidelity.Manual => "border-primary text-primary",
+            _ => "border-on-surface-variant text-on-surface-variant",
+        };
+        return $"inline-flex items-center px-1.5 py-0.5 rounded border text-xs font-medium leading-none flex-shrink-0 {tone}";
+    }
+}

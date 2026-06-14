@@ -84,7 +84,7 @@ public class TripPlaceableTests
     {
         var writeLock = new SqliteWriteLock();
         var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
-        var vm = new TripViewModel(ordering, factory, writeLock, NullLogger<TripViewModel>.Instance);
+        var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), NullLogger<TripViewModel>.Instance);
         await vm.LoadAsync(CollectionId, placeable);
         await vm.ToggleAsync(); // seed + enable
         return vm;
