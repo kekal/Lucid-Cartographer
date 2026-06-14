@@ -54,6 +54,45 @@
         </div>
     }
 
+    @* TRIP-TIMELINE-01 (Story 2.6, AC2/AC5): header inputs for the wall-clock trip
+       start time + the soft time budget (minutes), and the soft AMBER overrun flag.
+       Kept in the header — NOT in the clickable stop rows (the 2.2/2.5 width lesson).
+       The overrun is a soft warn (warn/amber convention), never tertiary/red, and is
+       shown only when the KNOWN total exceeds the set budget. *@
+    @if (Vm.OrderedLegs.Count > 0)
+    {
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 border-b border-surface-container-high flex-shrink-0 text-xs min-w-0">
+            <label class="flex items-center gap-1 text-on-surface-variant min-w-0">
+                <span class="flex-shrink-0">@UiStrings.TripStartTimeLabel</span>
+                <input type="time"
+                       class="min-w-0 w-20 text-xs px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
+                       aria-label="@UiStrings.TripStartTimeAria"
+                       value="@StartTimeValue()"
+                       @onchange="OnStartTimeChangedAsync" />
+            </label>
+            <label class="flex items-center gap-1 text-on-surface-variant min-w-0">
+                <span class="flex-shrink-0">@UiStrings.TripBudgetLabel</span>
+                <input type="number" min="0" max="@TripViewModel.MaxBudgetMinutes" inputmode="numeric"
+                       class="w-12 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
+                       placeholder="@UiStrings.TripBudgetPlaceholder"
+                       aria-label="@UiStrings.TripBudgetAria"
+                       value="@BudgetValue()"
+                       @onchange="OnBudgetChangedAsync" />
+            </label>
+            @if (Vm.Timeline.IsOverBudget)
+            {
+                @* Soft amber (warn) overrun — the project's muted amber soft-state tone
+                   (text-amber-600, as used elsewhere), on a neutral surface chip. NEVER
+                   tertiary/red. There is no `warn` Tailwind token (2.3 finding). *@
+                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-amber-600 bg-surface-container"
+                      role="status" aria-label="@UiStrings.TripBudgetOverrunAria">
+                    <span class="material-symbols-outlined" style="font-size:14px" aria-hidden="true">schedule</span>
+                    @UiStrings.TripBudgetOverrunLabel
+                </span>
+            }
+        </div>
+    }
+
     @* TRIP-TRAVELTIME-01 (AC6): announce the computing state while legs await the
        background provider. Resolves to empty once every leg has a cache row. *@
     <span class="sr-only" role="status" aria-live="polite">@(Vm.IsAnyLegComputing ? UiStrings.TripLegComputingAnnouncement : null)</span>
@@ -147,7 +186,7 @@
                         @ondrop="() => OnDropAsync(stop.OrderIndex)"
                         @ondrop:preventDefault
                         @ondragend="OnDragEnd"
-                        class="flex items-center gap-2 px-2 py-2 border-b border-surface-container cursor-pointer @(selected ? "bg-primary/10 ring-1 ring-inset ring-primary" : "hover:bg-surface-container")">
+                        class="flex items-center gap-1 px-2 py-2 border-b border-surface-container cursor-pointer @(selected ? "bg-primary/10 ring-1 ring-inset ring-primary" : "hover:bg-surface-container")">
                         @* TRIP-ORDER-04: drag handle (pointer reorder path, UX-DR3).
                            The whole row is draggable (native HTML5 DnD, no JS module);
                            the handle is the visual + accessible affordance for it. *@
@@ -196,11 +235,26 @@
                         @* TRIP-TRAVELTIME-01 (AC4): the leg DEPARTING this stop —
                            travel time + distance + Fidelity badge. No cache row yet
                            ⇒ "—" + computing. Placeholder/null fidelity ⇒ no badge. *@
+                        @{ var arrival = ArrivalFor(row.PoiId); }
                         <span class="flex items-center gap-1.5 flex-shrink-0">
                             @{ var leg = LegFrom(row.PoiId); }
                             @if (leg is not null)
                             {
-                                <span class="flex flex-col items-end leading-tight">
+                                <span class="flex flex-col items-end leading-tight min-w-0 max-w-[3.5rem]">
+                                    @* TRIP-TIMELINE-01 (Story 2.6, AC2/AC3): the honest
+                                       arrival, stacked above the leg time (read-only text,
+                                       no new horizontal element). Capped + truncating so a
+                                       long "+1h 20m · Estimated" never widens the leg column
+                                       and starves the name span (the 2.2/2.5 panel-beside-map
+                                       width lesson — the full text is in the title/aria). *@
+                                    @if (arrival is not null)
+                                    {
+                                        <span class="text-[10px] text-on-surface-variant truncate max-w-full"
+                                              title="@ArrivalText(arrival)"
+                                              aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripTimelineArrivalAria, ArrivalText(arrival))">
+                                            @ArrivalCompactText(arrival)
+                                        </span>
+                                    }
                                     <span class="text-xs text-on-surface @(leg.DurationSeconds is null ? "italic text-on-surface-variant" : "")"
                                           aria-label="@(leg.DurationSeconds is null ? UiStrings.TripLegComputingAria : string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegTravelTimeAria, TravelTimeFormatting.Duration(leg.DurationSeconds)))">
                                         @TravelTimeFormatting.Duration(leg.DurationSeconds)
@@ -228,8 +282,21 @@
                             }
                             else
                             {
-                                <span class="text-xs text-on-surface-variant w-6 text-right"
-                                      aria-label="@UiStrings.TripLegNoTravelTimeAria">@UiStrings.TripLegTimeUnknown</span>
+                                @* No departing leg (open-path Finish). Still show the
+                                   honest arrival for this stop, stacked compactly. *@
+                                @if (arrival is not null)
+                                {
+                                    <span class="text-[10px] text-on-surface-variant truncate max-w-[3.5rem] text-right"
+                                          title="@ArrivalText(arrival)"
+                                          aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripTimelineArrivalAria, ArrivalText(arrival))">
+                                        @ArrivalCompactText(arrival)
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="text-xs text-on-surface-variant w-6 text-right"
+                                          aria-label="@UiStrings.TripLegNoTravelTimeAria">@UiStrings.TripLegTimeUnknown</span>
+                                }
                             }
                         </span>
                         @* TRIP-ORDER-03: keyboard move controls (NFR4 / AR-9 build-
@@ -299,6 +366,20 @@
             }
         </ul>
     }
+
+    @* TRIP-TIMELINE-01 (Story 2.6, AC2): the finish/return readout at the END of the
+       list — the return-to-Start arrival on a Roundtrip, or the Finish arrival on an
+       open path — qualified, or "—" when unknown. *@
+    @if (Vm.Timeline.FinishOrReturn is { } finish)
+    {
+        <div class="flex items-center justify-between px-3 py-1.5 border-t border-surface-container-high flex-shrink-0 text-xs">
+            <span class="text-on-surface-variant">@(Vm.IsRoundtrip ? UiStrings.TripTimelineFinishLabel : UiStrings.TripTimelineFinishOpenLabel)</span>
+            <span class="font-semibold text-on-surface whitespace-nowrap"
+                  aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripTimelineFinishAria, ArrivalText(finish))">
+                @ArrivalText(finish)
+            </span>
+        </div>
+    }
 </section>
 
 @code {
@@ -312,6 +393,70 @@
     // next, or the roundtrip closing leg from the last stop back to the Start).
     private TripLeg? LegFrom(int poiId) =>
         Vm.OrderedLegs.FirstOrDefault(l => l.FromPoiId == poiId);
+
+    // TRIP-TIMELINE-01 (Story 2.6): the per-stop arrival for a row's PoiId, or null
+    // (an unplaceable row has no routed arrival). The first matching routed-stop
+    // arrival — the routed sequence holds one arrival per placeable stop in order.
+    private ItineraryArrival? ArrivalFor(int poiId) =>
+        Vm.Timeline.Stops.FirstOrDefault(a => a.PoiId == poiId);
+
+    // TRIP-TIMELINE-01: the UI-edge display string for an arrival (offset always,
+    // wall-clock only with a start time, qualified, or "—" unknown). Single formatter.
+    private static string ArrivalText(ItineraryArrival a) =>
+        TravelTimeFormatting.Arrival(a.OffsetSeconds, a.ArrivalWallClock, a.QualifyingFidelity, a.IsUnknown);
+
+    // TRIP-TIMELINE-01: the COMPACT row variant (no verbose qualifier word) — keeps the
+    // cramped w-64 row's name span from collapsing. The full text is in the title/aria.
+    private static string ArrivalCompactText(ItineraryArrival a) =>
+        TravelTimeFormatting.ArrivalCompact(a.OffsetSeconds, a.ArrivalWallClock, a.QualifyingFidelity, a.IsUnknown);
+
+    // TRIP-TIMELINE-01: the <input type="time"> value (HH:mm) for the active start
+    // time, or empty when unset.
+    private string StartTimeValue() =>
+        Vm.TripStartTime is { } t
+            ? t.ToString("HH:mm", System.Globalization.CultureInfo.CurrentCulture)
+            : string.Empty;
+
+    // TRIP-TIMELINE-01: the budget-minutes input value, or empty when unset.
+    private string BudgetValue() =>
+        Vm.TimeBudgetMinutes is { } m
+            ? m.ToString(System.Globalization.CultureInfo.CurrentCulture)
+            : string.Empty;
+
+    // TRIP-TIMELINE-01: parse the entered HH:mm and persist via the VM. Empty clears
+    // the start time (⇒ relative offsets only). The time pairs with today's date —
+    // the wall-clock arrivals only ever use the time-of-day component for display.
+    private async Task OnStartTimeChangedAsync(ChangeEventArgs e)
+    {
+        var text = e.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            await Vm.SetTripStartTimeAsync(null);
+            return;
+        }
+
+        if (TimeOnly.TryParse(text, System.Globalization.CultureInfo.CurrentCulture, out var time))
+        {
+            await Vm.SetTripStartTimeAsync(DateTime.Today.Add(time.ToTimeSpan()));
+        }
+    }
+
+    // TRIP-TIMELINE-01: parse the entered budget minutes and persist via the VM.
+    // Empty/blank clears the budget (⇒ no overrun flag). Non-numeric is ignored.
+    private async Task OnBudgetChangedAsync(ChangeEventArgs e)
+    {
+        var text = e.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            await Vm.SetTimeBudgetMinutesAsync(null);
+            return;
+        }
+
+        if (int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.CurrentCulture, out var minutes) && minutes >= 0)
+        {
+            await Vm.SetTimeBudgetMinutesAsync(minutes);
+        }
+    }
 
     // TRIP-MANUAL-01: the current manual minutes for an Any/Air leg (seconds÷60),
     // or empty when the leg has no Manual row yet. Only a Manual fidelity row

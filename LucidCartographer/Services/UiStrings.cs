@@ -200,6 +200,40 @@ public static class UiStrings
     public const string TripManualMinutesPlaceholder = "min";
     public const string TripManualMinutesAria = "Manual travel time in minutes for the leg departing {0}";
 
+    // TRIP-TIMELINE-01 (Story 2.6): the honest itinerary timeline. Per-stop arrival =
+    // a relative cumulative offset (always) + a wall-clock time (only with a TripStartTime),
+    // qualified by the lowest fidelity summed up to it. The em-dash marks a genuinely
+    // unknown arrival (an upstream leg's duration was unknown — never guess). All copy is
+    // honest and culture-formatted at the UI edge only.
+    // {0} = the formatted relative offset (e.g. "+2h 15m"). The offset is always shown.
+    public const string TripTimelineOffset = "+{0}";
+    // {0:HH:mm} = the wall-clock arrival; shown only when a TripStartTime is set.
+    public const string TripTimelineWallClock = "{0:HH:mm}";
+    // {0} = the wall-clock arrival, {1} = the qualifier word (e.g. "Estimated"). Renders
+    // an estimated arrival honestly: "~14:10 · Estimated". {0} alone for a clean arrival.
+    public const string TripTimelineEstimatedPrefix = "~{0}";
+    public const string TripTimelineQualified = "{0} · {1}";
+    // The unknown-arrival marker (an upstream leg's duration was unknown).
+    public const string TripTimelineUnknown = "—";
+    // Per-stop arrival accessible name. {0} = the arrival text (offset and/or wall-clock,
+    // qualified, or the unknown marker).
+    public const string TripTimelineArrivalAria = "Arrival {0}";
+    // The finish/return readout at the end of the list. Label + the {0} = arrival text.
+    public const string TripTimelineFinishLabel = "Return to start";
+    public const string TripTimelineFinishOpenLabel = "Finish";
+    public const string TripTimelineFinishAria = "Trip ends at {0}";
+    // The TripStartTime input (header). Label + accessible name; null ⇒ relative offsets only.
+    public const string TripStartTimeLabel = "Start time";
+    public const string TripStartTimeAria = "Trip start time (wall-clock)";
+    // The time-budget input (header). Label + accessible name; minutes.
+    public const string TripBudgetLabel = "Time budget";
+    public const string TripBudgetAria = "Time budget in minutes";
+    public const string TripBudgetPlaceholder = "min";
+    // The soft (amber, never red) overrun flag, shown only when the KNOWN total exceeds
+    // the set budget. Honest, factual — a soft warning, not an error.
+    public const string TripBudgetOverrunLabel = "Over budget";
+    public const string TripBudgetOverrunAria = "The trip total exceeds the time budget";
+
     // Data Sources Page
     public const string DataSourcesPageTitle = "Data Sources - Lucid Cartographer";
     public const string DataAndImports = "Data & Imports";

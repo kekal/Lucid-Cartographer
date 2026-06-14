@@ -55,6 +55,43 @@
     </div>
 }
 
+@* TRIP-TIMELINE-01 (Story 2.6, AC2/AC5): header inputs for the wall-clock trip
+   start time + the soft time budget (minutes), and the soft AMBER overrun flag —
+   identical semantics to the desktop surface (UX-DR12). Kept in the header, NOT in
+   the clickable rows. The overrun is a soft warn (amber), never red, shown only
+   when the KNOWN total exceeds the set budget. Tokens only, no raw hex. *@
+@if (Vm.OrderedLegs.Count > 0)
+{
+    <div class="trip-budget" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:6px 12px;border-bottom:1px solid var(--border);font-size:12px">
+        <label style="display:flex;align-items:center;gap:6px;color:var(--text-2)">
+            <span>@UiStrings.TripStartTimeLabel</span>
+            <input type="time"
+                   aria-label="@UiStrings.TripStartTimeAria"
+                   value="@StartTimeValue()"
+                   style="padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-elev-1);color:var(--text-1)"
+                   @onchange="OnStartTimeChangedAsync" />
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;color:var(--text-2)">
+            <span>@UiStrings.TripBudgetLabel</span>
+            <input type="number" min="0" max="@TripViewModel.MaxBudgetMinutes" inputmode="numeric"
+                   placeholder="@UiStrings.TripBudgetPlaceholder"
+                   aria-label="@UiStrings.TripBudgetAria"
+                   value="@BudgetValue()"
+                   style="width:64px;text-align:right;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-elev-1);color:var(--text-1)"
+                   @onchange="OnBudgetChangedAsync" />
+        </label>
+        @if (Vm.Timeline.IsOverBudget)
+        {
+            @* Soft amber (warn) overrun — the project's soft-state amber tone, never red. *@
+            <span class="trip-overrun" role="status" aria-label="@UiStrings.TripBudgetOverrunAria"
+                  style="display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:4px;color:var(--warn);background:var(--warn-soft)">
+                <span class="ms" aria-hidden="true" style="font-size:14px">schedule</span>
+                @UiStrings.TripBudgetOverrunLabel
+            </span>
+        }
+    </div>
+}
+
 @* TRIP-DEGRADE-01 (Story 2.3, AC2): honest approximate note when any leg fell
    back to a straight-line estimate (the routing engine was unreachable). In a
    role=status aria-live region so AT hears it; muted token tone, never error-red
@@ -163,6 +200,18 @@
                         }
                         <div class="meta">
                             <div class="name">@row.Name</div>
+                            @* TRIP-TIMELINE-01 (Story 2.6, AC2/AC3): the honest arrival —
+                               relative offset (always) + wall-clock (only with a start
+                               time), qualified, or "—" unknown. Read-only text (no input
+                               ⇒ no selection risk). Tokens only, no raw hex. *@
+                            @{ var arrival = ArrivalFor(row.PoiId); }
+                            @if (arrival is not null)
+                            {
+                                <div class="sub trip-arrival" title="@ArrivalText(arrival)"
+                                     aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripTimelineArrivalAria, ArrivalText(arrival))">
+                                    @ArrivalCompactText(arrival)
+                                </div>
+                            }
                             @* TRIP-TRAVELTIME-01 (AC4): the leg DEPARTING this stop —
                                travel time + distance + Fidelity badge. No cache row
                                yet ⇒ "—" + computing; Placeholder/null ⇒ no badge. *@
@@ -267,6 +316,20 @@
     </div>
 </div>
 
+@* TRIP-TIMELINE-01 (Story 2.6, AC2): the finish/return readout at the END of the
+   list — the return-to-Start arrival on a Roundtrip, or the Finish arrival on an
+   open path — qualified, or "—" unknown. Tokens only, no raw hex. *@
+@if (Vm.Timeline.FinishOrReturn is { } finish)
+{
+    <div class="trip-finish" style="display:flex;align-items:center;justify-content:space-between;padding:6px 12px;border-top:1px solid var(--border);font-size:12px">
+        <span class="sub">@(Vm.IsRoundtrip ? UiStrings.TripTimelineFinishLabel : UiStrings.TripTimelineFinishOpenLabel)</span>
+        <span class="name" style="text-align:right"
+              aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripTimelineFinishAria, ArrivalText(finish))">
+            @ArrivalText(finish)
+        </span>
+    </div>
+}
+
 @code {
     [Parameter, EditorRequired] public TripViewModel Vm { get; set; } = null!;
 
@@ -277,6 +340,58 @@
     // TRIP-TRAVELTIME-01: the leg departing a given stop (mirrors desktop).
     private TripLeg? LegFrom(int poiId) =>
         Vm.OrderedLegs.FirstOrDefault(l => l.FromPoiId == poiId);
+
+    // TRIP-TIMELINE-01 (Story 2.6): the per-stop arrival + its display string + the
+    // header start-time/budget input bridges — identical to the desktop surface.
+    private ItineraryArrival? ArrivalFor(int poiId) =>
+        Vm.Timeline.Stops.FirstOrDefault(a => a.PoiId == poiId);
+
+    private static string ArrivalText(ItineraryArrival a) =>
+        TravelTimeFormatting.Arrival(a.OffsetSeconds, a.ArrivalWallClock, a.QualifyingFidelity, a.IsUnknown);
+
+    // TRIP-TIMELINE-01: compact row variant — full text stays in the title/aria-label.
+    private static string ArrivalCompactText(ItineraryArrival a) =>
+        TravelTimeFormatting.ArrivalCompact(a.OffsetSeconds, a.ArrivalWallClock, a.QualifyingFidelity, a.IsUnknown);
+
+    private string StartTimeValue() =>
+        Vm.TripStartTime is { } t
+            ? t.ToString("HH:mm", System.Globalization.CultureInfo.CurrentCulture)
+            : string.Empty;
+
+    private string BudgetValue() =>
+        Vm.TimeBudgetMinutes is { } m
+            ? m.ToString(System.Globalization.CultureInfo.CurrentCulture)
+            : string.Empty;
+
+    private async Task OnStartTimeChangedAsync(ChangeEventArgs e)
+    {
+        var text = e.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            await Vm.SetTripStartTimeAsync(null);
+            return;
+        }
+
+        if (TimeOnly.TryParse(text, System.Globalization.CultureInfo.CurrentCulture, out var time))
+        {
+            await Vm.SetTripStartTimeAsync(DateTime.Today.Add(time.ToTimeSpan()));
+        }
+    }
+
+    private async Task OnBudgetChangedAsync(ChangeEventArgs e)
+    {
+        var text = e.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            await Vm.SetTimeBudgetMinutesAsync(null);
+            return;
+        }
+
+        if (int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.CurrentCulture, out var minutes) && minutes >= 0)
+        {
+            await Vm.SetTimeBudgetMinutesAsync(minutes);
+        }
+    }
 
     // TRIP-DWELL-01 (Story 2.5): current dwell minutes for a row, or empty when unset.
     private static string DwellMinutes(TripStopRow row) =>

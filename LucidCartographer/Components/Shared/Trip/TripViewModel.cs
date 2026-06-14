@@ -120,6 +120,28 @@ public sealed class TripViewModel(
     /// </summary>
     public bool IsShowingApproximateEstimates => OrderedLegs.Any(l => l.IsFallback);
 
+    /// <summary>
+    /// TRIP-TIMELINE-01 (Story 2.6): the honest itinerary timeline — per-stop arrivals
+    /// (relative offset always, wall-clock only with a start time), the finish/return
+    /// readout, the whole-trip total (travel + every dwell) and the soft budget-overrun
+    /// flag. Recomputed in both refresh paths from the already-loaded stops/dwell/legs +
+    /// the collection's TripStartTime/TimeBudgetMinutes. <see cref="ItineraryTimelineResult.Empty"/>
+    /// when Trip View is off or fewer than two placeable stops exist.
+    /// </summary>
+    public ItineraryTimelineResult Timeline { get; private set; } = ItineraryTimelineResult.Empty;
+
+    /// <summary>
+    /// TRIP-TIMELINE-01: the active collection's persisted wall-clock start time, or null
+    /// ⇒ relative offsets only. Drives the header start-time input's active value.
+    /// </summary>
+    public DateTime? TripStartTime { get; private set; }
+
+    /// <summary>
+    /// TRIP-TIMELINE-01: the active collection's persisted soft time budget in minutes, or
+    /// null ⇒ no overrun flag is ever shown. Drives the header budget input's active value.
+    /// </summary>
+    public int? TimeBudgetMinutes { get; private set; }
+
     /// <summary>Localized on/off text for the aria-live announcement region; null until first toggle.</summary>
     public string? Announcement { get; private set; }
 
@@ -634,6 +656,12 @@ public sealed class TripViewModel(
         // TRIP-TRAVELTIME-01: travel-time totals are scoped to an enabled Trip.
         TotalTravelTimeSeconds = null;
         IsAnyLegComputing = false;
+        // TRIP-TIMELINE-01 (Story 2.6): the timeline + its inputs are read state scoped to
+        // an enabled Trip (the persisted TripStartTime/TimeBudgetMinutes are untouched) —
+        // reset the surfaced values alongside the projections.
+        Timeline = ItineraryTimelineResult.Empty;
+        TripStartTime = null;
+        TimeBudgetMinutes = null;
         // TRIP-TRAVELMODE-01: the surfaced mode is read state scoped to an enabled
         // Trip (the persisted PoiCollection.TravelMode is untouched) — reset the
         // selector's active segment to the default alongside the projections.
@@ -680,13 +708,21 @@ public sealed class TripViewModel(
         // matching RouteSegment cache rows, then build the legs with whatever
         // duration/distance/fidelity has been computed so far. A leg with no
         // cache row keeps null fields ⇒ the UI shows "—" + computing.
-        var travelMode = await ReadTravelModeAsync(collectionId);
+        // TRIP-TIMELINE-01 (Story 2.6): read the persisted travel mode AND the timeline
+        // inputs (TripStartTime / TimeBudgetMinutes) in one collection read alongside the
+        // existing mode read — no extra DB round-trip for the recompute.
+        var (travelMode, tripStartTime, budgetMinutes) = await ReadTripSettingsAsync(collectionId);
         // TRIP-TRAVELMODE-01: surface the persisted mode so the selector restores
         // its active segment and the per-leg manual entry gates on Any/Air.
         TravelMode = travelMode;
+        TripStartTime = tripStartTime;
+        TimeBudgetMinutes = budgetMinutes;
         var cache = await ReadRouteSegmentsAsync(collectionId, travelMode);
         OrderedLegs = BuildLegs(stops, finishPoiId, cache);
         RecomputeTotal();
+        // TRIP-TIMELINE-01: recompute the honest timeline from the freshly-built stops/
+        // dwell/legs + the persisted start/budget (presentation-only, no DB).
+        RecomputeTimeline();
 
         // TRIP-TRAVELTIME-01: any uncomputed leg ⇒ kick the off-circuit compute.
         if (IsAnyLegComputing)
@@ -798,15 +834,21 @@ public sealed class TripViewModel(
         return (row?.StartPoiId, row?.FinishPoiId);
     }
 
-    /// <summary>TRIP-TRAVELTIME-01: the collection's persisted travel mode (entity default AnyAir).</summary>
-    private async Task<string> ReadTravelModeAsync(int collectionId)
+    /// <summary>
+    /// TRIP-TRAVELTIME-01 / TRIP-TIMELINE-01: the collection's persisted Trip settings —
+    /// the travel mode (entity default AnyAir) and the timeline inputs (TripStartTime,
+    /// TimeBudgetMinutes) — read in one pass so the timeline recompute adds no extra DB
+    /// round-trip beyond the pre-existing mode read.
+    /// </summary>
+    private async Task<(string TravelMode, DateTime? TripStartTime, int? BudgetMinutes)> ReadTripSettingsAsync(
+        int collectionId)
     {
         await using var db = await factory.CreateDbContextAsync(_cts.Token);
-        var mode = await db.PoiCollections
+        var row = await db.PoiCollections
             .Where(c => c.Id == collectionId)
-            .Select(c => c.TravelMode)
+            .Select(c => new { c.TravelMode, c.TripStartTime, c.TimeBudgetMinutes })
             .FirstOrDefaultAsync(_cts.Token);
-        return mode ?? Data.Entities.TravelMode.AnyAir;
+        return (row?.TravelMode ?? Data.Entities.TravelMode.AnyAir, row?.TripStartTime, row?.TimeBudgetMinutes);
     }
 
     /// <summary>
@@ -882,10 +924,15 @@ public sealed class TripViewModel(
 
         try
         {
-            var travelMode = await ReadTravelModeAsync(collectionId);
+            // TRIP-TIMELINE-01: re-read the timeline inputs alongside the mode so a leg
+            // landing in the cache recomputes arrivals/total too (both refresh paths).
+            var (travelMode, tripStartTime, budgetMinutes) = await ReadTripSettingsAsync(collectionId);
+            TripStartTime = tripStartTime;
+            TimeBudgetMinutes = budgetMinutes;
             var cache = await ReadRouteSegmentsAsync(collectionId, travelMode);
             OrderedLegs = BuildLegs(OrderedStops, FinishPoiId, cache);
             RecomputeTotal();
+            RecomputeTimeline();
         }
         catch (OperationCanceledException)
         {
@@ -996,6 +1043,56 @@ public sealed class TripViewModel(
         TotalTravelTimeSeconds = allDurationsKnown
             ? OrderedLegs.Sum(l => l.DurationSeconds!.Value)
             : null;
+    }
+
+    /// <summary>
+    /// TRIP-TIMELINE-01 (Story 2.6): recomputes the honest itinerary timeline from the
+    /// already-built projections (ordered placeable stops + their dwell, the ordered
+    /// legs with duration/fidelity, the unplaceable stops' dwell), the trip shape
+    /// (<see cref="IsRoundtrip"/>), and the persisted <see cref="TripStartTime"/> /
+    /// <see cref="TimeBudgetMinutes"/>. Pure, presentation-only — no DB. The dwell is
+    /// carried per-PoiId in <see cref="StopRows"/>; placeable rows feed the routed walk
+    /// (in OrderedStops order) and unplaceable rows feed the total-only dwell list.
+    /// </summary>
+    private void RecomputeTimeline()
+    {
+        if (OrderedStops.Count < 2)
+        {
+            Timeline = ItineraryTimelineResult.Empty;
+            return;
+        }
+
+        // Dwell minutes per PoiId from the stop-list rows (placeable + unplaceable alike).
+        var dwellByPoiId = StopRows.ToDictionary(r => r.PoiId, r => r.DwellMinutes);
+
+        var stops = OrderedStops
+            .Select(s => new ItineraryStopInput(
+                s.PoiId,
+                dwellByPoiId.TryGetValue(s.PoiId, out var dwell) ? dwell : null))
+            .ToList();
+
+        // Legs in the SAME order BuildLegs produced: N−1 consecutive legs, then the
+        // closing leg on a Roundtrip. The timeline walk consumes them positionally.
+        var legs = OrderedLegs
+            .Select(l => new ItineraryLegInput(l.DurationSeconds, l.Fidelity))
+            .ToList();
+
+        // Unplaceable rows contribute dwell to the total only (no leg, no arrival).
+        var unplaceableDwell = StopRows
+            .Where(r => !r.IsPlaceable)
+            .Select(r => r.DwellMinutes)
+            .ToList();
+
+        // TRIP-TIMELINE-01: derive the roundtrip shape from the ACTUAL leg set
+        // (BuildLegs emits N legs for a roundtrip, N−1 for an open path) rather than
+        // from IsRoundtrip directly. The two normally agree, but a stale/Start-equal
+        // FinishPoiId makes BuildLegs fall back to a closing leg while IsRoundtrip is
+        // still false — deriving from the legs keeps the timeline total consistent with
+        // the rendered legs no matter what.
+        var hasClosingLeg = legs.Count >= stops.Count;
+
+        Timeline = ItineraryTimeline.Compute(
+            stops, legs, unplaceableDwell, hasClosingLeg, TripStartTime, TimeBudgetMinutes);
     }
 
     // --- TripViewEnabled persistence (collection-level Trip state) ---
@@ -1220,6 +1317,126 @@ public sealed class TripViewModel(
         }
 
         membership.DwellMinutes = minutes;
+
+        await writeLock.Gate.WaitAsync(_cts.Token);
+        try
+        {
+            await db.SaveChangesAsync(_cts.Token);
+        }
+        finally
+        {
+            writeLock.Gate.Release();
+        }
+    }
+
+    // --- Trip start time + soft time budget (Story 2.6, TRIP-TIMELINE-01) ---
+
+    /// <summary>
+    /// Upper bound on the soft time budget, in minutes: 60 days. Generous enough for any
+    /// real multi-day trip, but rejects absurd input so the ×60 seconds comparison in the
+    /// pure timeline can never overflow <see cref="int"/>. Mirrors the
+    /// <see cref="MaxDwellMinutes"/> / <see cref="MaxManualLegMinutes"/> precedent.
+    /// </summary>
+    internal const int MaxBudgetMinutes = 60 * 24 * 60;
+
+    /// <summary>
+    /// TRIP-TIMELINE-01 (Story 2.6, AC2): sets the per-trip wall-clock start time on the
+    /// active collection (<c>PoiCollection.TripStartTime</c>); <c>null</c> clears it (⇒
+    /// relative offsets only). Mirrors the dwell/mode persistence (factory +
+    /// <see cref="SqliteWriteLock"/>), then refresh + Notify. Start time does NOT affect
+    /// route segments, so this never signals the travel-time trigger.
+    /// </summary>
+    public async Task SetTripStartTimeAsync(DateTime? start)
+    {
+        if (ActiveCollectionId is not { } collectionId || !IsTripViewEnabled)
+        {
+            return;
+        }
+
+        try
+        {
+            await PersistTripStartTimeAsync(collectionId, start);
+            await RefreshProjectionsAsync(collectionId);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to set trip start time for collection {CollectionId}", collectionId);
+            return;
+        }
+
+        Notify();
+    }
+
+    /// <summary>
+    /// TRIP-TIMELINE-01 (Story 2.6, AC5): sets the per-trip soft time budget in minutes on
+    /// the active collection (<c>PoiCollection.TimeBudgetMinutes</c>); <c>null</c> clears it
+    /// (⇒ no overrun flag is ever shown). Range-guarded (<c>&gt;= 0</c>,
+    /// <c>&lt;= <see cref="MaxBudgetMinutes"/></c>). Mirrors the dwell/mode persistence,
+    /// then refresh + Notify. The budget does NOT affect route segments, so this never
+    /// signals the travel-time trigger.
+    /// </summary>
+    public async Task SetTimeBudgetMinutesAsync(int? minutes)
+    {
+        if (ActiveCollectionId is not { } collectionId || !IsTripViewEnabled
+            || minutes is < 0 or > MaxBudgetMinutes)
+        {
+            return;
+        }
+
+        try
+        {
+            await PersistTimeBudgetMinutesAsync(collectionId, minutes);
+            await RefreshProjectionsAsync(collectionId);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to set time budget for collection {CollectionId}", collectionId);
+            return;
+        }
+
+        Notify();
+    }
+
+    private async Task PersistTripStartTimeAsync(int collectionId, DateTime? start)
+    {
+        await using var db = await factory.CreateDbContextAsync(_cts.Token);
+        var collection = await db.PoiCollections.FirstOrDefaultAsync(c => c.Id == collectionId, _cts.Token);
+        if (collection is null || collection.TripStartTime == start)
+        {
+            return;
+        }
+
+        collection.TripStartTime = start;
+
+        await writeLock.Gate.WaitAsync(_cts.Token);
+        try
+        {
+            await db.SaveChangesAsync(_cts.Token);
+        }
+        finally
+        {
+            writeLock.Gate.Release();
+        }
+    }
+
+    private async Task PersistTimeBudgetMinutesAsync(int collectionId, int? minutes)
+    {
+        await using var db = await factory.CreateDbContextAsync(_cts.Token);
+        var collection = await db.PoiCollections.FirstOrDefaultAsync(c => c.Id == collectionId, _cts.Token);
+        if (collection is null || collection.TimeBudgetMinutes == minutes)
+        {
+            return;
+        }
+
+        collection.TimeBudgetMinutes = minutes;
 
         await writeLock.Gate.WaitAsync(_cts.Token);
         try
