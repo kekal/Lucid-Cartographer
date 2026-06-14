@@ -50,6 +50,7 @@ last_updated: 2026-06-14
 # story 2-6 moved to review on 2026-06-14 via bmad-dev-story (pure ItineraryTimeline.Compute: walk + lowest-fidelity aggregate-honesty + unknown propagation + unplaceable dwell + soft budget overrun; TripStartTime/budget persistence + header inputs; per-stop arrival + finish/return both surfaces; no migration; 698 unit/component + 19 Trip integration green)
 # story 2-6 moved to done on 2026-06-14 via bmad-story-automator-review (adversarial honesty review: 0 CRITICAL/0 HIGH/1 MED/4 LOW; fidelity-propagation math confirmed correct; fixed compact-row estimated-offset honesty gap [~ marker], roundtrip-from-legs, strengthened test, dropped dead hex; 698 unit/component + 19 Trip integration green)
 # EPIC 2 COMPLETE — all 6 stories done on 2026-06-14 (create→dev→review per story, fresh-context adversarial review each; full suite green)
+# epic-2-retrospective completed 2026-06-14 via bmad-retrospective (full suite 844/844 green; 0 migrations across the epic; key lessons: run Trip integration after any DI/VM-ctor change [A3], keep Trip row controls compact [A4]; action items A5 [MCP coord-invalidation TODO → Story 3.2], A6 [Epic-4 follow-ups]; no epic-update required, Epic 3 ready; see epic-2-retro-2026-06-14.md)
 project: maps_editor
 # story 1-4 moved to done on 2026-06-12 via bmad-code-review (1 patch applied, 3 deferred, 3 re-surfaced already-tracked, ~15 dismissed; 54/54 Trip tests green)
 # story 1-2 moved to review on 2026-06-12 via bmad-dev-story
@@ -83,14 +84,14 @@ development_status:
   epic-1-retrospective: done
 
   # Epic 2: Travel times, dwell & the honest itinerary timeline
-  epic-2: in-progress
+  epic-2: done
   2-1-per-leg-travel-time-from-the-provider-fidelity-badged: done
   2-2-select-travel-mode-and-enter-a-manual-any-air-time: done
   2-3-graceful-degradation-to-straight-line-estimates: done
   2-4-cache-invalidation-recompute-estimated-measured-upgrade: done
   2-5-set-dwell-time-per-stop: done
   2-6-compute-the-honest-itinerary-timeline: done
-  epic-2-retrospective: optional
+  epic-2-retrospective: done
 
   # Epic 3: Assisted ordering — TSP-Sort & MCP agent
   epic-3: backlog
