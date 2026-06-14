@@ -19,7 +19,9 @@ public class TripOrderingServiceTests
     private const int CollectionId = 1;
 
     private static TripOrderingService CreateService(IDbContextFactory<AppDbContext> factory) =>
-        new(factory, new SqliteWriteLock(), NullLogger<TripOrderingService>.Instance);
+        new(factory, new SqliteWriteLock(),
+            new DistanceMatrixService(factory, Microsoft.Extensions.Options.Options.Create(new TravelTimeOptions())),
+            NullLogger<TripOrderingService>.Instance);
 
     // Seeds a collection with the given (poiId, addedDate, placeable) members.
     // OrderIndex starts at 0 (the column default for a freshly-added row).

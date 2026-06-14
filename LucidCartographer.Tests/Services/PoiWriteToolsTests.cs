@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using FluentAssertions;
@@ -87,7 +87,7 @@ public class PoiWriteToolsTests
     {
         var (service, factory) = await CreateServiceWithPoiAsync(_ => { });
 
-        var result = await PoiWriteTools.EditPoi(service, factory, Http, poiId: 1,
+        var result = await PoiWriteTools.EditPoi(service, factory, Http, TestDbHelper.CreateInvalidationService(factory), poiId: 1,
             name: "New Name", description: "New notes");
 
         result.Should().NotBeNull();
@@ -107,7 +107,7 @@ public class PoiWriteToolsTests
     {
         var (service, factory) = await CreateServiceWithPoiAsync(_ => { });
 
-        var result = await PoiWriteTools.EditPoi(service, factory, Http, poiId: 1,
+        var result = await PoiWriteTools.EditPoi(service, factory, Http, TestDbHelper.CreateInvalidationService(factory), poiId: 1,
             name: null, description: null);
 
         result!.Name.Should().Be("Original Name");
@@ -119,7 +119,7 @@ public class PoiWriteToolsTests
     {
         var (service, factory) = await CreateServiceWithPoiAsync(_ => { });
 
-        var result = await PoiWriteTools.EditPoi(service, factory, Http, poiId: 1,
+        var result = await PoiWriteTools.EditPoi(service, factory, Http, TestDbHelper.CreateInvalidationService(factory), poiId: 1,
             name: "Renamed");
 
         result!.Name.Should().Be("Renamed");
@@ -131,7 +131,7 @@ public class PoiWriteToolsTests
     {
         var (service, factory) = await CreateServiceWithPoiAsync(_ => { });
 
-        var result = await PoiWriteTools.EditPoi(service, factory, Http, poiId: 1,
+        var result = await PoiWriteTools.EditPoi(service, factory, Http, TestDbHelper.CreateInvalidationService(factory), poiId: 1,
             description: "");
 
         // "" clears a text field to null (consistent across all editable strings).
@@ -144,7 +144,7 @@ public class PoiWriteToolsTests
     {
         var (service, factory) = await CreateServiceWithPoiAsync(_ => { });
 
-        var act = () => PoiWriteTools.EditPoi(service, factory, Http, poiId: 1, name: "   ");
+        var act = () => PoiWriteTools.EditPoi(service, factory, Http, TestDbHelper.CreateInvalidationService(factory), poiId: 1, name: "   ");
 
         await act.Should().ThrowAsync<ArgumentException>();
     }
@@ -154,7 +154,7 @@ public class PoiWriteToolsTests
     {
         var (service, factory) = await CreateServiceWithPoiAsync(_ => { });
 
-        var result = await PoiWriteTools.EditPoi(service, factory, Http, poiId: 999, name: "X");
+        var result = await PoiWriteTools.EditPoi(service, factory, Http, TestDbHelper.CreateInvalidationService(factory), poiId: 999, name: "X");
 
         result.Should().BeNull();
     }
@@ -164,7 +164,7 @@ public class PoiWriteToolsTests
     {
         var (service, factory) = await CreateServiceWithPoiAsync(_ => { });
 
-        var result = await PoiWriteTools.EditPoi(service, factory, Http, poiId: 1,
+        var result = await PoiWriteTools.EditPoi(service, factory, Http, TestDbHelper.CreateInvalidationService(factory), poiId: 1,
             address: "New address 5", category: "cafe", website: "https://example.org",
             phone: "+48 100 200 300", latitude: 50.0, longitude: 19.0, rating: 4,
             country: "Poland", region: "Lesser Poland");
@@ -191,7 +191,7 @@ public class PoiWriteToolsTests
             p.ReviewCount = 120;
         });
 
-        var result = await PoiWriteTools.EditPoi(service, factory, Http, poiId: 1,
+        var result = await PoiWriteTools.EditPoi(service, factory, Http, TestDbHelper.CreateInvalidationService(factory), poiId: 1,
             address: "Changed");
 
         result!.Address.Should().Be("Changed");
@@ -209,7 +209,7 @@ public class PoiWriteToolsTests
             await db.SaveChangesAsync();
         }
 
-        var result = await PoiWriteTools.EditPoi(service, factory, Http, poiId: 1, imageUrl: "");
+        var result = await PoiWriteTools.EditPoi(service, factory, Http, TestDbHelper.CreateInvalidationService(factory), poiId: 1, imageUrl: "");
 
         result!.ImageUrl.Should().BeNull();
         result.HasStoredImage.Should().BeFalse();
@@ -232,7 +232,7 @@ public class PoiWriteToolsTests
         var service = new PoiService(factory, TestDbHelper.CreateInvalidationService(factory), NullLoggerFactory.Instance.CreateLogger<PoiService>());
 
         var dto = await PoiWriteTools.CreatePoi(service, factory, Http,
-            collectionId: 1, name: "2026-07-18 · Reenactment", latitude: 53.488, longitude: 20.087,
+            collectionId: 1, name: "2026-07-18 Â· Reenactment", latitude: 53.488, longitude: 20.087,
             category: "other");
 
         await using (var db = await factory.CreateDbContextAsync())
@@ -293,7 +293,7 @@ public class PoiWriteToolsTests
     {
         var (service, factory) = await CreateServiceWithPoiAsync(p => p.ImageUrl = null);
 
-        var result = await PoiWriteTools.EditPoi(service, factory, PngHttp(), poiId: 1,
+        var result = await PoiWriteTools.EditPoi(service, factory, PngHttp(), TestDbHelper.CreateInvalidationService(factory), poiId: 1,
             imageUrl: "https://example.com/p.png");
 
         result!.ImageUrl.Should().Be("https://example.com/p.png");
@@ -309,7 +309,7 @@ public class PoiWriteToolsTests
         // edited fields unpersisted (atomic-ish): the address must NOT change.
         var (service, factory) = await CreateServiceWithPoiAsync(_ => { });
 
-        var act = () => PoiWriteTools.EditPoi(service, factory, ErrorHttp(HttpStatusCode.NotFound),
+        var act = () => PoiWriteTools.EditPoi(service, factory, ErrorHttp(HttpStatusCode.NotFound), TestDbHelper.CreateInvalidationService(factory),
             poiId: 1, address: "Changed Address", imageUrl: "https://example.com/missing.png");
 
         await act.Should().ThrowAsync<ArgumentException>();
@@ -338,13 +338,13 @@ public class PoiWriteToolsTests
 
         var result = field switch
         {
-            "address" => await PoiWriteTools.EditPoi(service, factory, Http, poiId: 1, address: ""),
-            "website" => await PoiWriteTools.EditPoi(service, factory, Http, poiId: 1, website: ""),
-            "phone" => await PoiWriteTools.EditPoi(service, factory, Http, poiId: 1, phone: ""),
-            "googleMapsUrl" => await PoiWriteTools.EditPoi(service, factory, Http, poiId: 1, googleMapsUrl: ""),
-            "category" => await PoiWriteTools.EditPoi(service, factory, Http, poiId: 1, category: ""),
-            "country" => await PoiWriteTools.EditPoi(service, factory, Http, poiId: 1, country: ""),
-            "region" => await PoiWriteTools.EditPoi(service, factory, Http, poiId: 1, region: ""),
+            "address" => await PoiWriteTools.EditPoi(service, factory, Http, TestDbHelper.CreateInvalidationService(factory), poiId: 1, address: ""),
+            "website" => await PoiWriteTools.EditPoi(service, factory, Http, TestDbHelper.CreateInvalidationService(factory), poiId: 1, website: ""),
+            "phone" => await PoiWriteTools.EditPoi(service, factory, Http, TestDbHelper.CreateInvalidationService(factory), poiId: 1, phone: ""),
+            "googleMapsUrl" => await PoiWriteTools.EditPoi(service, factory, Http, TestDbHelper.CreateInvalidationService(factory), poiId: 1, googleMapsUrl: ""),
+            "category" => await PoiWriteTools.EditPoi(service, factory, Http, TestDbHelper.CreateInvalidationService(factory), poiId: 1, category: ""),
+            "country" => await PoiWriteTools.EditPoi(service, factory, Http, TestDbHelper.CreateInvalidationService(factory), poiId: 1, country: ""),
+            "region" => await PoiWriteTools.EditPoi(service, factory, Http, TestDbHelper.CreateInvalidationService(factory), poiId: 1, region: ""),
             _ => throw new ArgumentOutOfRangeException(nameof(field)),
         };
 
@@ -362,5 +362,62 @@ public class PoiWriteToolsTests
         actual.Should().BeNull();
         // A different field stays populated (proves "" clears only the named field).
         result!.Name.Should().Be("Original Name");
+    }
+
+    // === Story 3.2 (A5, TRIP-INVALIDATE-01): MCP coordinate edits invalidate legs ===
+
+    // Adds a neighbour POI + cached RouteSegment rows touching POI 1 (one Estimated
+    // each direction + one Manual) so an invalidation can be observed.
+    private static async Task SeedSegmentsTouchingPoi1Async(IDbContextFactory<AppDbContext> factory)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        db.Pois.Add(new Poi { Id = 2, Name = "Neighbour", Latitude = 55.0, Longitude = 19.0, AddedDate = DateTime.UtcNow });
+        db.RouteSegments.Add(new RouteSegment { FromPoiId = 1, ToPoiId = 2, TravelMode = TravelMode.Drive, DurationSeconds = 600, DistanceMeters = 5000, Fidelity = Fidelity.Estimated, Source = "Mock", ComputedAt = DateTime.UtcNow });
+        db.RouteSegments.Add(new RouteSegment { FromPoiId = 2, ToPoiId = 1, TravelMode = TravelMode.Drive, DurationSeconds = 600, DistanceMeters = 5000, Fidelity = Fidelity.Estimated, Source = "Mock", ComputedAt = DateTime.UtcNow });
+        db.RouteSegments.Add(new RouteSegment { FromPoiId = 1, ToPoiId = 2, TravelMode = TravelMode.AnyAir, DurationSeconds = 300, DistanceMeters = 5000, Fidelity = Fidelity.Manual, Source = "Manual", ComputedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task EditPoi_CoordinateChange_InvalidatesCachedLegs_KeepingManual()
+    {
+        var (service, factory) = await CreateServiceWithPoiAsync(_ => { });
+        await SeedSegmentsTouchingPoi1Async(factory);
+
+        await PoiWriteTools.EditPoi(service, factory, Http, TestDbHelper.CreateInvalidationService(factory),
+            poiId: 1, latitude: 54.80, longitude: 18.50);
+
+        await using var db = await factory.CreateDbContextAsync();
+        var rows = await db.RouteSegments.AsNoTracking().ToListAsync();
+        rows.Should().NotContain(r => r.Fidelity == Fidelity.Estimated, "moving the POI invalidates its non-Manual legs");
+        rows.Should().ContainSingle(r => r.Fidelity == Fidelity.Manual, "a user's Manual leg is never invalidated");
+    }
+
+    [Fact]
+    public async Task EditPoi_NoCoordinateChange_LeavesLegsIntact()
+    {
+        var (service, factory) = await CreateServiceWithPoiAsync(_ => { });
+        await SeedSegmentsTouchingPoi1Async(factory);
+
+        // Edit a non-coordinate field only.
+        await PoiWriteTools.EditPoi(service, factory, Http, TestDbHelper.CreateInvalidationService(factory),
+            poiId: 1, name: "Renamed");
+
+        await using var db = await factory.CreateDbContextAsync();
+        (await db.RouteSegments.CountAsync()).Should().Be(3, "an edit that doesn't touch coordinates invalidates nothing");
+    }
+
+    [Fact]
+    public async Task EditPoi_SameCoordinateValue_IsNotAChange()
+    {
+        var (service, factory) = await CreateServiceWithPoiAsync(_ => { });
+        await SeedSegmentsTouchingPoi1Async(factory);
+
+        // Pass the POI's existing coordinates verbatim — not a real change.
+        await PoiWriteTools.EditPoi(service, factory, Http, TestDbHelper.CreateInvalidationService(factory),
+            poiId: 1, latitude: 54.7099, longitude: 18.4373);
+
+        await using var db = await factory.CreateDbContextAsync();
+        (await db.RouteSegments.CountAsync()).Should().Be(3, "re-supplying identical coordinates invalidates nothing");
     }
 }

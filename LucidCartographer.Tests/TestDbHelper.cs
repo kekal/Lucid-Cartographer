@@ -4,6 +4,7 @@ using LucidCartographer.Services.Trip;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace LucidCartographer.Tests;
 
@@ -29,6 +30,19 @@ public static class TestDbHelper
         new RouteSegmentInvalidationService(
             factory, writeLock ?? new SqliteWriteLock(),
             NullLogger<RouteSegmentInvalidationService>.Instance);
+
+    /// <summary>
+    /// A real <see cref="TripOrderingService"/> over the given factory and write
+    /// lock, wired with a default <see cref="DistanceMatrixService"/> (Story 3.1,
+    /// TRIP-TSP-01 — the matrix is a hard dependency of the ordering service).
+    /// Optional <paramref name="options"/> tunes the haversine matrix fill speeds.
+    /// </summary>
+    public static TripOrderingService CreateOrderingService(
+        IDbContextFactory<AppDbContext> factory, SqliteWriteLock? writeLock = null,
+        IOptions<TravelTimeOptions>? options = null) =>
+        new(factory, writeLock ?? new SqliteWriteLock(),
+            new DistanceMatrixService(factory, options ?? Options.Create(new TravelTimeOptions())),
+            NullLogger<TripOrderingService>.Instance);
 }
 
 public class TestDbContextFactory(DbContextOptions<AppDbContext> options) : IDbContextFactory<AppDbContext>

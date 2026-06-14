@@ -1,4 +1,4 @@
-using Bunit;
+﻿using Bunit;
 using BunitTestContext = Bunit.TestContext;
 using FluentAssertions;
 using LucidCartographer.Components.Shared.Trip;
@@ -33,7 +33,7 @@ public class TripToggleTests : BunitTestContext
     private static TripViewModel CreateVm(IDbContextFactory<AppDbContext> factory)
     {
         var writeLock = new SqliteWriteLock();
-        var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
         return new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), TestDbHelper.CreateInvalidationService(factory), NullLogger<TripViewModel>.Instance);
     }
 
@@ -59,7 +59,7 @@ public class TripToggleTests : BunitTestContext
 
         var cut = RenderComponent<TripToggle>(p => p.Add(x => x.Vm, vm));
 
-        cut.FindAll("button[role='switch']").Should().BeEmpty("the toggle is absent below the ≥2 gate, never an error");
+        cut.FindAll("button[role='switch']").Should().BeEmpty("the toggle is absent below the â‰¥2 gate, never an error");
     }
 
     [Fact]

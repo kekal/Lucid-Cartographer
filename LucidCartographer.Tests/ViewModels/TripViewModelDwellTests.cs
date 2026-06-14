@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using LucidCartographer.Components.Shared.Trip;
 using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
@@ -14,7 +14,7 @@ namespace LucidCartographer.Tests.ViewModels;
 /// time (minutes) on <see cref="PoiCollectionItem.DwellMinutes"/>, clears it to null,
 /// round-trips it into <see cref="TripStopRow.DwellMinutes"/>, keeps the same POI's
 /// dwell independent across collections, rejects out-of-range values, works on an
-/// unplaceable stop, and — being independent of travel times — neither signals the
+/// unplaceable stop, and â€” being independent of travel times â€” neither signals the
 /// recompute trigger nor touches any <see cref="RouteSegment"/>.
 /// </summary>
 public class TripViewModelDwellTests
@@ -37,7 +37,7 @@ public class TripViewModelDwellTests
         for (var j = 1; j <= unplaceable; j++)
         {
             var id = 1000 + j;
-            // No coordinates ⇒ unplaceable (StopPlaceability), but still a member.
+            // No coordinates â‡’ unplaceable (StopPlaceability), but still a member.
             db.Pois.Add(new Poi { Id = id, Name = $"U{j}", Latitude = null, Longitude = null, AddedDate = new DateTime(2025, 2, j) });
             db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = id, PoiCollectionId = CollectionId });
         }
@@ -49,7 +49,7 @@ public class TripViewModelDwellTests
         IDbContextFactory<AppDbContext> factory, int placeable)
     {
         var writeLock = new SqliteWriteLock();
-        var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
         var trigger = new TravelTimeTrigger();
         var vm = new TripViewModel(
             ordering, factory, writeLock,
@@ -105,7 +105,7 @@ public class TripViewModelDwellTests
     [Fact]
     public async Task SetDwellMinutes_LargeValue_IsStoredVerbatim()
     {
-        // AC3: overnight is just a large dwell — no special handling.
+        // AC3: overnight is just a large dwell â€” no special handling.
         var factory = Seed(placeable: 2);
         var (vm, _, _) = await EnabledVmAsync(factory, 2);
         await using var _v = vm;
@@ -175,7 +175,7 @@ public class TripViewModelDwellTests
     {
         // AC5 + Dev Notes: dwell is independent of travel times. Seed both roundtrip
         // legs as fully computed (Manual) so RefreshProjectionsAsync has no
-        // "computing" leg to signal on — isolating that the dwell write itself never
+        // "computing" leg to signal on â€” isolating that the dwell write itself never
         // signals the recompute trigger.
         var factory = Seed(placeable: 2);
         await AddSegmentAsync(factory, 1, 2);
@@ -203,7 +203,7 @@ public class TripViewModelDwellTests
         // leg, regardless of compute state. Here NO segments are seeded (both legs are
         // "computing"); editing dwell must still create/change/remove zero RouteSegment
         // rows. (RefreshProjectionsAsync may wake the compute loop because a leg is
-        // genuinely uncomputed — the pre-existing IsAnyLegComputing behavior — but that
+        // genuinely uncomputed â€” the pre-existing IsAnyLegComputing behavior â€” but that
         // is not a dwell-driven recompute and writes no segment in this unit context.)
         var factory = Seed(placeable: 2);
         var (vm, _, _) = await EnabledVmAsync(factory, 2);

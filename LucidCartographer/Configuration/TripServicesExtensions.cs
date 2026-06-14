@@ -26,6 +26,15 @@ public static class TripServicesExtensions
     public static IServiceCollection AddTripServices(this IServiceCollection services)
     {
         services.TryAddSingletonWriteLock();
+
+        // TRIP-MATRIX-01 (Story 3.1): the on-demand Distance Matrix is a dependency
+        // of TripOrderingService (TSP-Sort), so it MUST register in this
+        // parameterless overload — the integration host composes services by hand
+        // and resolves TripOrderingService here; omitting the matrix would fail its
+        // construction. It reads the shared RouteSegment cache + bound
+        // TravelTimeOptions (IOptions<> resolves to defaults when unconfigured) and
+        // writes nothing, so it carries no provider / Polly / hosted dependency.
+        services.AddScoped<IDistanceMatrixService, DistanceMatrixService>();
         services.AddScoped<ITripOrderingService, TripOrderingService>();
 
         // TRIP-INVALIDATE-01 (Story 2.4): the cache-invalidation service is VM- and

@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using LucidCartographer.Components.Shared.Trip;
 using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
@@ -12,8 +12,8 @@ namespace LucidCartographer.Tests.ViewModels;
 /// <summary>
 /// Story 2.1 (AC 4, 5, 7): the ViewModel reads RouteSegment cache rows into the
 /// TripLeg projection (duration/distance/fidelity), renders missing rows as null
-/// (⇒ "—" + computing), sums computed legs into the total, and shows a null total
-/// (⇒ "—") whenever any leg is uncomputed.
+/// (â‡’ "â€”" + computing), sums computed legs into the total, and shows a null total
+/// (â‡’ "â€”") whenever any leg is uncomputed.
 /// </summary>
 public class TripViewModelTravelTimeTests
 {
@@ -39,7 +39,7 @@ public class TripViewModelTravelTimeTests
     private static async Task<TripViewModel> EnabledVmAsync(IDbContextFactory<AppDbContext> factory, int placeable)
     {
         var writeLock = new SqliteWriteLock();
-        var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
         var vm = new TripViewModel(
             ordering, factory, writeLock,
             new TravelTimeTrigger(), new TravelTimeProgressService(),
@@ -68,7 +68,7 @@ public class TripViewModelTravelTimeTests
     public async Task Legs_PopulateFromCache_WhenRowsExist()
     {
         var factory = Seed(placeable: 2);
-        // Roundtrip over P1,P2 ⇒ legs 1→2 and 2→1. Seed both.
+        // Roundtrip over P1,P2 â‡’ legs 1â†’2 and 2â†’1. Seed both.
         await AddSegmentAsync(factory, 1, 2, 600, 8000, Fidelity.Estimated);
         await AddSegmentAsync(factory, 2, 1, 600, 8000, Fidelity.Estimated);
 
@@ -81,7 +81,7 @@ public class TripViewModelTravelTimeTests
         leg.Fidelity.Should().Be(Fidelity.Estimated);
         leg.IsMeasured.Should().BeFalse("Estimated is not Measured");
         vm.IsAnyLegComputing.Should().BeFalse();
-        vm.TotalTravelTimeSeconds.Should().Be(1200, "Σ of both computed legs");
+        vm.TotalTravelTimeSeconds.Should().Be(1200, "Î£ of both computed legs");
     }
 
     [Fact]
@@ -99,7 +99,7 @@ public class TripViewModelTravelTimeTests
         uncomputed.Fidelity.Should().BeNull();
 
         vm.IsAnyLegComputing.Should().BeTrue();
-        vm.TotalTravelTimeSeconds.Should().BeNull("any uncomputed leg ⇒ total is em-dash, not false precision");
+        vm.TotalTravelTimeSeconds.Should().BeNull("any uncomputed leg â‡’ total is em-dash, not false precision");
     }
 
     [Fact]
@@ -107,8 +107,8 @@ public class TripViewModelTravelTimeTests
     {
         // TRIP-TRAVELMODE-01 (AC4): once the background service computes an Any/Air
         // leg it writes a Placeholder row carrying a real straight-line air estimate.
-        // That estimate must NEVER surface — the leg's display duration is null (⇒
-        // "—"), the total is "—", but the leg is NOT "computing" (its row exists).
+        // That estimate must NEVER surface â€” the leg's display duration is null (â‡’
+        // "â€”"), the total is "â€”", but the leg is NOT "computing" (its row exists).
         var factory = Seed(placeable: 2);
         await AddSegmentAsync(factory, 1, 2, 720, 9000, Fidelity.Placeholder);
         await AddSegmentAsync(factory, 2, 1, 720, 9000, Fidelity.Placeholder);
@@ -120,7 +120,7 @@ public class TripViewModelTravelTimeTests
         leg.DurationSeconds.Should().BeNull("a Placeholder air estimate is never shown as a real time");
         leg.DistanceMeters.Should().Be(9000, "the haversine distance is real and may show");
         vm.IsAnyLegComputing.Should().BeFalse("a computed Placeholder leg is not still computing");
-        vm.TotalTravelTimeSeconds.Should().BeNull("a Placeholder leg keeps the total honest ('—')");
+        vm.TotalTravelTimeSeconds.Should().BeNull("a Placeholder leg keeps the total honest ('â€”')");
     }
 
     [Fact]
@@ -141,7 +141,7 @@ public class TripViewModelTravelTimeTests
     public async Task IsShowingApproximateEstimates_True_WhenAnyLegIsFallback()
     {
         var factory = Seed(placeable: 2);
-        // 1→2 is a degraded fallback (EstimatedFallback); 2→1 is a normal estimate.
+        // 1â†’2 is a degraded fallback (EstimatedFallback); 2â†’1 is a normal estimate.
         await AddSegmentAsync(factory, 1, 2, 600, 8000, Fidelity.Estimated, TravelTimeSource.EstimatedFallback);
         await AddSegmentAsync(factory, 2, 1, 600, 8000, Fidelity.Estimated, TravelTimeSource.Mock);
 

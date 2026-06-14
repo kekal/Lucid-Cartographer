@@ -43,7 +43,17 @@
         @* TRIP-RECOMPUTE-01 (Story 2.4, AC4): explicit on-demand recompute. Kept in
            the header area, NOT inside the clickable stop rows (a wide element over
            the row centre breaks Playwright row selection — 2.2 regression). *@
-        <div class="px-3 py-1.5 border-b border-surface-container-high flex-shrink-0">
+        <div class="px-3 py-1.5 border-b border-surface-container-high flex-shrink-0 flex items-center gap-4">
+            @* TRIP-TSP-01 (Story 3.1, AR-6): explicit on-demand TSP-Sort. On-demand
+               only — never fires automatically. Disabled while legs are computing so
+               the matrix sorts over settled travel times. *@
+            <button type="button"
+                    class="text-xs text-primary hover:underline disabled:opacity-50 disabled:no-underline"
+                    aria-label="@UiStrings.TripSortTspAria"
+                    disabled="@Vm.IsAnyLegComputing"
+                    @onclick="Vm.SortTravelingSalesmanAsync">
+                @UiStrings.TripSortTspLabel
+            </button>
             <button type="button"
                     class="text-xs text-primary hover:underline disabled:opacity-50 disabled:no-underline"
                     aria-label="@UiStrings.TripRecomputeAria"
@@ -52,6 +62,8 @@
                 @UiStrings.TripRecomputeLabel
             </button>
         </div>
+        @* TRIP-TSP-01: polite live region announcing a completed sort. *@
+        <span class="sr-only" role="status" aria-live="polite">@Vm.LastSortAnnouncement</span>
     }
 
     @* TRIP-TIMELINE-01 (Story 2.6, AC2/AC5): header inputs for the wall-clock trip

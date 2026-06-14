@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using LucidCartographer.Components.Shared.Trip;
 using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
@@ -41,7 +41,7 @@ public class TripViewModelTimelineTests
         IDbContextFactory<AppDbContext> factory, int placeable)
     {
         var writeLock = new SqliteWriteLock();
-        var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
         var trigger = new TravelTimeTrigger();
         var vm = new TripViewModel(
             ordering, factory, writeLock,
@@ -160,7 +160,7 @@ public class TripViewModelTimelineTests
     public async Task SetTripStartTime_AndBudget_DoNotSignalTheTrigger()
     {
         // Both legs fully computed (Manual) so RefreshProjectionsAsync has no "computing"
-        // leg to signal on — isolating that start/budget writes never signal the trigger.
+        // leg to signal on â€” isolating that start/budget writes never signal the trigger.
         var factory = Seed(placeable: 2);
         await AddSegmentAsync(factory, 1, 2, 3600);
         await AddSegmentAsync(factory, 2, 1, 3600);
@@ -181,7 +181,7 @@ public class TripViewModelTimelineTests
     [Fact]
     public async Task Timeline_ReflectsSeededStopsDwellLegs_AndBudgetOverrun()
     {
-        // Roundtrip, both legs Manual 1h each (7200s = 120m). Budget 119 ⇒ overrun.
+        // Roundtrip, both legs Manual 1h each (7200s = 120m). Budget 119 â‡’ overrun.
         var factory = Seed(placeable: 2);
         await AddSegmentAsync(factory, 1, 2, 3600);
         await AddSegmentAsync(factory, 2, 1, 3600);
@@ -196,7 +196,7 @@ public class TripViewModelTimelineTests
         vm.Timeline.FinishOrReturn!.PoiId.Should().Be(1, "roundtrip returns to Start");
         vm.Timeline.TotalSeconds.Should().Be(7200);
         vm.Timeline.IsOverBudget.Should().BeTrue("120m total exceeds the 119m budget");
-        // Manual legs are confident ⇒ clean (no qualifier).
+        // Manual legs are confident â‡’ clean (no qualifier).
         vm.Timeline.TotalQualifyingFidelity.Should().BeNull();
         // Wall-clock present because a start time is set.
         vm.Timeline.Stops[0].ArrivalWallClock.Should().Be(new DateTime(2026, 6, 14, 9, 0, 0));
@@ -205,7 +205,7 @@ public class TripViewModelTimelineTests
     [Fact]
     public async Task Timeline_UnknownTotal_NeverFalseOverrun_InTheVm()
     {
-        // No segments seeded ⇒ legs uncomputed ⇒ unknown total. Even a tiny budget set,
+        // No segments seeded â‡’ legs uncomputed â‡’ unknown total. Even a tiny budget set,
         // the VM Timeline must not assert an overrun.
         var factory = Seed(placeable: 2);
         var (vm, _) = await EnabledVmAsync(factory, 2);

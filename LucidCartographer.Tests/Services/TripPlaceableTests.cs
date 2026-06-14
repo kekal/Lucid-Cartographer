@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using LucidCartographer.Components.Shared.Trip;
 using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace LucidCartographer.Tests;
 
 /// <summary>
-/// Story 1.6 — the IsPlaceable exclusion contract. Covers the canonical
+/// Story 1.6 â€” the IsPlaceable exclusion contract. Covers the canonical
 /// predicate truth table ([TRIP-PLACE-01]), the placeable-only routing
 /// candidate accessor ([TRIP-PLACE-03]), leg exclusion ([TRIP-PLACE-02]) and
 /// the presented contiguous numbering over the placeable subset
@@ -78,12 +78,12 @@ public class TripPlaceableTests
     }
 
     private static TripOrderingService CreateOrdering(IDbContextFactory<AppDbContext> factory) =>
-        new(factory, new SqliteWriteLock(), NullLogger<TripOrderingService>.Instance);
+        TestDbHelper.CreateOrderingService(factory);
 
     private static async Task<TripViewModel> EnabledVmAsync(IDbContextFactory<AppDbContext> factory, int placeable)
     {
         var writeLock = new SqliteWriteLock();
-        var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
         var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), TestDbHelper.CreateInvalidationService(factory), NullLogger<TripViewModel>.Instance);
         await vm.LoadAsync(CollectionId, placeable);
         await vm.ToggleAsync(); // seed + enable
@@ -105,7 +105,7 @@ public class TripPlaceableTests
         candidates.Select(c => c.PoiId).Should().Equal(1, 2, 3);
         candidates.Select(c => c.PoiId).Should().NotContain(new[] { 98, 99 });
         candidates.Select(c => c.OrderIndex).Should().BeInAscendingOrder();
-        // Coordinates are materialized non-null — an all-pairs matrix built over
+        // Coordinates are materialized non-null â€” an all-pairs matrix built over
         // this list can never see a null coordinate.
         candidates.Should().OnlyContain(c => c.Latitude > 0 && c.Longitude > 0);
     }
@@ -120,7 +120,7 @@ public class TripPlaceableTests
         var candidates = await ordering.GetPlaceableStopsAsync(CollectionId);
 
         // Simulate the Epic 3 all-pairs enumeration: every (from, to) pair drawn
-        // from the accessor — no pair may touch an unplaceable POI.
+        // from the accessor â€” no pair may touch an unplaceable POI.
         var pairs = candidates.SelectMany(_ => candidates, (from, to) => (from.PoiId, to.PoiId)).ToList();
         pairs.Should().HaveCount(9);
         pairs.Should().NotContain(p => p.Item1 == 99 || p.Item2 == 99 || p.Item1 == 98 || p.Item2 == 98);
@@ -134,7 +134,7 @@ public class TripPlaceableTests
         var factory = SeedMixedFactory();
         await using var vm = await EnabledVmAsync(factory, placeable: 3);
 
-        // 3 placeable stops on a Roundtrip ⇒ exactly 3 legs (1→2, 2→3, 3→1):
+        // 3 placeable stops on a Roundtrip â‡’ exactly 3 legs (1â†’2, 2â†’3, 3â†’1):
         // the interleaved unplaceable POI neither severs the chain nor appears.
         vm.OrderedLegs.Should().HaveCount(3);
         vm.OrderedLegs.Select(l => (l.FromPoiId, l.ToPoiId))
@@ -149,7 +149,7 @@ public class TripPlaceableTests
         var factory = SeedMixedFactory();
         await using var vm = await EnabledVmAsync(factory, placeable: 3);
 
-        // StopOrders is what decorates the map markers — no unplaceable POI in it.
+        // StopOrders is what decorates the map markers â€” no unplaceable POI in it.
         vm.StopOrders.Keys.Should().BeEquivalentTo(new[] { 1, 2, 3 });
         vm.OrderedStops.Should().NotContain(s => s.PoiId == 99 || s.PoiId == 98);
     }
@@ -162,7 +162,7 @@ public class TripPlaceableTests
         var factory = SeedMixedFactory();
         await using var vm = await EnabledVmAsync(factory, placeable: 3);
 
-        vm.StopRows.Should().HaveCount(5, "every member stays in the list — nothing is silently dropped");
+        vm.StopRows.Should().HaveCount(5, "every member stays in the list â€” nothing is silently dropped");
 
         var placeable = vm.StopRows.Where(r => r.IsPlaceable).ToList();
         placeable.Select(r => r.DisplayOrder).Should().Equal(1, 2, 3);
@@ -225,7 +225,7 @@ public class TripPlaceableTests
 
         await vm.RefreshAfterMembershipChangeAsync(2);
 
-        // The user never sees placeable badges 1,3 — the presentation renumbers
+        // The user never sees placeable badges 1,3 â€” the presentation renumbers
         // the placeable subset contiguously and P2 shows no routed number.
         var placeable = vm.StopRows.Where(r => r.IsPlaceable).ToList();
         placeable.Select(r => r.DisplayOrder).Should().Equal(1, 2);

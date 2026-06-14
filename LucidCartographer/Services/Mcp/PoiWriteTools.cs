@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
+using LucidCartographer.Services.Trip;
 using Microsoft.EntityFrameworkCore;
 using ModelContextProtocol.Server;
 
@@ -112,6 +113,7 @@ public static class PoiWriteTools
         IPoiService poiService,
         IDbContextFactory<AppDbContext> dbFactory,
         IHttpClientFactory httpFactory,
+        IRouteSegmentInvalidationService routeSegmentInvalidation,
         [Description("POI id.")] int poiId,
         [Description("New name. Omit to leave unchanged.")] string? name = null,
         [Description("New description/notes. Omit to leave unchanged; pass \"\" to clear.")] string? description = null,
@@ -157,15 +159,12 @@ public static class PoiWriteTools
         if (phone is not null) poi.Phone = NullIfEmpty(phone);
         if (country is not null) poi.Country = NullIfEmpty(country);
         if (region is not null) poi.Region = NullIfEmpty(region);
-        // MA0026 (TODO) is suppressed deliberately: this is a tracked,
-        // story-referenced deferral, not an oversight.
-#pragma warning disable MA0026
-        // TODO TRIP-INVALIDATE-01 (Story 2.4, deferred): when this MCP coord write
-        // actually changes lat/lon, route it through IRouteSegmentInvalidationService
-        // .InvalidateForPoiAsync so agent-driven coordinate edits invalidate the
-        // POI's cached legs too (today the user can force a Recompute). Deferred:
-        // agent-driven coordinate edits are rare and the explicit Recompute covers it.
-#pragma warning restore MA0026
+        // TRIP-INVALIDATE-01 (Story 3.2, AC6 — resolves the Epic-2 retro A5 defer):
+        // detect a genuine coordinate change so the POI's cached legs can be
+        // invalidated after the save (parity with the in-app coordinate-change hook).
+        // A supplied-but-identical value is NOT a change.
+        var coordsChanged = (latitude is not null && latitude != poi.Latitude)
+            || (longitude is not null && longitude != poi.Longitude);
         if (latitude is not null) poi.Latitude = latitude;
         if (longitude is not null) poi.Longitude = longitude;
         if (rating is not null) poi.Rating = rating;
@@ -180,6 +179,14 @@ public static class PoiWriteTools
             : null;
 
         await poiService.UpdatePoiAsync(poi, ct);
+
+        // TRIP-INVALIDATE-01 (A5): an agent-driven coordinate change invalidates the
+        // POI's cached RouteSegment legs (both directions, all non-Manual modes); the
+        // background compute refills them on the next trigger — same as the in-app hook.
+        if (coordsChanged)
+        {
+            await routeSegmentInvalidation.InvalidateForPoiAsync(poiId, ct);
+        }
 
         if (changeImage)
         {

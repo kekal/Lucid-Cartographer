@@ -44,7 +44,15 @@
 
     @* TRIP-RECOMPUTE-01 (Story 2.4, AC4): explicit on-demand recompute. In the
        header area, NOT inside the clickable stop rows (2.2 row-selection regression). *@
-    <div style="padding:6px 12px;border-bottom:1px solid var(--border)">
+    <div style="padding:6px 12px;border-bottom:1px solid var(--border);display:flex;gap:16px;align-items:center">
+        @* TRIP-TSP-01 (Story 3.1, AR-6): explicit on-demand TSP-Sort (mobile). *@
+        <button type="button" class="trip-sort-tsp"
+                style="font-size:12px;color:var(--primary);background:none;border:none;padding:0;cursor:pointer"
+                aria-label="@UiStrings.TripSortTspAria"
+                disabled="@Vm.IsAnyLegComputing"
+                @onclick="Vm.SortTravelingSalesmanAsync">
+            @UiStrings.TripSortTspLabel
+        </button>
         <button type="button" class="trip-recompute"
                 style="font-size:12px;color:var(--primary);background:none;border:none;padding:0;cursor:pointer"
                 aria-label="@UiStrings.TripRecomputeAria"
@@ -53,6 +61,8 @@
             @UiStrings.TripRecomputeLabel
         </button>
     </div>
+    @* TRIP-TSP-01: polite live region announcing a completed sort. *@
+    <span role="status" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">@Vm.LastSortAnnouncement</span>
 }
 
 @* TRIP-TIMELINE-01 (Story 2.6, AC2/AC5): header inputs for the wall-clock trip

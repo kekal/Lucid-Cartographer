@@ -162,6 +162,13 @@ public static class UiStrings
     // re-requests them (never the user's Manual entries, never a Measured row).
     public const string TripRecomputeLabel = "Recompute travel times";
     public const string TripRecomputeAria = "Recompute travel times";
+    // TRIP-TSP-01 (Story 3.1, AR-6): the explicit "Sort in Traveling Salesman order"
+    // control in the trip header area (both surfaces). Visible label + accessible
+    // name; on-demand only — reorders the placeable Stops into an efficient loop and
+    // never fires automatically. {0} = stop count for the post-sort announcement.
+    public const string TripSortTspLabel = "Sort in Traveling Salesman order";
+    public const string TripSortTspAria = "Sort stops in Traveling Salesman order";
+    public const string TripSortTspAnnouncement = "Stops sorted into travel order ({0} stops)";
     // UI-edge duration/distance format patterns (TravelTimeFormatting). Kept here
     // so the unit words ("h"/"m"/"km") and the sub-minute/zero tokens are localizable
     // rather than hardcoded at the conversion site. {0}/{1} = numeric parts.

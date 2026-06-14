@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Bunit;
 using BunitTestContext = Bunit.TestContext;
 using FluentAssertions;
@@ -17,7 +17,7 @@ namespace LucidCartographer.Tests.Components;
 /// <summary>
 /// Story 2.6 (TRIP-TIMELINE-01, AC 2/3/4/5/6): bUnit coverage that TripStopList (desktop)
 /// and MobileTripPanel (mobile) render the per-stop arrival (offset always; wall-clock
-/// only with a start time; Estimated qualifier; "—" unknown), the finish/return readout,
+/// only with a start time; Estimated qualifier; "â€”" unknown), the finish/return readout,
 /// the soft AMBER (never red) overrun flag shown only when over budget, and that the
 /// start-time + budget inputs invoke the VM.
 /// </summary>
@@ -58,7 +58,7 @@ public class TripTimelineRenderTests : BunitTestContext
     private static async Task<TripViewModel> EnabledVmAsync(IDbContextFactory<AppDbContext> factory, int placeable = 2)
     {
         var writeLock = new SqliteWriteLock();
-        var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
         var vm = new TripViewModel(
             ordering, factory, writeLock,
             new TravelTimeTrigger(), new TravelTimeProgressService(),
@@ -79,12 +79,12 @@ public class TripTimelineRenderTests : BunitTestContext
         await AddSegmentAsync(factory, 2, 1, 3600, Fidelity.Manual);
         await using var vm = await EnabledVmAsync(factory);
 
-        // No start time yet ⇒ offset present, no wall-clock colon time.
+        // No start time yet â‡’ offset present, no wall-clock colon time.
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
         cut.Markup.Should().Contain("+", "the relative offset is always shown");
         cut.Markup.Should().NotContain("10:00", "no wall-clock without a start time");
 
-        // Set a start time ⇒ wall-clock appears.
+        // Set a start time â‡’ wall-clock appears.
         await cut.InvokeAsync(() => vm.SetTripStartTimeAsync(new DateTime(2026, 6, 14, 9, 0, 0)));
         cut.Render();
         // arrival(2) = 9:00 + leg1(1h) = 10:00.
@@ -102,7 +102,7 @@ public class TripTimelineRenderTests : BunitTestContext
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
 
         // The ARRIVAL VALUE itself must carry the "~" approximation marker (offset-only
-        // mode, the default) — not merely the per-leg Fidelity badge. A bare "+1h 0m"
+        // mode, the default) â€” not merely the per-leg Fidelity badge. A bare "+1h 0m"
         // here would be a confident-looking time over an Estimated leg (TRIP-TIMELINE-01).
         var approxOffset = string.Format(
             System.Globalization.CultureInfo.CurrentCulture,
@@ -117,7 +117,7 @@ public class TripTimelineRenderTests : BunitTestContext
     public async Task TripStopList_UnknownArrival_ShowsEmDash()
     {
         var factory = Seed();
-        // No segments ⇒ legs uncomputed ⇒ every arrival downstream of the first is unknown.
+        // No segments â‡’ legs uncomputed â‡’ every arrival downstream of the first is unknown.
         await using var vm = await EnabledVmAsync(factory);
 
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
@@ -137,7 +137,7 @@ public class TripTimelineRenderTests : BunitTestContext
 
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
 
-        // Roundtrip ⇒ "Return to start" finish readout at the end of the list.
+        // Roundtrip â‡’ "Return to start" finish readout at the end of the list.
         cut.Markup.Should().Contain(UiStrings.TripTimelineFinishLabel);
     }
 
@@ -153,15 +153,15 @@ public class TripTimelineRenderTests : BunitTestContext
 
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
 
-        // Under budget ⇒ no flag.
+        // Under budget â‡’ no flag.
         await cut.InvokeAsync(() => vm.SetTimeBudgetMinutesAsync(180));
         cut.Render();
-        cut.Markup.Should().NotContain(UiStrings.TripBudgetOverrunLabel, "120m under a 180m budget ⇒ no overrun");
+        cut.Markup.Should().NotContain(UiStrings.TripBudgetOverrunLabel, "120m under a 180m budget â‡’ no overrun");
 
-        // Over budget ⇒ flag, amber tone, NEVER an error-red token.
+        // Over budget â‡’ flag, amber tone, NEVER an error-red token.
         await cut.InvokeAsync(() => vm.SetTimeBudgetMinutesAsync(60));
         cut.Render();
-        cut.Markup.Should().Contain(UiStrings.TripBudgetOverrunLabel, "120m over a 60m budget ⇒ overrun");
+        cut.Markup.Should().Contain(UiStrings.TripBudgetOverrunLabel, "120m over a 60m budget â‡’ overrun");
         cut.Markup.Should().Contain("text-amber-600", "the overrun is a soft amber warn");
         cut.Markup.Should().NotContain("text-tertiary", "the overrun is NEVER red/tertiary");
         cut.Markup.Should().NotContain("text-error");
@@ -171,7 +171,7 @@ public class TripTimelineRenderTests : BunitTestContext
     public async Task TripStopList_UnknownTotal_NeverShowsOverrun()
     {
         var factory = Seed();
-        // No segments ⇒ unknown total.
+        // No segments â‡’ unknown total.
         await using var vm = await EnabledVmAsync(factory);
 
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));

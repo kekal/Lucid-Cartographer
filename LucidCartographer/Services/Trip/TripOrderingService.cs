@@ -14,6 +14,7 @@ namespace LucidCartographer.Services.Trip;
 public sealed class TripOrderingService(
     IDbContextFactory<AppDbContext> factory,
     SqliteWriteLock writeLock,
+    IDistanceMatrixService distanceMatrix,
     ILogger<TripOrderingService> logger) : ITripOrderingService
 {
     public async Task<bool> HasOrderAsync(int collectionId, CancellationToken ct = default)
@@ -109,6 +110,160 @@ public sealed class TripOrderingService(
             .ThenBy(r => r.AddedDate)
             .ThenBy(r => r.PoiId));
         await SetOrderAsync(collectionId, desired, ct);
+    }
+
+    public async Task SortTravelingSalesmanAsync(int collectionId, CancellationToken ct = default)
+    {
+        // TRIP-TSP-01 (AR-6/D5): build the on-demand matrix over the placeable Stops
+        // (reusing the shared cache), run NN + 2-opt, then commit through the SAME
+        // Renumber + SetOrderAsync the seed/reorder/designation paths use (AR-11 single
+        // writer). Fewer than two placeable Stops ⇒ nothing to sort.
+        var matrix = await distanceMatrix.BuildAsync(collectionId, ct);
+        if (matrix is null || matrix.Stops.Count < 2)
+        {
+            return;
+        }
+
+        var n = matrix.Stops.Count;
+        var (startPoiId, finishPoiId) = await ReadPinsAsync(collectionId, ct);
+
+        // Pin → matrix index (null when the pinned POI is not actually a Stop here —
+        // defensive, mirrors ReorderStopAsync/ArrangeWithPins).
+        var startIndex = MatrixIndexOf(matrix.Stops, startPoiId);
+        var finishIndex = MatrixIndexOf(matrix.Stops, finishPoiId);
+        if (startIndex is { } si && finishIndex == si)
+        {
+            // Start == Finish can't happen (SetPin rejects it); treat as no Finish pin.
+            finishIndex = null;
+        }
+
+        // A distinct Finish Stop makes the trip an open path (no closing leg);
+        // otherwise it is a Roundtrip whose cost includes the closing edge — the
+        // same open/closed shape TravelTimeComputationBackgroundService.DirectionalPairs
+        // and TripViewModel.BuildLegs draw, so "≤ pre-sort total" is measured against
+        // what the UI actually shows.
+        var roundtrip = finishIndex is null;
+
+        // Pre-sort tour = the current Stop Order (matrix.Stops is ordered by
+        // OrderIndex, so the identity permutation IS the current order).
+        var identity = Enumerable.Range(0, n).ToList();
+        var preCost = TspSolver.TourCost(identity, matrix.DurationSeconds, roundtrip);
+
+        var solved = TspSolver.Solve(matrix.DurationSeconds, n, startIndex, finishIndex, roundtrip);
+        var solvedCost = TspSolver.TourCost(solved, matrix.DurationSeconds, roundtrip);
+
+        // AC4 never-worse guard: keep the optimized tour only when it is strictly
+        // better; otherwise retain the current order. The result is therefore always
+        // ≤ the pre-sort total — never worse — regardless of matrix shape.
+        var chosen = solvedCost < preCost - 1e-6 ? solved : identity;
+
+        // Map the chosen index permutation back to the tracked ItemRows, then run it
+        // through the shared pin arrangement (Start→1 / Finish→N) and the one writer.
+        var rows = await ReadAsync(collectionId, ct);
+        var rowByPoiId = rows.ToDictionary(r => r.PoiId);
+        var orderedRows = chosen
+            .Select(idx => rowByPoiId[matrix.Stops[idx].PoiId])
+            .ToList();
+
+        var desired = Renumber(ArrangeWithPins(orderedRows, startPoiId, finishPoiId));
+        await SetOrderAsync(collectionId, desired, ct);
+
+        logger.LogDebug(
+            "TRIP-TSP-01: sorted collection {CollectionId} over {Count} stop(s); pre {PreCost}s, post {PostCost}s, {Outcome}",
+            collectionId, n, (long)preCost, (long)solvedCost,
+            chosen == solved ? "improved" : "kept-existing");
+    }
+
+    /// <summary>
+    /// Upper bound on dwell minutes: 60 days. Mirrors the former
+    /// <c>TripViewModel.MaxDwellMinutes</c> (now centralized here so the UI and MCP
+    /// share one bound).
+    /// </summary>
+    public const int MaxDwellMinutes = 60 * 24 * 60;
+
+    public async Task AssignOrderAsync(int collectionId, IReadOnlyList<int> orderedPoiIds, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(orderedPoiIds);
+
+        // TRIP-MCP-01 (AR-11 single writer): an externally-supplied full order. The
+        // valid input is EXACTLY the current placeable Stop set — validate before
+        // touching the order so an agent mistake fails loudly rather than silently
+        // dropping or duplicating a Stop.
+        var rows = await ReadAsync(collectionId, ct);
+        var stops = rows.Where(r => r.Placeable && r.Order > 0).ToList();
+        var stopIds = stops.Select(r => r.PoiId).ToHashSet();
+
+        if (orderedPoiIds.Count != stopIds.Count
+            || orderedPoiIds.Distinct().Count() != orderedPoiIds.Count
+            || !orderedPoiIds.All(stopIds.Contains))
+        {
+            throw new ArgumentException(
+                $"orderedPoiIds must be exactly the {stopIds.Count} placeable Stop(s) of collection {collectionId}, " +
+                "each listed once (no unknown, unplaceable, missing or duplicate id).",
+                nameof(orderedPoiIds));
+        }
+
+        var rowByPoiId = stops.ToDictionary(r => r.PoiId);
+        var orderedRows = orderedPoiIds.Select(id => rowByPoiId[id]).ToList();
+
+        // Pins win: a designated Start/Finish keeps Order 1 / N regardless of the
+        // supplied position — same arrangement the drag/TSP/designation paths use.
+        var (startPoiId, finishPoiId) = await ReadPinsAsync(collectionId, ct);
+        var desired = Renumber(ArrangeWithPins(orderedRows, startPoiId, finishPoiId));
+        await SetOrderAsync(collectionId, desired, ct);
+
+        logger.LogDebug("TRIP-MCP-01: assigned external Stop Order for collection {CollectionId} ({Count} stop(s))",
+            collectionId, orderedRows.Count);
+    }
+
+    public async Task SetDwellMinutesAsync(int collectionId, int poiId, int? minutes, CancellationToken ct = default)
+    {
+        // TRIP-DWELL-01: validated dwell persist shared by the UI and MCP. Out-of-range
+        // is a silent no-op (the caller pre-validates / surfaces UX), mirroring the
+        // former VM behavior.
+        if (minutes is < 0 or > MaxDwellMinutes)
+        {
+            return;
+        }
+
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var membership = await db.PoiCollectionItems.FirstOrDefaultAsync(
+            ci => ci.PoiCollectionId == collectionId && ci.PoiId == poiId, ct);
+        if (membership is null || membership.DwellMinutes == minutes)
+        {
+            return;
+        }
+
+        membership.DwellMinutes = minutes;
+
+        await writeLock.Gate.WaitAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        finally
+        {
+            writeLock.Gate.Release();
+        }
+
+        logger.LogDebug("TRIP-DWELL-01: dwell {Minutes} written for POI {PoiId} in collection {CollectionId}",
+            minutes, poiId, collectionId);
+    }
+
+    private static int? MatrixIndexOf(IReadOnlyList<PlaceableStop> stops, int? poiId)
+    {
+        if (poiId is not { } id)
+        {
+            return null;
+        }
+        for (var i = 0; i < stops.Count; i++)
+        {
+            if (stops[i].PoiId == id)
+            {
+                return i;
+            }
+        }
+        return null;
     }
 
     public async Task ReconcileOrderAsync(int collectionId, CancellationToken ct = default)

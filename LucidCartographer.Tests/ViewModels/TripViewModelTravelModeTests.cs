@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using LucidCartographer.Components.Shared.Trip;
 using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
@@ -12,8 +12,8 @@ namespace LucidCartographer.Tests.ViewModels;
 /// <summary>
 /// Story 2.2 (AC 1, 2, 5): the ViewModel persists the per-trip TravelMode + signals
 /// the recompute trigger (no-op on the active mode), and upserts/clears a manual
-/// Any/Air leg time (Fidelity.Manual, Source "Manual", minutes→seconds) updating the
-/// total — clearing reverts the leg to a Placeholder/uncomputed state.
+/// Any/Air leg time (Fidelity.Manual, Source "Manual", minutesâ†’seconds) updating the
+/// total â€” clearing reverts the leg to a Placeholder/uncomputed state.
 /// </summary>
 public class TripViewModelTravelModeTests
 {
@@ -40,7 +40,7 @@ public class TripViewModelTravelModeTests
     {
         var factory = Seed(placeable);
         var writeLock = new SqliteWriteLock();
-        var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
         var trigger = new TravelTimeTrigger();
         var vm = new TripViewModel(
             ordering, factory, writeLock,
@@ -125,7 +125,7 @@ public class TripViewModelTravelModeTests
     {
         var (vm, _, factory) = await EnabledVmAsync(placeable: 2);
         await using var _v = vm;
-        // Seed the other roundtrip leg (2→1) so the total can resolve once 1→2 is manual.
+        // Seed the other roundtrip leg (2â†’1) so the total can resolve once 1â†’2 is manual.
         await using (var db = await factory.CreateDbContextAsync())
         {
             db.RouteSegments.Add(new RouteSegment { FromPoiId = 2, ToPoiId = 1, TravelMode = TravelMode.AnyAir, DurationSeconds = 600, DistanceMeters = 8000, Fidelity = Fidelity.Manual, Source = "Manual", ComputedAt = DateTime.UtcNow });
@@ -166,7 +166,7 @@ public class TripViewModelTravelModeTests
         }
 
         var leg = vm.OrderedLegs.First(l => l.FromPoiId == 1 && l.ToPoiId == 2);
-        leg.Fidelity.Should().BeNull("no row ⇒ uncomputed (em-dash, no badge)");
+        leg.Fidelity.Should().BeNull("no row â‡’ uncomputed (em-dash, no badge)");
         leg.DurationSeconds.Should().BeNull();
     }
 }

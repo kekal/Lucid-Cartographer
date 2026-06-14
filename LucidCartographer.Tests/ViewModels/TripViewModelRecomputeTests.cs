@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using LucidCartographer.Components.Shared.Trip;
 using LucidCartographer.Configuration;
 using LucidCartographer.Data;
@@ -17,14 +17,14 @@ namespace LucidCartographer.Tests.ViewModels;
 /// Story 2.4 (TRIP-RECOMPUTE-01, AC1/AC4/AC5): the VM's explicit Recompute
 /// invalidates the eligible cached rows (keeping Manual), the no-op reorder over a
 /// fully-cached trip neither writes nor signals (AC1), and a recompute followed by a
-/// background pass with a stub Measured provider upgrades a leg Estimated→Measured,
+/// background pass with a stub Measured provider upgrades a leg Estimatedâ†’Measured,
 /// flipping <see cref="TripLeg.IsMeasured"/> and raising <see cref="TripViewModel.StateChanged"/>.
 /// </summary>
 public class TripViewModelRecomputeTests
 {
     private const int CollectionId = 1;
 
-    // A stub provider that always returns a Measured result — the Epic 4 upgrade
+    // A stub provider that always returns a Measured result â€” the Epic 4 upgrade
     // signal, exercised here since the shipping Mock never yields Measured.
     private sealed class MeasuredProvider : ITravelTimeProvider
     {
@@ -34,7 +34,7 @@ public class TripViewModelRecomputeTests
     }
 
     // Counts provider calls so the no-op reorder test can prove the compute path was
-    // never entered (the trigger was not signalled ⇒ no leg recomputed).
+    // never entered (the trigger was not signalled â‡’ no leg recomputed).
     private sealed class CountingProvider(IOptions<TravelTimeOptions> options) : ITravelTimeProvider
     {
         public int Calls { get; private set; }
@@ -85,7 +85,7 @@ public class TripViewModelRecomputeTests
         IDbContextFactory<AppDbContext> factory, SqliteWriteLock writeLock,
         IRouteSegmentInvalidationService invalidation, TravelTimeTrigger trigger)
     {
-        var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
         var vm = new TripViewModel(
             ordering, factory, writeLock, trigger, new TravelTimeProgressService(),
             invalidation, NullLogger<TripViewModel>.Instance);
@@ -122,7 +122,7 @@ public class TripViewModelRecomputeTests
         // The Manual row survives; the Estimated row was deleted (now missing).
         rows.Should().ContainSingle(r => r.Fidelity == Fidelity.Manual && r.FromPoiId == 2 && r.ToPoiId == 1);
         rows.Should().NotContain(r => r.FromPoiId == 1 && r.ToPoiId == 2);
-        // A missing leg ⇒ the VM is computing again (RefreshProjections signalled).
+        // A missing leg â‡’ the VM is computing again (RefreshProjections signalled).
         vm.IsAnyLegComputing.Should().BeTrue("the deleted Estimated leg is re-queued");
     }
 
@@ -143,11 +143,11 @@ public class TripViewModelRecomputeTests
         var fired = false;
         vm.StateChanged += () => fired = true;
 
-        // Recompute deletes the eligible Estimated rows…
+        // Recompute deletes the eligible Estimated rowsâ€¦
         await vm.RecomputeTravelTimesAsync();
         fired.Should().BeTrue("RecomputeTravelTimesAsync notifies via StateChanged");
 
-        // …and the next background pass (now a Measured provider) refills them Measured.
+        // â€¦and the next background pass (now a Measured provider) refills them Measured.
         var measuredCompute = BuildCompute(factory, writeLock, new MeasuredProvider());
         await measuredCompute.ProcessOnceAsync(CancellationToken.None);
 
@@ -159,7 +159,7 @@ public class TripViewModelRecomputeTests
 
         // The VM reflects the upgrade on its next refresh. A second recompute keeps
         // the Measured rows (Measured is NOT eligible for invalidation) and re-reads
-        // the projections — proving the upgrade lands via the real refresh path, not
+        // the projections â€” proving the upgrade lands via the real refresh path, not
         // a test back-door.
         await vm.RecomputeTravelTimesAsync();
         vm.OrderedLegs.Should().NotBeEmpty();
@@ -185,7 +185,7 @@ public class TripViewModelRecomputeTests
         await using var db = await factory.CreateDbContextAsync();
         var rows = await db.RouteSegments.AsNoTracking().ToListAsync();
         rows.Should().NotBeEmpty();
-        rows.Should().OnlyContain(r => r.Fidelity == Fidelity.Estimated, "the Mock yields Estimated for Drive — no spurious Measured upgrade");
+        rows.Should().OnlyContain(r => r.Fidelity == Fidelity.Estimated, "the Mock yields Estimated for Drive â€” no spurious Measured upgrade");
     }
 
     [Fact]
@@ -198,7 +198,7 @@ public class TripViewModelRecomputeTests
         var compute = BuildCompute(factory, writeLock, counting);
 
         // Enable Trip View in the DB and fully cache the trip BEFORE building the VM,
-        // so the VM's initial projection reads a complete cache (⇒ not computing).
+        // so the VM's initial projection reads a complete cache (â‡’ not computing).
         await using (var db = await factory.CreateDbContextAsync())
         {
             var c = await db.PoiCollections.FirstAsync(x => x.Id == CollectionId);
@@ -211,12 +211,12 @@ public class TripViewModelRecomputeTests
         // The trigger the VM signals on; we drain it after build so a later signal
         // from the reorder is detectable.
         var trigger = new TravelTimeTrigger();
-        var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
         var vm = new TripViewModel(
             ordering, factory, writeLock, trigger, new TravelTimeProgressService(),
             invalidation, NullLogger<TripViewModel>.Instance);
         await using var _ = vm;
-        // LoadAsync reads the DB-persisted TripViewEnabled=true ⇒ the VM is enabled
+        // LoadAsync reads the DB-persisted TripViewEnabled=true â‡’ the VM is enabled
         // with projections built from the full cache (no ToggleAsync needed).
         await vm.LoadAsync(CollectionId, 2);
 
@@ -230,10 +230,10 @@ public class TripViewModelRecomputeTests
         // Drain any pre-existing signal so a fresh signal from the reorder is detectable.
         await trigger.WaitAsync(TimeSpan.Zero, CancellationToken.None);
 
-        // A clamped/own-position move yields the same (From,To,Mode) set ⇒ no new legs.
+        // A clamped/own-position move yields the same (From,To,Mode) set â‡’ no new legs.
         await vm.MoveStopToAsync(1, 1);
 
-        // No new signal ⇒ WaitAsync(0) times out (returns false).
+        // No new signal â‡’ WaitAsync(0) times out (returns false).
         var signalled = await trigger.WaitAsync(TimeSpan.Zero, CancellationToken.None);
         signalled.Should().BeFalse("a no-op reorder over a fully-cached trip must not signal recompute (AC1)");
 

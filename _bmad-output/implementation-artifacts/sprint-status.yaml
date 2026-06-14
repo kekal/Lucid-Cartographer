@@ -36,6 +36,14 @@
 
 generated: 2026-06-11
 last_updated: 2026-06-14
+# epic-3 activated (backlog → in-progress) and story 3-1 created via bmad-create-story on 2026-06-14 (status backlog → ready-for-dev); manual cycle (no tmux — Windows). Two NEW files planned: DistanceMatrixService + SortTravelingSalesmanAsync on TripOrderingService (NN+2-opt, D5/D11)
+# story 3-1 moved to review on 2026-06-14 via bmad-dev-story (TSP-Sort: new DistanceMatrixService [D11 on-demand N×N over shared RouteSegment cache, estimate-fill, no cache writes] + pure TspSolver [NN+2-opt, full-cost eval for asymmetric directional matrix] on TripOrderingService.SortTravelingSalesmanAsync via the single OrderIndex write path; pins honored, never-worse guard, button on both surfaces. DistanceMatrixService registered in parameterless AddTripServices to keep the integration host wiring TripOrderingService; VM ctor unchanged. Full suite 867/867 green incl. Trip integration)
+# story 3-1 moved to done on 2026-06-14 via bmad-story-automator-review (adversarial fresh-context: 0 CRITICAL/0 HIGH/1 MED/2 LOW; MED auto-fixed [no-op sort no longer announces a reorder that didn't happen — matches MoveStopToAsync no-op silence, +1 guard test], 2 LOW accepted [position-0 anchor never-worse; announcement-not-cleared pre-existing pattern]; File List == git; full suite 869/869 green incl. Trip integration)
+# story 3-2 created via bmad-create-story on 2026-06-14 (status backlog → ready-for-dev). MCP TripTools (get_trip/assign_stop_order/set_trip_start|finish/set_dwell_time) on the existing /mcp 3-tier auth via WithToolsFromAssembly (no Program.cs change); new ITripOrderingService.AssignOrderAsync + SetDwellMinutesAsync through the single OrderIndex writer; VM dwell-persist refactored to delegate. Resolves Epic-2 retro A5 (MCP coord-edit → IRouteSegmentInvalidationService.InvalidateForPoiAsync in EditPoi, removes the deferred TODO). MCP = first off-circuit ordering writer → flag the atomicity defer for review
+# story 3-2 moved to review on 2026-06-14 via bmad-dev-story (TripTools.cs [7 tools] auto-discovered on /mcp, no new auth surface; AssignOrderAsync validates exact-stop-set + pins-win via ArrangeWithPins/SetOrderAsync; dwell write centralized on the service [VM delegates]; A5 done [EditPoi invalidates legs on real coord change, TODO+MA0026 removed]. Concurrency: MCP is first off-circuit ordering writer — atomicity defer flagged for Epic-3 retro. Full suite 886/886 green incl. Trip integration)
+# story 3-2 moved to done on 2026-06-14 via bmad-story-automator-review (adversarial fresh-context: 0 CRITICAL/0 HIGH/1 MED/2 LOW; MED auto-fixed [assign_stop_order MCP input IReadOnlyList<int>→int[] for robust schema binding], 2 LOW accepted [off-circuit ordering-writer atomicity → flagged for Epic-3 retro; per-write trip re-read]; File List == git; full suite 886/886 green incl. Trip integration)
+# EPIC 3 COMPLETE — both stories done on 2026-06-14 (create→dev→review per story, fresh-context adversarial review each, no tmux/Windows manual cycle); retrospective next. Open item for retro: promote the OrderIndex/pin write-path atomicity defer now that MCP is a real off-circuit ordering writer
+# epic-3-retrospective completed 2026-06-14 via bmad-retrospective (YOLO; full suite 886/886 green, 0 migrations across the epic; A5 closed [MCP coord-invalidation], A3/A4 standing gates held). NEW action items: A7 [promote OrderIndex/pin write-path to a single gated read-validate-write txn — MCP is now an off-circuit ordering writer], A8 [test files use namespace LucidCartographer.Tests, never …Tests.Services which shadows Services.*], A9 [all-pairs cache computations must treat the cache as directional/asymmetric]. A6 follow-ups owned by Epic 4 (OSRM). No epic-update required; Epic 4 ready. See epic-3-retro-2026-06-14.md
 # epic-2 activated and story 2-1 created via bmad-create-story on 2026-06-14 (status backlog → ready-for-dev)
 # story 2-1 moved to review on 2026-06-14 via bmad-dev-story (build clean; 589 unit/component + 19 Trip integration green; caught+fixed an integration-host DI regression — AddTripServices split so the hosted travel-time loop/pipeline only registers in production, not the test host)
 # story 2-1 moved to done on 2026-06-14 via bmad-story-automator-review (adversarial fresh-context review: 0 CRITICAL/0 HIGH/1 MED/3 LOW; 2 auto-fixed [UiStrings i18n for duration/distance formats, empty-leg aria-label], 2 LOW accepted as matching the enrichment single-writer pattern; rebuild clean, 589 green)
@@ -94,10 +102,10 @@ development_status:
   epic-2-retrospective: done
 
   # Epic 3: Assisted ordering — TSP-Sort & MCP agent
-  epic-3: backlog
-  3-1-sort-in-traveling-salesman-order-button: backlog
-  3-2-assign-stop-order-and-start-finish-dwell-via-mcp: backlog
-  epic-3-retrospective: optional
+  epic-3: done
+  3-1-sort-in-traveling-salesman-order-button: done
+  3-2-assign-stop-order-and-start-finish-dwell-via-mcp: done
+  epic-3-retrospective: done
 
   # Epic 4: Measured road routing via OSRM (Phase 2, optional)
   epic-4: backlog

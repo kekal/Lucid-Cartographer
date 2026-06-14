@@ -33,6 +33,17 @@ public static class McpServerExtensions
         - Before create_poi, search the name; on a hit, get_poi to inspect its `collections`.
           A POI can live in several collections — prefer copy_poi/move_poi over re-creating one.
 
+        Trips (ordering a collection into a route):
+        - get_trip reads the ordered Stops (1-based OrderIndex, Start/Finish flags,
+          dwell minutes) + the cached Legs (seconds/meters) under the collection's
+          Travel Mode.
+        - assign_stop_order sets the full visiting order — pass ALL placeable Stop
+          PoiIds once, in order. set_trip_start / set_trip_finish pin the ends
+          (Start→1, Finish→last; clear_* to release); set_dwell_time sets per-Stop
+          dwell minutes. An MCP-assigned order persists exactly like a manual drag and
+          stays drag-editable. Honor soft constraints the cost matrix can't express
+          ("museums in the morning, rooftop bar last").
+
         Allowed category values: restaurant, cafe, bar, hotel, attraction, shopping,
         nature, other.
         Coordinate ranges: latitude [-90, 90], longitude [-180, 180].

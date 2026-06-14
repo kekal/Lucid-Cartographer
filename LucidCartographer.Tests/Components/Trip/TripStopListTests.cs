@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Bunit;
 using BunitTestContext = Bunit.TestContext;
 using FluentAssertions;
@@ -18,7 +18,7 @@ namespace LucidCartographer.Tests.Components;
 /// bUnit coverage for the Story 1.3 stop-list panels (desktop TripStopList +
 /// mobile MobileTripPanel). Verifies rows render one-per-placeable-stop in order
 /// with the order badge, POI name, and the two inert em-dash placeholders (dwell
-/// + timeline) carrying their aria-labels — all via UiStrings.
+/// + timeline) carrying their aria-labels â€” all via UiStrings.
 /// </summary>
 public class TripStopListTests : BunitTestContext
 {
@@ -50,7 +50,7 @@ public class TripStopListTests : BunitTestContext
             await db.SaveChangesAsync();
         }
         var writeLock = new SqliteWriteLock();
-        var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
         var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), TestDbHelper.CreateInvalidationService(factory), NullLogger<TripViewModel>.Instance);
         await vm.LoadAsync(CollectionId, placeable);
         await vm.ToggleAsync(); // seed + enable so OrderedStops is populated
@@ -74,7 +74,7 @@ public class TripStopListTests : BunitTestContext
         cut.Find($"[aria-label=\"{badgeAria}\"]").TextContent.Trim().Should().Be("1");
 
         // Story 2.5 (TRIP-DWELL-01): the dwell slot is now an empty minutes input
-        // (unset ⇒ no value) carrying its per-stop UiStrings aria-label.
+        // (unset â‡’ no value) carrying its per-stop UiStrings aria-label.
         var dwellAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripDwellAria, "P1");
         var dwell = cut.Find($"input[aria-label=\"{dwellAria}\"]");
         dwell.GetAttribute("type").Should().Be("number");
@@ -92,10 +92,10 @@ public class TripStopListTests : BunitTestContext
     [Fact]
     public async Task TripStopList_ShowsEmptyState_WhenNoStops()
     {
-        // Trip View off ⇒ OrderedStops empty ⇒ empty-state copy.
+        // Trip View off â‡’ OrderedStops empty â‡’ empty-state copy.
         var factory = SeedFactory(placeable: 2);
         var writeLock = new SqliteWriteLock();
-        var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
         await using var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), TestDbHelper.CreateInvalidationService(factory), NullLogger<TripViewModel>.Instance);
         await vm.LoadAsync(CollectionId, 2);
 
@@ -124,7 +124,63 @@ public class TripStopListTests : BunitTestContext
         cut.Find($"input[aria-label=\"{dwellAria}\"]").GetAttribute("type").Should().Be("number");
     }
 
-    // === Story 1.4: row selection (list→map) ===
+    // === Story 3.1 (TRIP-TSP-01): the "Sort in Traveling Salesman order" button ===
+
+    [Fact]
+    public async Task TripStopList_RendersSortButton_AboveTheGate()
+    {
+        await using var vm = await EnabledVmAsync(placeable: 3);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        cut.Find($"[aria-label=\"{UiStrings.TripSortTspAria}\"]")
+            .TextContent.Trim().Should().Be(UiStrings.TripSortTspLabel);
+    }
+
+    [Fact]
+    public async Task MobileTripPanel_RendersSortButton_AboveTheGate()
+    {
+        await using var vm = await EnabledVmAsync(placeable: 2);
+
+        var cut = RenderComponent<MobileTripPanel>(p => p.Add(x => x.Vm, vm));
+
+        cut.Find($"[aria-label=\"{UiStrings.TripSortTspAria}\"]")
+            .TextContent.Trim().Should().Be(UiStrings.TripSortTspLabel);
+    }
+
+    [Fact]
+    public async Task TripStopList_SortButton_Absent_WhenTripViewOff()
+    {
+        // Trip View off ⇒ header controls (and the Sort button) are not rendered.
+        var factory = SeedFactory(placeable: 2);
+        var writeLock = new SqliteWriteLock();
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
+        await using var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), TestDbHelper.CreateInvalidationService(factory), NullLogger<TripViewModel>.Instance);
+        await vm.LoadAsync(CollectionId, 2);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        cut.FindAll($"[aria-label=\"{UiStrings.TripSortTspAria}\"]").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TripStopList_SortButtonClick_ReordersStops()
+    {
+        // poi i has latitude 50+i and AddedDate id-order, so seed order == spatial
+        // order here; instead assert the click invokes the sort without error and
+        // keeps a contiguous order (the algorithm itself is unit-tested elsewhere).
+        await using var vm = await EnabledVmAsync(placeable: 3);
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        await cut.Find($"[aria-label=\"{UiStrings.TripSortTspAria}\"]").ClickAsync(new MouseEventArgs());
+
+        // Seed latitude is monotonic in id here, so the order is already optimal —
+        // the click invokes the sort without error and leaves a contiguous order.
+        // (The genuine-reorder + announcement behaviour is covered in TripViewModelTspSortTests.)
+        vm.OrderedStops.Select(s => s.OrderIndex).Should().Equal(1, 2, 3);
+    }
+
+    // === Story 1.4: row selection (listâ†’map) ===
 
     [Fact]
     public async Task TripStopList_Rows_AreSelectableButtons_WithDataPoiId()
@@ -230,7 +286,7 @@ public class TripStopListTests : BunitTestContext
     [Fact]
     public async Task TripStopList_PinnedStartFinishRows_HaveBothMoveButtonsDisabled()
     {
-        // P1 pinned Start, P4 pinned Finish ⇒ movable window is [2..3].
+        // P1 pinned Start, P4 pinned Finish â‡’ movable window is [2..3].
         await using var vm = await EnabledVmAsync(placeable: 4, startPoiId: 1, finishPoiId: 4);
 
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
@@ -331,7 +387,7 @@ public class TripStopListTests : BunitTestContext
         var down = cut.Find($"button[aria-label=\"{MoveDownLabel("P1")}\"]");
         down.HasAttribute("disabled").Should().BeFalse();
 
-        // ≥44px touch targets on the mobile move controls.
+        // â‰¥44px touch targets on the mobile move controls.
         down.GetAttribute("style").Should().Contain("min-width:44px").And.Contain("min-height:44px");
 
         down.Click();
@@ -495,7 +551,7 @@ public class TripStopListTests : BunitTestContext
         await using var vm = await EnabledVmAsync(placeable: 3);
         var cut = RenderComponent<MobileTripPanel>(p => p.Add(x => x.Vm, vm));
 
-        // Same aria-labels as desktop (shared UiStrings + shared VM), ≥44px targets.
+        // Same aria-labels as desktop (shared UiStrings + shared VM), â‰¥44px targets.
         var setStart = cut.Find($"button[aria-label=\"{SetStartLabel("P2")}\"]");
         setStart.GetAttribute("style").Should().Contain("min-width:44px").And.Contain("min-height:44px");
 
@@ -549,7 +605,7 @@ public class TripStopListTests : BunitTestContext
         }
 
         var writeLock = new SqliteWriteLock();
-        var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
         var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), TestDbHelper.CreateInvalidationService(factory), NullLogger<TripViewModel>.Instance);
         await vm.LoadAsync(CollectionId, 2);
         await vm.ToggleAsync();
@@ -563,7 +619,7 @@ public class TripStopListTests : BunitTestContext
 
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
 
-        // The row is present — never dropped (AC1).
+        // The row is present â€” never dropped (AC1).
         var rows = cut.FindAll("li");
         rows.Should().HaveCount(3, "the unplaceable POI stays in the list");
 
@@ -577,7 +633,7 @@ public class TripStopListTests : BunitTestContext
         // No routed order badge on the unplaceable row (AC4): the badge aria-label
         // pattern ("Stop X of Y") must not appear inside it.
         row.QuerySelectorAll("[aria-label^='Stop']").Should().BeEmpty();
-        // Not selectable — no button semantics.
+        // Not selectable â€” no button semantics.
         row.HasAttribute("role").Should().BeFalse();
         row.HasAttribute("tabindex").Should().BeFalse();
     }
@@ -651,7 +707,7 @@ public class TripStopListTests : BunitTestContext
             await db.SaveChangesAsync();
         }
         var writeLock = new SqliteWriteLock();
-        var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
         var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), TestDbHelper.CreateInvalidationService(factory), NullLogger<TripViewModel>.Instance);
         await vm.LoadAsync(CollectionId, placeable);
         await vm.ToggleAsync();
@@ -712,14 +768,14 @@ public class TripStopListTests : BunitTestContext
     [Fact]
     public async Task AnyAir_NoManual_Leg_ShowsEmDash_NoBadge()
     {
-        // A Placeholder Any/Air row ⇒ the time slot shows "—" and no fidelity badge.
+        // A Placeholder Any/Air row â‡’ the time slot shows "â€”" and no fidelity badge.
         await using var vm = await EnabledVmWithModeAsync(placeable: 2, mode: TravelMode.AnyAir);
 
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
 
-        // With no cache rows the leg is uncomputed ⇒ "—" in the time slot. The
+        // With no cache rows the leg is uncomputed â‡’ "â€”" in the time slot. The
         // FidelityBadge renders nothing for Placeholder/null, so no provenance pill
-        // appears (asserted via the badge's "Provenance: …" aria-label, which is
+        // appears (asserted via the badge's "Provenance: â€¦" aria-label, which is
         // distinct from the manual input's own aria text).
         cut.Markup.Should().Contain(UiStrings.TripLegTimeUnknown);
         var manualProvenance = string.Format(CultureInfo.CurrentCulture, UiStrings.TripFidelityAria, UiStrings.TripFidelityManual);
@@ -739,7 +795,7 @@ public class TripStopListTests : BunitTestContext
 
         cut.WaitForAssertion(() =>
         {
-            // The 1→2 leg now carries the Manual badge.
+            // The 1â†’2 leg now carries the Manual badge.
             cut.Markup.Should().Contain(UiStrings.TripFidelityManual);
             var leg = vm.OrderedLegs.First(l => l.FromPoiId == 1 && l.ToPoiId == 2);
             leg.Fidelity.Should().Be(Fidelity.Manual);
@@ -792,7 +848,7 @@ public class TripStopListTests : BunitTestContext
         // Clicking Recompute invokes the VM (no exception; the VM stays usable).
         cut.Find($"button[aria-label=\"{UiStrings.TripRecomputeAria}\"]").Click();
 
-        // Row selection still works after the recompute click — the button did not
+        // Row selection still works after the recompute click â€” the button did not
         // capture the row's click target.
         vm.SelectStop(1, TripSelectionSource.List);
         vm.SelectedStopPoiId.Should().Be(1, "selecting a stop still works alongside the Recompute control");

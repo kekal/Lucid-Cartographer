@@ -109,3 +109,35 @@ public record PoiDetailDto(
 
 /// <summary>Snapshot of the background enrichment queue.</summary>
 public record EnrichmentStatusDto(int Total, int Remaining, int Fetched);
+
+/// <summary>
+/// TRIP-MCP-01 (Story 3.2): a collection's Trip as seen by an MCP agent — the
+/// ordered placeable Stops plus the cached Legs between them, under the
+/// collection's persisted Travel Mode. Canonical units: durations in SECONDS,
+/// distances in METERS, dwell in MINUTES, OrderIndex 1-based.
+/// </summary>
+public record TripDto(
+    int CollectionId,
+    string TravelMode,
+    IReadOnlyList<TripStopDto> Stops,
+    IReadOnlyList<TripLegDto> Legs);
+
+/// <summary>One ordered Stop: 1-based OrderIndex, pin flags, optional dwell.</summary>
+public record TripStopDto(
+    int PoiId,
+    string Name,
+    int OrderIndex,
+    bool IsStart,
+    bool IsFinish,
+    int? DwellMinutes);
+
+/// <summary>
+/// One cached, directional Leg (From → To) under the collection's mode. Null
+/// when the pair has no cache row yet (not yet computed).
+/// </summary>
+public record TripLegDto(
+    int FromPoiId,
+    int ToPoiId,
+    int? DurationSeconds,
+    double? DistanceMeters,
+    string? Fidelity);

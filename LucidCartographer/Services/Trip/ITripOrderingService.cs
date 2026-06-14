@@ -118,6 +118,50 @@ public interface ITripOrderingService
     Task CompactOrderAsync(int collectionId, CancellationToken ct = default);
 
     /// <summary>
+    /// TRIP-TSP-01 (Story 3.1, AR-6/D5): "Sort in Traveling Salesman order". Builds
+    /// the on-demand N×N Distance Matrix over the placeable Stops
+    /// (<see cref="IDistanceMatrixService"/>, reusing the shared cache), runs
+    /// nearest-neighbour + 2-opt, and rewrites <c>OrderIndex</c> through the SAME
+    /// single write path (<see cref="ITripOrderingService"/>, AR-11) as drag /
+    /// keyboard / MCP — it is just another ordering write, freely overridable by a
+    /// later manual drag. This is the ONLY method that sorts; the system never
+    /// reorders without an explicit caller (no automatic trigger).
+    ///
+    /// Pin-aware: a designated Start stays at Order 1 and a designated Finish at
+    /// Order N (interior edges only). A Roundtrip (no distinct Finish) closes the
+    /// loop; an open path does not. The new order's total travel time is GUARANTEED
+    /// <b>≤</b> the pre-sort order for the same Stops/mode — if the search cannot
+    /// improve on the current order, the current order is kept (no worse result is
+    /// ever written). No-op for a collection with fewer than two placeable Stops.
+    /// </summary>
+    Task SortTravelingSalesmanAsync(int collectionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// TRIP-MCP-01 (Story 3.2, AR-8/FR-16): assigns a full Stop Order supplied by an
+    /// external caller (the MCP agent). <paramref name="orderedPoiIds"/> must be
+    /// EXACTLY the collection's placeable, ordered Stops — every Stop present once,
+    /// no unknown / unplaceable / duplicate id — otherwise an
+    /// <see cref="ArgumentException"/> is thrown (the MCP runtime surfaces it as a
+    /// tool error). The supplied sequence is the interior order; a designated Start
+    /// stays at Order 1 and a designated Finish at Order N (pins win, via the shared
+    /// <c>ArrangeWithPins</c>). Writes through the SAME single <c>OrderIndex</c> path
+    /// (1-based, contiguous, gap-free, unique — AR-11) as drag / keyboard / TSP, so an
+    /// MCP-assigned order persists identically to a manual drag and stays drag-editable.
+    /// </summary>
+    Task AssignOrderAsync(int collectionId, IReadOnlyList<int> orderedPoiIds, CancellationToken ct = default);
+
+    /// <summary>
+    /// TRIP-DWELL-01 / TRIP-MCP-01: persists the dwell time (minutes) on the
+    /// collection's membership for <paramref name="poiId"/>. <paramref name="minutes"/>
+    /// is stored verbatim on <c>PoiCollectionItem.DwellMinutes</c>; <c>null</c> clears
+    /// it. Written under the shared <see cref="SqliteWriteLock"/>. No-op when the
+    /// membership is absent or <paramref name="minutes"/> is out of range
+    /// (<c>&lt; 0</c> or <c>&gt; <see cref="TripOrderingService.MaxDwellMinutes"/></c>).
+    /// The single dwell-write implementation shared by the UI (TripViewModel) and MCP.
+    /// </summary>
+    Task SetDwellMinutesAsync(int collectionId, int poiId, int? minutes, CancellationToken ct = default);
+
+    /// <summary>
     /// Reconciles the order after an arbitrary membership change: any placeable
     /// item that has no order yet (<c>OrderIndex == 0</c>) is appended after the
     /// existing Stops (by AddedDate, then PoiId), then the whole set is compacted

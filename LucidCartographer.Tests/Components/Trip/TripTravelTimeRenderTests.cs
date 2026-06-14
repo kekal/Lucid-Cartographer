@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Bunit;
 using BunitTestContext = Bunit.TestContext;
 using FluentAssertions;
@@ -16,7 +16,7 @@ namespace LucidCartographer.Tests.Components;
 /// <summary>
 /// Story 2.1 (AC 4, 5, 8): bUnit coverage that TripStopList (desktop) and
 /// MobileTripPanel (mobile) render per-leg travel time + distance + the
-/// Estimated Fidelity badge (on-surface-variant tone), the "—" unknown marker
+/// Estimated Fidelity badge (on-surface-variant tone), the "â€”" unknown marker
 /// when a leg is uncomputed, and never render a Placeholder badge.
 /// </summary>
 public class TripTravelTimeRenderTests : BunitTestContext
@@ -57,7 +57,7 @@ public class TripTravelTimeRenderTests : BunitTestContext
     private static async Task<TripViewModel> EnabledVmAsync(IDbContextFactory<AppDbContext> factory)
     {
         var writeLock = new SqliteWriteLock();
-        var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
         var vm = new TripViewModel(
             ordering, factory, writeLock,
             new TravelTimeTrigger(), new TravelTimeProgressService(),
@@ -114,7 +114,7 @@ public class TripTravelTimeRenderTests : BunitTestContext
     public async Task TripStopList_UncomputedLeg_ShowsEmDash_AndComputingAnnouncement()
     {
         var factory = Seed();
-        // No segments seeded ⇒ both legs uncomputed.
+        // No segments seeded â‡’ both legs uncomputed.
         await using var vm = await EnabledVmAsync(factory);
 
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
@@ -133,8 +133,8 @@ public class TripTravelTimeRenderTests : BunitTestContext
     {
         var factory = Seed();
         // TRIP-TRAVELMODE-01 (AC4): a COMPUTED Placeholder row carries a real
-        // straight-line air estimate (600s = "10m" each). The UI must show "—" for
-        // the time and "—" for the total — never the air estimate — and never a badge.
+        // straight-line air estimate (600s = "10m" each). The UI must show "â€”" for
+        // the time and "â€”" for the total â€” never the air estimate â€” and never a badge.
         await AddSegmentAsync(factory, 1, 2, 600, 8000, Fidelity.Placeholder);
         await AddSegmentAsync(factory, 2, 1, 600, 8000, Fidelity.Placeholder);
         await using var vm = await EnabledVmAsync(factory);
@@ -142,7 +142,7 @@ public class TripTravelTimeRenderTests : BunitTestContext
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
 
         // No badge for Placeholder.
-        cut.Markup.Should().NotContain(Fidelity.Placeholder, "Placeholder is internal-only — never a badge");
+        cut.Markup.Should().NotContain(Fidelity.Placeholder, "Placeholder is internal-only â€” never a badge");
         var provenanceAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripFidelityAria, Fidelity.Placeholder);
         cut.FindAll($"[aria-label=\"{provenanceAria}\"]").Should().BeEmpty();
         // The air estimate must NOT be rendered as a real time.

@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using LucidCartographer.Components.Shared.Trip;
 using LucidCartographer.Data;
 using LucidCartographer.Data.Entities;
@@ -42,7 +42,7 @@ public class TripViewModelTests
     private static TripViewModel CreateVm(IDbContextFactory<AppDbContext> factory)
     {
         var writeLock = new SqliteWriteLock();
-        var ordering = new TripOrderingService(factory, writeLock, NullLogger<TripOrderingService>.Instance);
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
         return new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), TestDbHelper.CreateInvalidationService(factory), NullLogger<TripViewModel>.Instance);
     }
 
@@ -118,7 +118,7 @@ public class TripViewModelTests
     {
         var factory = SeedFactory(placeable: 2, tripViewEnabled: true);
         // Pre-seed an order as if a previous session had enabled Trip View.
-        var ordering = new TripOrderingService(factory, new SqliteWriteLock(), NullLogger<TripOrderingService>.Instance);
+        var ordering = TestDbHelper.CreateOrderingService(factory);
         await ordering.SeedOrderAsync(CollectionId);
 
         await using var vm = CreateVm(factory);
@@ -163,9 +163,9 @@ public class TripViewModelTests
         vm.IsToggleAvailable.Should().BeFalse();
     }
 
-    // === [TRIP-GATE-01] Auto-disable below the ≥2 placeable gate ===
+    // === [TRIP-GATE-01] Auto-disable below the â‰¥2 placeable gate ===
     // Only the membership-change signal (real add/remove, fired after the
-    // filtered set is refreshed) auto-disables — never the transient
+    // filtered set is refreshed) auto-disables â€” never the transient
     // visible/filtered count fed to LoadAsync/UpdatePlaceableCount.
 
     [Fact]
@@ -186,7 +186,7 @@ public class TripViewModelTests
 
         await vm.RefreshAfterMembershipChangeAsync(1);
 
-        vm.IsTripViewEnabled.Should().BeFalse("a removal below the ≥2 gate auto-disables Trip View");
+        vm.IsTripViewEnabled.Should().BeFalse("a removal below the â‰¥2 gate auto-disables Trip View");
         vm.StopOrders.Should().BeEmpty();
         vm.Announcement.Should().Be(UiStrings.TripViewAutoDisabledAnnouncement);
 
@@ -211,7 +211,7 @@ public class TripViewModelTests
 
         await vm.RefreshAfterMembershipChangeAsync(2);
 
-        vm.IsTripViewEnabled.Should().BeTrue("two placeable stops still clear the ≥2 gate");
+        vm.IsTripViewEnabled.Should().BeTrue("two placeable stops still clear the â‰¥2 gate");
         vm.StopOrders.Should().HaveCount(2, "the order re-compacts to the remaining stops");
     }
 
@@ -220,10 +220,10 @@ public class TripViewModelTests
     {
         // Regression guard: a reopen can momentarily report a low placeable
         // count before the POIs finish loading. LoadAsync must restore the
-        // persisted-on state from the order it finds — never auto-disable on
+        // persisted-on state from the order it finds â€” never auto-disable on
         // that transient count (which would persist Trip View off across reopen).
         var factory = SeedFactory(placeable: 2, tripViewEnabled: true);
-        var ordering = new TripOrderingService(factory, new SqliteWriteLock(), NullLogger<TripOrderingService>.Instance);
+        var ordering = TestDbHelper.CreateOrderingService(factory);
         await ordering.SeedOrderAsync(CollectionId);
 
         await using var vm = CreateVm(factory);
@@ -242,12 +242,12 @@ public class TripViewModelTests
     [Fact]
     public async Task OrderedLegs_Roundtrip_HasNLegs_IncludingClosingLegBackToStart()
     {
-        var factory = SeedFactory(placeable: 3); // FinishPoiId null ⇒ Roundtrip
+        var factory = SeedFactory(placeable: 3); // FinishPoiId null â‡’ Roundtrip
         await using var vm = CreateVm(factory);
         await vm.LoadAsync(CollectionId, 3);
         await vm.ToggleAsync(); // seeds 1..3
 
-        // N stops ⇒ N legs (2 consecutive + the closing leg).
+        // N stops â‡’ N legs (2 consecutive + the closing leg).
         vm.OrderedLegs.Should().HaveCount(3);
         // Closing leg runs from the last stop back to the Start (Order 1).
         var closing = vm.OrderedLegs[^1];
@@ -273,7 +273,7 @@ public class TripViewModelTests
         await vm.LoadAsync(CollectionId, 3);
         await vm.ToggleAsync();
 
-        vm.OrderedLegs.Should().HaveCount(2, "an open path emits N−1 legs and no closing leg");
+        vm.OrderedLegs.Should().HaveCount(2, "an open path emits Nâˆ’1 legs and no closing leg");
         vm.OrderedLegs.Should().NotContain(l => l.FromPoiId == 3 && l.ToPoiId == 1);
     }
 
@@ -281,7 +281,7 @@ public class TripViewModelTests
     public async Task OrderedLegs_FinishPointingAtNonPlaceableStop_FallsBackToRoundtrip()
     {
         var factory = SeedFactory(placeable: 3);
-        // Designate a coordinate-less POI as Finish — it can't terminate a drawn
+        // Designate a coordinate-less POI as Finish â€” it can't terminate a drawn
         // path, so the loop must stay closed (Roundtrip) rather than drop the leg.
         await using (var db = await factory.CreateDbContextAsync())
         {
@@ -321,7 +321,7 @@ public class TripViewModelTests
         vm.OrderedStops.Should().HaveCount(2);
         vm.OrderedStops.Select(s => s.OrderIndex).Should().BeEquivalentTo(new[] { 1, 2 });
         vm.OrderedStops.Should().NotContain(s => s.PoiId == 99);
-        // Roundtrip over 2 placeable stops ⇒ 2 legs (1→2 and the 2→1 close).
+        // Roundtrip over 2 placeable stops â‡’ 2 legs (1â†’2 and the 2â†’1 close).
         vm.OrderedLegs.Should().HaveCount(2);
     }
 
@@ -355,7 +355,7 @@ public class TripViewModelTests
         vm.OrderedStops.Should().BeEmpty();
     }
 
-    // === Story 1.4: list ↔ map selection sync ===
+    // === Story 1.4: list â†” map selection sync ===
 
     private static async Task<TripViewModel> EnabledVmAsync(IDbContextFactory<AppDbContext> factory, int placeable)
     {
@@ -515,7 +515,7 @@ public class TripViewModelTests
         vm.StopRole(1).Should().Be(TripStopRole.Finish);
         vm.OrderedStops[^1].PoiId.Should().Be(1, "the Finish is pinned to Order N");
         vm.OrderedStops[^1].IsFinish.Should().BeTrue();
-        vm.OrderedLegs.Should().HaveCount(2, "an open path over 3 stops has N−1 legs and no closing leg");
+        vm.OrderedLegs.Should().HaveCount(2, "an open path over 3 stops has Nâˆ’1 legs and no closing leg");
         vm.StartFinishAnnouncement.Should().Be(
             string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripOpenPathAnnounce, "P1"));
     }

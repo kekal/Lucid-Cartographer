@@ -231,6 +231,12 @@ public sealed class TripViewModel(
     public string? LastReorderAnnouncement { get; private set; }
 
     /// <summary>
+    /// TRIP-TSP-01 (Story 3.1): localized "stops sorted into travel order" text for
+    /// the aria-live region after a successful TSP-Sort; null until the first sort.
+    /// </summary>
+    public string? LastSortAnnouncement { get; private set; }
+
+    /// <summary>
     /// Whether the Stop can move one position up. False on a pinned Start/Finish
     /// and on the topmost movable Stop (mirrors the service's interior window so
     /// the buttons disable instead of throwing; the service stays authoritative).
@@ -1261,7 +1267,7 @@ public sealed class TripViewModel(
     /// minutes→seconds conversion (Story 2.6) can never overflow <see cref="int"/>.
     /// Mirrors the <see cref="MaxManualLegMinutes"/> precedent.
     /// </summary>
-    internal const int MaxDwellMinutes = 60 * 24 * 60;
+    internal const int MaxDwellMinutes = TripOrderingService.MaxDwellMinutes;
 
     /// <summary>
     /// TRIP-DWELL-01 (Story 2.5): sets the dwell time (minutes) on the active
@@ -1303,31 +1309,12 @@ public sealed class TripViewModel(
         Notify();
     }
 
-    // TRIP-DWELL-01: load the (collection, poi) membership and write its DwellMinutes
-    // under the shared write lock (serialized with the background writers, like the
-    // manual-leg/travel-mode persists). No-op when the membership is absent.
-    private async Task PersistDwellMinutesAsync(int collectionId, int poiId, int? minutes)
-    {
-        await using var db = await factory.CreateDbContextAsync(_cts.Token);
-        var membership = await db.PoiCollectionItems.FirstOrDefaultAsync(
-            ci => ci.PoiCollectionId == collectionId && ci.PoiId == poiId, _cts.Token);
-        if (membership is null)
-        {
-            return;
-        }
-
-        membership.DwellMinutes = minutes;
-
-        await writeLock.Gate.WaitAsync(_cts.Token);
-        try
-        {
-            await db.SaveChangesAsync(_cts.Token);
-        }
-        finally
-        {
-            writeLock.Gate.Release();
-        }
-    }
+    // TRIP-DWELL-01: the dwell DB-write now lives on ITripOrderingService
+    // (SetDwellMinutesAsync) so the UI and the MCP set_dwell_time tool (Story 3.2)
+    // share one validated, write-locked implementation. The VM keeps its guard,
+    // RefreshProjectionsAsync and Notify; only the persistence is delegated.
+    private Task PersistDwellMinutesAsync(int collectionId, int poiId, int? minutes) =>
+        ordering.SetDwellMinutesAsync(collectionId, poiId, minutes, _cts.Token);
 
     // --- Trip start time + soft time budget (Story 2.6, TRIP-TIMELINE-01) ---
 
@@ -1519,6 +1506,54 @@ public sealed class TripViewModel(
             return;
         }
 
+        Notify();
+    }
+
+    /// <summary>
+    /// TRIP-TSP-01 (Story 3.1, AR-6): explicit on-demand "Sort in Traveling Salesman
+    /// order". Delegates to the single ordering write path
+    /// (<see cref="ITripOrderingService.SortTravelingSalesmanAsync"/>) — the VM never
+    /// computes or writes order itself — then re-reads the projections (stops, legs,
+    /// timeline) and Notifies, which the host page turns into the existing incremental
+    /// redraw. On-demand ONLY: nothing else calls this, so the system never reorders
+    /// without the explicit press (AC2). Mirrors the RecomputeTravelTimesAsync
+    /// guard → service → refresh → notify shape.
+    /// </summary>
+    public async Task SortTravelingSalesmanAsync()
+    {
+        if (ActiveCollectionId is not { } collectionId || !IsTripViewEnabled)
+        {
+            return;
+        }
+
+        // Snapshot the order so a sort that the never-worse guard leaves unchanged
+        // stays silent — the live region must never report a reorder that didn't
+        // happen (mirrors MoveStopToAsync's no-op-move silence).
+        var before = OrderedStops.Select(s => s.PoiId).ToList();
+
+        try
+        {
+            await ordering.SortTravelingSalesmanAsync(collectionId, _cts.Token);
+            await RefreshProjectionsAsync(collectionId);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to TSP-sort collection {CollectionId}", collectionId);
+            return;
+        }
+
+        var after = OrderedStops.Select(s => s.PoiId).ToList();
+        if (!before.SequenceEqual(after))
+        {
+            LastSortAnnouncement = string.Format(
+                System.Globalization.CultureInfo.CurrentCulture,
+                UiStrings.TripSortTspAnnouncement,
+                OrderedStops.Count);
+        }
         Notify();
     }
 
