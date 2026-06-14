@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Polly;
 using Polly.Registry;
 
 namespace LucidCartographer.Tests;
@@ -28,18 +29,33 @@ public class TravelTimeComputationBackgroundServiceTests
         return services.BuildServiceProvider().GetRequiredService<ResiliencePipelineProvider<string>>();
     }
 
-    private static TravelTimeComputationBackgroundService BuildService(
-        IDbContextFactory<AppDbContext> factory, SqliteWriteLock writeLock)
+    // A no-retry "travel-time" pipeline so a throwing-provider test reaches the
+    // fallback immediately instead of waiting out the production retry/backoff.
+    private static ResiliencePipelineProvider<string> NoRetryPipelines()
     {
-        var options = Options.Create(new TravelTimeOptions { AssumedSpeedMetersPerSecond = 13.8889 });
-        var provider = new MockTravelTimeProvider(options);
+        var services = new ServiceCollection();
+        services.AddResiliencePipeline("travel-time", _ => { });
+        return services.BuildServiceProvider().GetRequiredService<ResiliencePipelineProvider<string>>();
+    }
+
+    private static TravelTimeComputationBackgroundService BuildService(
+        IDbContextFactory<AppDbContext> factory, SqliteWriteLock writeLock,
+        ITravelTimeProvider? provider = null,
+        ResiliencePipelineProvider<string>? pipelines = null)
+    {
+        var options = Options.Create(new TravelTimeOptions
+        {
+            AssumedSpeedMetersPerSecond = 13.8889,
+            DriveSpeedMetersPerSecond = 20.0,
+        });
+        provider ??= new MockTravelTimeProvider(options);
         return new TravelTimeComputationBackgroundService(
             factory,
             new TravelTimeTrigger(),
             new TravelTimeProgressService(),
             provider,
             writeLock,
-            Pipelines(),
+            pipelines ?? Pipelines(),
             options,
             NullLogger<TravelTimeComputationBackgroundService>.Instance);
     }
@@ -147,5 +163,194 @@ public class TravelTimeComputationBackgroundServiceTests
         manual.Source.Should().Be("Manual");
         manual.DurationSeconds.Should().Be(5400, "the user's flight time is untouched");
         manual.DistanceMeters.Should().Be(123456);
+    }
+
+    // --- Story 2.3 (TRIP-DEGRADE-01): provider-down straight-line fallback ---
+
+    /// <summary>A Drive collection with N ordered, placeable stops (an open path).</summary>
+    private static IDbContextFactory<AppDbContext> SeedDriveOpenPath(int stops)
+    {
+        var factory = TestDbHelper.CreateFactory();
+        using var db = factory.CreateDbContext();
+        db.PoiCollections.Add(new PoiCollection
+        {
+            Id = CollectionId, Name = "Trip", Color = "#005bbf",
+            TripViewEnabled = true, TravelMode = TravelMode.Drive,
+            // Distinct Finish ⇒ open path (N-1 legs) so the leg count is predictable.
+            StartPoiId = 1, FinishPoiId = stops,
+        });
+        for (var i = 1; i <= stops; i++)
+        {
+            db.Pois.Add(new Poi { Id = i, Name = $"P{i}", Latitude = 50.0 + i, Longitude = 20.0 + i, AddedDate = new DateTime(2025, 1, i) });
+            db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = i, PoiCollectionId = CollectionId, OrderIndex = i });
+        }
+        db.SaveChanges();
+        return factory;
+    }
+
+    /// <summary>A provider that always throws — stands in for an unreachable routing engine.</summary>
+    private sealed class ThrowingProvider : ITravelTimeProvider
+    {
+        public string Source => "Throwing";
+        public Task<TravelLegResult> GetLegAsync(TravelEndpoint from, TravelEndpoint to, string travelMode, CancellationToken ct) =>
+            throw new InvalidOperationException("routing engine unreachable");
+    }
+
+    /// <summary>Throws only for the first leg (from PoiId 1); otherwise delegates to the Mock.</summary>
+    private sealed class ThrowOnFirstLegProvider(MockTravelTimeProvider inner) : ITravelTimeProvider
+    {
+        public string Source => inner.Source;
+        public Task<TravelLegResult> GetLegAsync(TravelEndpoint from, TravelEndpoint to, string travelMode, CancellationToken ct) =>
+            from.PoiId == 1
+                ? throw new InvalidOperationException("routing engine unreachable for the first leg")
+                : inner.GetLegAsync(from, to, travelMode, ct);
+    }
+
+    [Fact]
+    public async Task ProcessOnce_ProviderThrows_UpsertsEstimatedFallbackRow_NoExceptionEscapes()
+    {
+        var factory = SeedDriveOpenPath(stops: 2);
+        var service = BuildService(factory, new SqliteWriteLock(),
+            provider: new ThrowingProvider(), pipelines: NoRetryPipelines());
+
+        // AC1: never throws out of the loop.
+        var act = async () => await service.ProcessOnceAsync(CancellationToken.None);
+        await act.Should().NotThrowAsync();
+
+        await using var db = await factory.CreateDbContextAsync();
+        var row = await db.RouteSegments.SingleAsync();
+        row.FromPoiId.Should().Be(1);
+        row.ToPoiId.Should().Be(2);
+        row.Fidelity.Should().Be(Fidelity.Estimated, "a degraded leg falls back to a haversine Estimated value");
+        row.Source.Should().Be(TravelTimeSource.EstimatedFallback, "the row is badged as a degradation, not a normal Mock estimate");
+        row.DurationSeconds.Should().BeGreaterThan(0, "never blank — a real straight-line duration");
+        row.DistanceMeters.Should().BeGreaterThan(0);
+        row.GeometryPolyline.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ProcessOnce_LegAfterAThrowingOne_StillComputes()
+    {
+        // 3 stops, open path (Start=1, Finish=3) ⇒ legs 1→2 and 2→3. The first leg
+        // (from PoiId 1) throws; the loop must continue and compute the second leg
+        // normally via the Mock.
+        var factory = SeedDriveOpenPath(stops: 3);
+        var options = Options.Create(new TravelTimeOptions { DriveSpeedMetersPerSecond = 20.0 });
+        var mock = new MockTravelTimeProvider(options);
+        var service = BuildService(factory, new SqliteWriteLock(),
+            provider: new ThrowOnFirstLegProvider(mock), pipelines: NoRetryPipelines());
+
+        await service.ProcessOnceAsync(CancellationToken.None);
+
+        await using var db = await factory.CreateDbContextAsync();
+        var rows = await db.RouteSegments.ToListAsync();
+        rows.Should().HaveCount(2, "both legs land a row — the throwing first leg falls back, the second computes");
+
+        var degraded = rows.Single(r => r.FromPoiId == 1 && r.ToPoiId == 2);
+        degraded.Fidelity.Should().Be(Fidelity.Estimated);
+        degraded.Source.Should().Be(TravelTimeSource.EstimatedFallback);
+
+        var normal = rows.Single(r => r.FromPoiId == 2 && r.ToPoiId == 3);
+        normal.Fidelity.Should().Be(Fidelity.Estimated, "Drive mode from the Mock is Estimated");
+        normal.Source.Should().Be(TravelTimeSource.Mock, "a normally-computed leg keeps the Mock source");
+    }
+
+    [Fact]
+    public async Task ProcessOnce_ProviderThrows_DoesNotOverwrite_ManualRow()
+    {
+        var factory = SeedDriveOpenPath(stops: 2);
+        // Seed a Manual row for the 1→2 Drive leg. Even with a throwing provider the
+        // fallback must NOT overwrite/downgrade it (AC5).
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.RouteSegments.Add(new RouteSegment
+            {
+                FromPoiId = 1, ToPoiId = 2, TravelMode = TravelMode.Drive,
+                DurationSeconds = 5400, DistanceMeters = 123456,
+                Fidelity = Fidelity.Manual, Source = TravelTimeSource.Manual, ComputedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = BuildService(factory, new SqliteWriteLock(),
+            provider: new ThrowingProvider(), pipelines: NoRetryPipelines());
+        await service.ProcessOnceAsync(CancellationToken.None);
+
+        await using var verify = await factory.CreateDbContextAsync();
+        var manual = await verify.RouteSegments.SingleAsync();
+        manual.Fidelity.Should().Be(Fidelity.Manual, "a Manual row is never overwritten by the fallback");
+        manual.Source.Should().Be(TravelTimeSource.Manual);
+        manual.DurationSeconds.Should().Be(5400);
+    }
+
+    [Fact]
+    public async Task ProcessOnce_ProviderThrows_DoesNotDowngrade_MeasuredRow()
+    {
+        // LoadPendingLegsAsync skips pairs that already have a row, so to exercise the
+        // UpsertAsync Measured guard directly we drive UpsertAsync via a re-queued key.
+        // Simpler: seed a Measured row, then assert a fallback pass leaves it intact.
+        // Because the existing row makes the leg "not pending", the pass is a no-op for
+        // it — but the guard is the defensive belt for a future recompute path (2.4).
+        var factory = SeedDriveOpenPath(stops: 2);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.RouteSegments.Add(new RouteSegment
+            {
+                FromPoiId = 1, ToPoiId = 2, TravelMode = TravelMode.Drive,
+                DurationSeconds = 999, DistanceMeters = 111,
+                Fidelity = Fidelity.Measured, Source = "OSRM", ComputedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = BuildService(factory, new SqliteWriteLock(),
+            provider: new ThrowingProvider(), pipelines: NoRetryPipelines());
+        await service.ProcessOnceAsync(CancellationToken.None);
+
+        await using var verify = await factory.CreateDbContextAsync();
+        var measured = await verify.RouteSegments.SingleAsync();
+        measured.Fidelity.Should().Be(Fidelity.Measured, "a Measured row is never downgraded by the fallback");
+        measured.Source.Should().Be("OSRM");
+        measured.DurationSeconds.Should().Be(999);
+    }
+
+    // TRIP-DEGRADE-01 (AC5) / TRIP-MANUAL-01 (Story 2.2 AC6): drive the
+    // no-downgrade guard DIRECTLY. The production loop never re-queues an existing
+    // key, so this is the only path that actually enters the guard branch — it is
+    // the load-bearing test for the future Story-2.4 recompute path. Asserts that an
+    // upsert carrying a fresh fallback Estimated result leaves an existing
+    // higher-trust row (Manual or Measured) completely untouched.
+    [Theory]
+    [InlineData(Fidelity.Manual, "Manual")]
+    [InlineData(Fidelity.Measured, "OSRM")]
+    public async Task UpsertAsync_NeverDowngrades_ExistingHigherTrustRow(string existingFidelity, string existingSource)
+    {
+        var factory = SeedDriveOpenPath(stops: 2);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.RouteSegments.Add(new RouteSegment
+            {
+                FromPoiId = 1, ToPoiId = 2, TravelMode = TravelMode.Drive,
+                DurationSeconds = 999, DistanceMeters = 111,
+                Fidelity = existingFidelity, Source = existingSource, ComputedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = BuildService(factory, new SqliteWriteLock());
+        var leg = new TravelTimeComputationBackgroundService.PendingLeg(
+            new TravelEndpoint(1, 50, 20), new TravelEndpoint(2, 51, 21), TravelMode.Drive);
+        var fallback = new TravelLegResult(
+            DurationSeconds: 12345, DistanceMeters: 67890,
+            Fidelity: Fidelity.Estimated, GeometryPolyline: null);
+
+        await service.UpsertAsync(leg, fallback, TravelTimeSource.EstimatedFallback, CancellationToken.None);
+
+        await using var verify = await factory.CreateDbContextAsync();
+        var row = await verify.RouteSegments.SingleAsync();
+        row.Fidelity.Should().Be(existingFidelity, "a higher-trust row is never downgraded to a fallback estimate");
+        row.Source.Should().Be(existingSource);
+        row.DurationSeconds.Should().Be(999, "the original duration is preserved");
+        row.DistanceMeters.Should().Be(111);
     }
 }

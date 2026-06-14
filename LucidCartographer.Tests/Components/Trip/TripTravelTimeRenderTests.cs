@@ -41,14 +41,15 @@ public class TripTravelTimeRenderTests : BunitTestContext
     }
 
     private static async Task AddSegmentAsync(
-        IDbContextFactory<AppDbContext> factory, int from, int to, int seconds, double meters, string fidelity)
+        IDbContextFactory<AppDbContext> factory, int from, int to, int seconds, double meters, string fidelity,
+        string source = "Mock")
     {
         await using var db = await factory.CreateDbContextAsync();
         db.RouteSegments.Add(new RouteSegment
         {
             FromPoiId = from, ToPoiId = to, TravelMode = TravelMode.AnyAir,
             DurationSeconds = seconds, DistanceMeters = meters,
-            Fidelity = fidelity, Source = "Mock", ComputedAt = DateTime.UtcNow,
+            Fidelity = fidelity, Source = source, ComputedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
     }
@@ -182,5 +183,70 @@ public class TripTravelTimeRenderTests : BunitTestContext
         cut.Markup.Should().Contain(UiStrings.TripLegTimeUnknown);
         cut.FindAll("[aria-live='polite']")
             .Should().Contain(r => r.TextContent.Contains(UiStrings.TripLegComputingAnnouncement, StringComparison.Ordinal));
+    }
+
+    // --- Story 2.3 (TRIP-DEGRADE-01): the honest approximate note, both surfaces ---
+
+    [Fact]
+    public async Task TripStopList_DegradedTrip_ShowsApproximateNote_InAriaLiveRegion()
+    {
+        var factory = Seed();
+        // Both legs degraded (fallback). The note must render in a role=status
+        // aria-live region; the fallback leg keeps its real Estimated time + badge.
+        await AddSegmentAsync(factory, 1, 2, 4800, 12000, Fidelity.Estimated, TravelTimeSource.EstimatedFallback);
+        await AddSegmentAsync(factory, 2, 1, 4800, 12000, Fidelity.Estimated, TravelTimeSource.EstimatedFallback);
+        await using var vm = await EnabledVmAsync(factory);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        // The note text appears inside an aria-live status region.
+        cut.FindAll("[role='status'][aria-live='polite']")
+            .Should().Contain(r => r.TextContent.Contains(UiStrings.TripApproximateEstimatesNote, StringComparison.Ordinal));
+        // A fallback Estimated leg still shows the Estimated badge and a real time.
+        cut.Markup.Should().Contain(UiStrings.TripFidelityEstimated);
+        cut.Markup.Should().Contain("1h 20m");
+    }
+
+    [Fact]
+    public async Task TripStopList_HealthyTrip_ShowsNoApproximateNote()
+    {
+        var factory = Seed();
+        await AddSegmentAsync(factory, 1, 2, 4800, 12000, Fidelity.Estimated, TravelTimeSource.Mock);
+        await AddSegmentAsync(factory, 2, 1, 4800, 12000, Fidelity.Estimated, TravelTimeSource.Mock);
+        await using var vm = await EnabledVmAsync(factory);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        cut.Markup.Should().NotContain(UiStrings.TripApproximateEstimatesNote,
+            "a normal Mock-Estimated trip is not a degradation");
+    }
+
+    [Fact]
+    public async Task MobileTripPanel_DegradedTrip_ShowsApproximateNote_InAriaLiveRegion()
+    {
+        var factory = Seed();
+        await AddSegmentAsync(factory, 1, 2, 4800, 12000, Fidelity.Estimated, TravelTimeSource.EstimatedFallback);
+        await AddSegmentAsync(factory, 2, 1, 4800, 12000, Fidelity.Estimated, TravelTimeSource.EstimatedFallback);
+        await using var vm = await EnabledVmAsync(factory);
+
+        var cut = RenderComponent<MobileTripPanel>(p => p.Add(x => x.Vm, vm));
+
+        cut.FindAll("[role='status'][aria-live='polite']")
+            .Should().Contain(r => r.TextContent.Contains(UiStrings.TripApproximateEstimatesNote, StringComparison.Ordinal));
+        cut.Markup.Should().Contain(UiStrings.TripFidelityEstimated);
+        cut.Markup.Should().Contain("1h 20m");
+    }
+
+    [Fact]
+    public async Task MobileTripPanel_HealthyTrip_ShowsNoApproximateNote()
+    {
+        var factory = Seed();
+        await AddSegmentAsync(factory, 1, 2, 4800, 12000, Fidelity.Estimated, TravelTimeSource.Mock);
+        await AddSegmentAsync(factory, 2, 1, 4800, 12000, Fidelity.Estimated, TravelTimeSource.Mock);
+        await using var vm = await EnabledVmAsync(factory);
+
+        var cut = RenderComponent<MobileTripPanel>(p => p.Add(x => x.Vm, vm));
+
+        cut.Markup.Should().NotContain(UiStrings.TripApproximateEstimatesNote);
     }
 }

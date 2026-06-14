@@ -55,7 +55,13 @@ public sealed record TripLeg(
     bool IsMeasured,
     int? DurationSeconds = null,
     double? DistanceMeters = null,
-    string? Fidelity = null);
+    string? Fidelity = null,
+    // TRIP-DEGRADE-01 (Story 2.3): true when this leg's backing RouteSegment was
+    // produced by the provider-down straight-line fallback (Source ==
+    // TravelTimeSource.EstimatedFallback). Drives
+    // TripViewModel.IsShowingApproximateEstimates and the honest "showing
+    // straight-line estimates" note — distinct from a normally-Estimated Mock leg.
+    bool IsFallback = false);
 
 /// <summary>
 /// One ordered, placeable stop projected for the stop-list panel and the

@@ -43,6 +43,21 @@
     </div>
 }
 
+@* TRIP-DEGRADE-01 (Story 2.3, AC2): honest approximate note when any leg fell
+   back to a straight-line estimate (the routing engine was unreachable). In a
+   role=status aria-live region so AT hears it; muted token tone, never error-red
+   (UX-DR10). Kept in the panel header area, NOT inside the clickable stop rows
+   (a wide element over the row centre breaks row selection — 2.2 regression).
+   Tokens only, no raw hex (dark mode first-class). *@
+@if (Vm.IsShowingApproximateEstimates)
+{
+    <div role="status" aria-live="polite"
+         style="display:flex;align-items:flex-start;gap:6px;padding:6px 12px;border-bottom:1px solid var(--border);background:var(--bg-elev-2);color:var(--text-2);font-size:12px">
+        <span class="ms" aria-hidden="true" style="font-size:16px">info</span>
+        <span>@UiStrings.TripApproximateEstimatesNote</span>
+    </div>
+}
+
 <div class="scroll" style="flex:1">
     @* `trip-stop-list` scopes the JS scroll-into-view helper (TRIP-SELECT-05). *@
     <div class="list trip-stop-list" aria-label="@UiStrings.TripStopListAria">

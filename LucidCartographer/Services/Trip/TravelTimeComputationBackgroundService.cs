@@ -82,11 +82,13 @@ public sealed class TravelTimeComputationBackgroundService(
             ct.ThrowIfCancellationRequested();
 
             TravelLegResult result;
+            string source;
             try
             {
                 result = await _pipeline.ExecuteAsync(
                     async innerCt => await provider.GetLegAsync(leg.From, leg.To, leg.TravelMode, innerCt),
                     ct);
+                source = provider.Source;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -94,17 +96,24 @@ public sealed class TravelTimeComputationBackgroundService(
             }
             catch (Exception ex)
             {
-                // Provider-down fallback + failure-copy is Story 2.3; here we just
-                // log and leave the leg uncomputed so a later cycle retries it.
+                // TRIP-DEGRADE-01 (Story 2.3, AC1/AC3): the active provider failed
+                // for this leg (unreachable / no route). Rather than leave it blank
+                // or rethrow out of the loop, substitute the shared haversine
+                // Estimated value and stamp Source = EstimatedFallback so the VM can
+                // surface the honest "straight-line estimates" note. The loop
+                // continues to the next leg — one bad leg never fails the pass.
+                result = EstimatedTravelTime.Compute(leg.From, leg.To, leg.TravelMode, options.Value);
+                source = TravelTimeSource.EstimatedFallback;
+
+                // NFR6: log a WARNING naming the leg + the resulting (degraded)
+                // fidelity, distinct from the success path, so SM-3 can count
+                // degraded legs.
                 logger.LogWarning(ex,
-                    "Travel-time provider failed for leg {From}->{To} ({Mode}); leaving uncomputed",
-                    leg.From.PoiId, leg.To.PoiId, leg.TravelMode);
-                remaining--;
-                progress.Set(remaining);
-                continue;
+                    "Travel-time provider failed for leg {From}->{To} ({Mode}); degraded to {Fidelity} via straight-line fallback",
+                    leg.From.PoiId, leg.To.PoiId, leg.TravelMode, result.Fidelity);
             }
 
-            await UpsertAsync(leg, result, ct);
+            await UpsertAsync(leg, result, source, ct);
             remaining--;
             progress.Set(remaining);
         }
@@ -205,8 +214,11 @@ public sealed class TravelTimeComputationBackgroundService(
     /// <summary>
     /// Upserts one computed leg into the cache under the write lock. Idempotent:
     /// an existing row for the key is updated in place (no duplicate inserted).
+    /// Internal so the Manual/Measured no-downgrade guard can be driven directly in
+    /// tests (the production loop never re-queues an existing key, so the guard is
+    /// otherwise unreachable until Story 2.4's recompute path).
     /// </summary>
-    private async Task UpsertAsync(PendingLeg leg, TravelLegResult result, CancellationToken ct)
+    internal async Task UpsertAsync(PendingLeg leg, TravelLegResult result, string source, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
 
@@ -222,7 +234,13 @@ public sealed class TravelTimeComputationBackgroundService(
         // makes the protection defensive against a future recompute path (Story
         // 2.4) that might re-queue an existing key. A Manual row is changed/cleared
         // only by the user (TripViewModel.Set/ClearManualLegTimeAsync).
-        if (existing is not null && existing.Fidelity == Fidelity.Manual)
+        //
+        // TRIP-DEGRADE-01 (Story 2.3, AC5): a degraded straight-line estimate must
+        // never DOWNGRADE a higher-fidelity Measured row. Measured arrives in Epic
+        // 4; this is a defensive guard so a later recompute/fallback can't replace
+        // a real measured time with an approximation. (A fallback only ever fills a
+        // leg that would otherwise be blank/failed.)
+        if (existing is not null && existing.Fidelity is Fidelity.Manual or Fidelity.Measured)
         {
             return;
         }
@@ -238,7 +256,7 @@ public sealed class TravelTimeComputationBackgroundService(
                 DistanceMeters = result.DistanceMeters,
                 GeometryPolyline = result.GeometryPolyline,
                 Fidelity = result.Fidelity,
-                Source = provider.Source,
+                Source = source,
                 ComputedAt = DateTime.UtcNow,
             });
         }
@@ -248,7 +266,7 @@ public sealed class TravelTimeComputationBackgroundService(
             existing.DistanceMeters = result.DistanceMeters;
             existing.GeometryPolyline = result.GeometryPolyline;
             existing.Fidelity = result.Fidelity;
-            existing.Source = provider.Source;
+            existing.Source = source;
             existing.ComputedAt = DateTime.UtcNow;
         }
 
@@ -263,5 +281,5 @@ public sealed class TravelTimeComputationBackgroundService(
         }
     }
 
-    private readonly record struct PendingLeg(TravelEndpoint From, TravelEndpoint To, string TravelMode);
+    internal readonly record struct PendingLeg(TravelEndpoint From, TravelEndpoint To, string TravelMode);
 }

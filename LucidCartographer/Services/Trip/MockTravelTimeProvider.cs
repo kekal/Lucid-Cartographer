@@ -28,28 +28,20 @@ public sealed class MockTravelTimeProvider(IOptions<TravelTimeOptions> options) 
         string travelMode,
         CancellationToken ct)
     {
-        var meters = GeoUtils.HaversineDistance(
-            from.Latitude, from.Longitude, to.Latitude, to.Longitude);
-
-        // TRIP-TRAVELMODE-01: pick the assumed speed by travel mode (AR-10).
-        // Guard against a zero/negative speed so a misconfigured value can't
-        // divide by zero.
-        var speed = options.Value.SpeedFor(travelMode);
-        var seconds = speed > 0 ? (int)Math.Round(meters / speed) : 0;
+        // TRIP-DEGRADE-01 (Story 2.3): the ground-mode haversine→(seconds,meters)
+        // math now lives in the shared EstimatedTravelTime helper so the Mock and
+        // the provider-down fallback share one estimate code path (DRY).
+        var estimate = EstimatedTravelTime.Compute(from, to, travelMode, options.Value);
 
         // TRIP-TRAVELMODE-01: Any/Air carries Placeholder (the UI shows "—" — a
         // straight-line air estimate is never presented as a real time; a manual
         // entry overrides it). A duration is still computed so the leg/total has a
-        // value internally. Drive/Walk/Cycle stay Estimated.
-        var fidelity = travelMode == Data.Entities.TravelMode.AnyAir
-            ? Data.Entities.Fidelity.Placeholder
-            : Data.Entities.Fidelity.Estimated;
-
-        var result = new TravelLegResult(
-            DurationSeconds: seconds,
-            DistanceMeters: meters,
-            Fidelity: fidelity,
-            GeometryPolyline: null);
+        // value internally. Drive/Walk/Cycle stay Estimated (the helper's fidelity).
+        // Any/Air is NEVER routed through the Estimated fallback (Story 2.3 keeps it
+        // Placeholder); only the Mock re-badges the shared estimate here.
+        var result = travelMode == Data.Entities.TravelMode.AnyAir
+            ? estimate with { Fidelity = Data.Entities.Fidelity.Placeholder }
+            : estimate;
 
         return Task.FromResult(result);
     }

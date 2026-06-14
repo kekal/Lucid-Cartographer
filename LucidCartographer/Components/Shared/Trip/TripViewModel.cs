@@ -108,6 +108,17 @@ public sealed class TripViewModel(
     /// </summary>
     public bool IsAnyLegComputing { get; private set; }
 
+    /// <summary>
+    /// TRIP-DEGRADE-01 (Story 2.3, AC2): true when any current leg is backed by
+    /// the provider-down straight-line fallback (its <see cref="RouteSegment.Source"/>
+    /// is <see cref="TravelTimeSource.EstimatedFallback"/>). Drives the honest
+    /// "couldn't reach the routing engine — showing straight-line estimates" note
+    /// on both surfaces. Cleared automatically once no fallback legs remain (a
+    /// later successful recompute replaces the row), via the existing refresh path
+    /// — no polling. A normal Mock-Estimated leg does NOT trip this.
+    /// </summary>
+    public bool IsShowingApproximateEstimates => OrderedLegs.Any(l => l.IsFallback);
+
     /// <summary>Localized on/off text for the aria-live announcement region; null until first toggle.</summary>
     public string? Announcement { get; private set; }
 
@@ -942,12 +953,18 @@ public sealed class TripViewModel(
         // kept distinct from Placeholder so the aria-live computing announcement does
         // not fire forever on Any/Air.
         var displayDuration = fidelity == Fidelity.Placeholder ? null : seg?.DurationSeconds;
+        // TRIP-DEGRADE-01 (Story 2.3): a leg backed by the provider-down fallback
+        // (Source == EstimatedFallback) is "degraded" — it keeps its real Estimated
+        // duration but flags the trip as showing straight-line estimates. A normal
+        // Mock Estimated leg does NOT set this.
+        var isFallback = seg?.Source == TravelTimeSource.EstimatedFallback;
         return new TripLeg(
             from.PoiId, to.PoiId, from.Lat, from.Lon, to.Lat, to.Lon,
             IsMeasured: fidelity == Fidelity.Measured,
             DurationSeconds: displayDuration,
             DistanceMeters: seg?.DistanceMeters,
-            Fidelity: fidelity);
+            Fidelity: fidelity,
+            IsFallback: isFallback);
     }
 
     /// <summary>

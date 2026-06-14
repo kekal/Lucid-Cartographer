@@ -45,6 +45,21 @@
        background provider. Resolves to empty once every leg has a cache row. *@
     <span class="sr-only" role="status" aria-live="polite">@(Vm.IsAnyLegComputing ? UiStrings.TripLegComputingAnnouncement : null)</span>
 
+    @* TRIP-DEGRADE-01 (Story 2.3, AC2): honest approximate note when any leg fell
+       back to a straight-line estimate (the routing engine was unreachable). In a
+       role=status aria-live region so AT hears it; warn/muted tone, never error-red
+       (UX-DR10 — a soft honest state, not an error). Kept in the panel header area,
+       NOT inside the clickable stop rows (a wide element over the row centre breaks
+       row selection — 2.2 regression). *@
+    @if (Vm.IsShowingApproximateEstimates)
+    {
+        <div class="flex items-start gap-1.5 px-3 py-1.5 border-b border-surface-container-high flex-shrink-0 text-xs text-on-surface-variant bg-surface-container"
+             role="status" aria-live="polite">
+            <span class="material-symbols-outlined flex-shrink-0" style="font-size:16px" aria-hidden="true">info</span>
+            <span>@UiStrings.TripApproximateEstimatesNote</span>
+        </div>
+    }
+
     @* TRIP-SELECT-05: announces the selected stop (list→map or map→list). *@
     <span class="sr-only" role="status" aria-live="polite">@Vm.SelectionAnnouncement</span>
 

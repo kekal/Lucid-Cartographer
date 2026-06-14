@@ -50,14 +50,15 @@ public class TripViewModelTravelTimeTests
     }
 
     private static async Task AddSegmentAsync(
-        IDbContextFactory<AppDbContext> factory, int from, int to, int seconds, double meters, string fidelity)
+        IDbContextFactory<AppDbContext> factory, int from, int to, int seconds, double meters, string fidelity,
+        string source = "Mock")
     {
         await using var db = await factory.CreateDbContextAsync();
         db.RouteSegments.Add(new RouteSegment
         {
             FromPoiId = from, ToPoiId = to, TravelMode = TravelMode.AnyAir,
             DurationSeconds = seconds, DistanceMeters = meters,
-            Fidelity = fidelity, Source = "Mock", ComputedAt = DateTime.UtcNow,
+            Fidelity = fidelity, Source = source, ComputedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
     }
@@ -131,5 +132,48 @@ public class TripViewModelTravelTimeTests
         await using var vm = await EnabledVmAsync(factory, 2);
 
         vm.OrderedLegs.Should().OnlyContain(l => l.IsMeasured);
+    }
+
+    // --- Story 2.3 (TRIP-DEGRADE-01): IsShowingApproximateEstimates flag ---
+
+    [Fact]
+    public async Task IsShowingApproximateEstimates_True_WhenAnyLegIsFallback()
+    {
+        var factory = Seed(placeable: 2);
+        // 1→2 is a degraded fallback (EstimatedFallback); 2→1 is a normal estimate.
+        await AddSegmentAsync(factory, 1, 2, 600, 8000, Fidelity.Estimated, TravelTimeSource.EstimatedFallback);
+        await AddSegmentAsync(factory, 2, 1, 600, 8000, Fidelity.Estimated, TravelTimeSource.Mock);
+
+        await using var vm = await EnabledVmAsync(factory, 2);
+
+        vm.IsShowingApproximateEstimates.Should().BeTrue("a leg backed by EstimatedFallback degrades the trip");
+        var degraded = vm.OrderedLegs.First(l => l.FromPoiId == 1 && l.ToPoiId == 2);
+        degraded.IsFallback.Should().BeTrue();
+        degraded.DurationSeconds.Should().Be(600, "a fallback Estimated leg keeps its real duration");
+    }
+
+    [Fact]
+    public async Task IsShowingApproximateEstimates_False_ForNormalMockAndManualRows()
+    {
+        var factory = Seed(placeable: 2);
+        await AddSegmentAsync(factory, 1, 2, 600, 8000, Fidelity.Estimated, TravelTimeSource.Mock);
+        await AddSegmentAsync(factory, 2, 1, 600, 8000, Fidelity.Manual, TravelTimeSource.Manual);
+
+        await using var vm = await EnabledVmAsync(factory, 2);
+
+        vm.IsShowingApproximateEstimates.Should().BeFalse("a normal Mock/Manual trip is not degraded");
+        vm.OrderedLegs.Should().NotContain(l => l.IsFallback);
+    }
+
+    [Fact]
+    public async Task IsShowingApproximateEstimates_False_ForPlaceholderRows()
+    {
+        var factory = Seed(placeable: 2);
+        await AddSegmentAsync(factory, 1, 2, 600, 8000, Fidelity.Placeholder, TravelTimeSource.Mock);
+        await AddSegmentAsync(factory, 2, 1, 600, 8000, Fidelity.Placeholder, TravelTimeSource.Mock);
+
+        await using var vm = await EnabledVmAsync(factory, 2);
+
+        vm.IsShowingApproximateEstimates.Should().BeFalse("Any/Air Placeholder legs are never degradations");
     }
 }

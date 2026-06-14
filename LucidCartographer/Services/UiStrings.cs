@@ -167,6 +167,14 @@ public static class UiStrings
     // "computing" state — there is simply no hop to time here.
     public const string TripLegNoTravelTimeAria = "No travel time";
 
+    // TRIP-DEGRADE-01 (Story 2.3, AC2 / UX-DR10/UX-DR11): the honest approximate
+    // note shown in the trip header/panel area (an aria-live status region, warn/
+    // muted tone — never error-red) when any leg fell back to a straight-line
+    // estimate because the routing engine was unreachable. A normal Mock-Estimated
+    // trip (the shipping default) never shows this.
+    public const string TripApproximateEstimatesNote =
+        "Couldn't reach the routing engine — showing straight-line estimates.";
+
     // Trip View — travel-mode selector (Story 2.2, TRIP-TRAVELMODE-01). Segment
     // labels + the radiogroup's accessible name. The active segment is styled
     // primary; the choice is per-trip (persisted to PoiCollection.TravelMode).
