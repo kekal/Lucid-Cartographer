@@ -51,6 +51,7 @@ project: maps_editor
 # story 1-7 moved to in-progress on 2026-06-12 via bmad-dev-story (subagent in worktree story/1-7)
 # story 1-7 moved to review on 2026-06-12 via bmad-dev-story (709/710 green; known Union_ShowsAllUniquePois flake passes in isolation; merged to master)
 # stories 1-5/1-6/1-7 moved to done on 2026-06-14 via bmad-code-review (3-layer review; 1 patch applied [TRIP-STARTFINISH-07 orphaned-pin reconcile + 3 new tests], 2 deferred, 11 dismissed; full suite 713/713 green)
+# epic-1-retrospective completed 2026-06-14 via bmad-retrospective (4 action items promoted to pre-Epic-2: A1 stuck-on ≥2 gate, A2 RouteSegment write-path locking, A3 enrichment→placeable hook, A4 Leaflet integration coverage; no epic-update required; see epic-1-retro-2026-06-14.md)
 project_key: NOKEY
 tracking_system: file-system
 story_location: "{project-root}/_bmad-output/implementation-artifacts"
@@ -65,7 +66,7 @@ development_status:
   1-5-reorder-stops-by-drag-and-by-keyboard: done
   1-6-flag-unplaceable-stops: done
   1-7-designate-start-finish-and-roundtrip: done
-  epic-1-retrospective: optional
+  epic-1-retrospective: done
 
   # Epic 2: Travel times, dwell & the honest itinerary timeline
   epic-2: backlog
