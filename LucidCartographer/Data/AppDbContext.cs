@@ -116,6 +116,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithMany(c => c.CollectionItems)
                 .HasForeignKey(e => e.PoiCollectionId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // TRIP-LEGMODE-01: per-leg travel mode for the leg leaving this stop. NULLABLE —
+            // null ≡ AnyAir (one undefined/Any-Air state, no "unset" sentinel). The CHECK
+            // therefore ALLOWS NULL or one of TravelMode.All, built from TravelMode.All so it
+            // can't drift (mirrors the CK_*_TravelMode pattern, but nullable).
+            entity.Property(e => e.OutgoingTravelMode).HasMaxLength(20);
+            entity.ToTable(t =>
+                t.HasCheckConstraint("CK_PoiCollectionItem_OutgoingTravelMode",
+                    NullableEnumCheckSql("OutgoingTravelMode", TravelMode.All)));
         });
 
         modelBuilder.Entity<Tag>(entity =>
@@ -192,6 +201,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // a value to TravelMode.All / Fidelity.All cannot silently diverge from the DB constraint.
     private static string EnumCheckSql(string column, IReadOnlyList<string> allowed) =>
         $"{column} IN ({string.Join(",", allowed.Select(v => $"'{v}'"))})";
+
+    // TRIP-LEGMODE-01: nullable variant of EnumCheckSql for columns where NULL is a valid,
+    // meaningful value (here null ≡ AnyAir). Produces e.g.
+    // "OutgoingTravelMode IS NULL OR OutgoingTravelMode IN ('AnyAir','Drive','Walk','Cycle')".
+    private static string NullableEnumCheckSql(string column, IReadOnlyList<string> allowed) =>
+        $"{column} IS NULL OR {EnumCheckSql(column, allowed)}";
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
