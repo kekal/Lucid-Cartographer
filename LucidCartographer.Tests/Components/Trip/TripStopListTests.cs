@@ -1122,7 +1122,7 @@ public class TripStopListTests : BunitTestContext
         // shared edge between rows — inside an aria-hidden <li> WITHOUT a
         // data-poi-id (valid list nesting), never inside a STOP row.
         var connector = cut.Find("div.trip-leg-connector");
-        connector.TextContent.Should().Contain("1h 20m").And.Contain("12 km");
+        connector.TextContent.Should().Contain("1h 20 min").And.Contain("12 km");
         var connectorLi = connector.Closest("li");
         connectorLi.Should().NotBeNull("the connector is wrapped in an <li> for valid <ul> nesting");
         connectorLi!.HasAttribute("data-poi-id").Should().BeFalse("the connector <li> is not a stop row");

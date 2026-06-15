@@ -192,10 +192,13 @@ public static class UiStrings
     // UI-edge duration/distance format patterns (TravelTimeFormatting). Kept here
     // so the unit words ("h"/"m"/"km") and the sub-minute/zero tokens are localizable
     // rather than hardcoded at the conversion site. {0}/{1} = numeric parts.
-    public const string TripDurationHoursMinutes = "{0}h {1}m";
-    public const string TripDurationMinutes = "{0}m";
-    public const string TripDurationSubMinute = "<1m";
-    public const string TripDurationZero = "0m";
+    // FR-16: the minute unit reads "min" (not "m") to disambiguate from distance
+    // meters ("m"). Hours stay "h"; distance meters stay "m". Shared layer — both
+    // desktop and mobile render "min".
+    public const string TripDurationHoursMinutes = "{0}h {1} min";
+    public const string TripDurationMinutes = "{0} min";
+    public const string TripDurationSubMinute = "<1 min";
+    public const string TripDurationZero = "0 min";
     public const string TripDistanceKilometers = "{0:0.#} km";
     public const string TripDistanceMeters = "{0:0} m";
     // Accessible name for the leg-time slot of a stop that has NO departing leg

@@ -35,12 +35,12 @@ public class TravelTimeFormattingTests
     [Fact]
     public void Duration_RoundsUp_NotTruncates()
     {
-        // 90s truncated would be "1m"; round-once gives "2m".
-        TravelTimeFormatting.Duration(90).Should().Be("2m");
-        // 89s truncated would be "1m"; round-once gives "1m" (rounds to 1).
-        TravelTimeFormatting.Duration(89).Should().Be("1m");
-        // 30s truncated would be "0m"/"<1m"; round-once gives "1m" (half rounds up).
-        TravelTimeFormatting.Duration(30).Should().Be("1m");
+        // 90s truncated would be "1 min"; round-once gives "2 min". (FR-16 unit "min".)
+        TravelTimeFormatting.Duration(90).Should().Be("2 min");
+        // 89s truncated would be "1 min"; round-once gives "1 min" (rounds to 1).
+        TravelTimeFormatting.Duration(89).Should().Be("1 min");
+        // 30s truncated would be "0 min"/"<1 min"; round-once gives "1 min" (half rounds up).
+        TravelTimeFormatting.Duration(30).Should().Be("1 min");
     }
 
     [Fact]
@@ -65,9 +65,9 @@ public class TravelTimeFormattingTests
     [Fact]
     public void Duration_HoursAndMinutes_UseRoundedMinutes()
     {
-        // 1h + 89s → 60 + 1 = 61 min → "1h 1m" (89s rounds to 1).
-        TravelTimeFormatting.Duration(3600 + 89).Should().Be("1h 1m");
-        // 1h + 90s → 60 + 2 = 62 min → "1h 2m" (90s rounds up to 2).
-        TravelTimeFormatting.Duration(3600 + 90).Should().Be("1h 2m");
+        // 1h + 89s → 60 + 1 = 61 min → "1h 1 min" (89s rounds to 1).
+        TravelTimeFormatting.Duration(3600 + 89).Should().Be("1h 1 min");
+        // 1h + 90s → 60 + 2 = 62 min → "1h 2 min" (90s rounds up to 2).
+        TravelTimeFormatting.Duration(3600 + 90).Should().Be("1h 2 min");
     }
 }

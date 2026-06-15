@@ -199,7 +199,7 @@ public class TripViewModelTravelTimeTests
         var displayedTotal = TravelTimeFormatting.Duration(vm.TotalTravelTimeSeconds);
         var sumOfPerLeg = vm.OrderedLegs.Sum(l => TravelTimeFormatting.DisplayMinutes(l.DurationSeconds!.Value));
         TravelTimeFormatting.Duration(sumOfPerLeg * 60).Should().Be(displayedTotal);
-        displayedTotal.Should().Be("4m", "round-once: 2m + 2m, not Duration(180s)='3m'");
+        displayedTotal.Should().Be("4 min", "round-once: 2 min + 2 min, not Duration(180s)='3 min'");
     }
 
     [Fact]
@@ -229,7 +229,7 @@ public class TripViewModelTravelTimeTests
         vm.IsShowingApproximateEstimates.Should().BeTrue("EstimatedFallback legs degrade the trip");
         // DisplayMinutes(150)=3, DisplayMinutes(30)=1 ⇒ total 4m (240s), not Duration(180s)='3m'.
         vm.TotalTravelTimeSeconds.Should().Be(240);
-        TravelTimeFormatting.Duration(vm.TotalTravelTimeSeconds).Should().Be("4m");
+        TravelTimeFormatting.Duration(vm.TotalTravelTimeSeconds).Should().Be("4 min");
     }
 
     // --- Story 2.3 (TRIP-DEGRADE-01): IsShowingApproximateEstimates flag ---

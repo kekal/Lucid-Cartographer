@@ -78,8 +78,8 @@ public class LegConnectorTests : BunitTestContext
         // ↓ glyph (decorative).
         cut.Markup.Should().Contain("↓");
         // Travel time + distance via the shared formatters.
-        cut.Markup.Should().Contain("1h 20m").And.Contain("12 km");
-        cut.Find($"[aria-label=\"{string.Format(CultureInfo.CurrentCulture, UiStrings.TripLegTravelTimeAria, "1h 20m")}\"]").Should().NotBeNull();
+        cut.Markup.Should().Contain("1h 20 min").And.Contain("12 km");
+        cut.Find($"[aria-label=\"{string.Format(CultureInfo.CurrentCulture, UiStrings.TripLegTravelTimeAria, "1h 20 min")}\"]").Should().NotBeNull();
         cut.Find($"[aria-label=\"{string.Format(CultureInfo.CurrentCulture, UiStrings.TripLegDistanceAria, "12 km")}\"]").Should().NotBeNull();
         // Fidelity badge with its provenance accessible name.
         var prov = string.Format(CultureInfo.CurrentCulture, UiStrings.TripFidelityAria, UiStrings.TripFidelityEstimated);

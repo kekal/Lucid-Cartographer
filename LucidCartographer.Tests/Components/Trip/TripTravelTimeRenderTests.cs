@@ -102,12 +102,12 @@ public class TripTravelTimeRenderTests : BunitTestContext
         badges.Should().NotBeEmpty();
         cut.Markup.Should().Contain("text-on-surface-variant");
         // Formatted time + distance present.
-        cut.Markup.Should().Contain("1h 20m");
+        cut.Markup.Should().Contain("1h 20 min");
         cut.Markup.Should().Contain("12 km");
         // Trip total label + value rendered once.
         cut.Markup.Should().Contain(UiStrings.TripTotalTravelTimeLabel);
-        var totalAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripTotalTravelTimeAria, "2h 40m");
-        cut.Find($"[aria-label=\"{totalAria}\"]").TextContent.Trim().Should().Be("2h 40m");
+        var totalAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripTotalTravelTimeAria, "2h 40 min");
+        cut.Find($"[aria-label=\"{totalAria}\"]").TextContent.Trim().Should().Be("2h 40 min");
     }
 
     [Fact]
@@ -146,8 +146,8 @@ public class TripTravelTimeRenderTests : BunitTestContext
         var provenanceAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripFidelityAria, Fidelity.Placeholder);
         cut.FindAll($"[aria-label=\"{provenanceAria}\"]").Should().BeEmpty();
         // The air estimate must NOT be rendered as a real time.
-        cut.Markup.Should().NotContain("10m", "a Placeholder air estimate is never shown as a real leg time");
-        cut.Markup.Should().NotContain("20m", "the trip total must not sum Placeholder air estimates");
+        cut.Markup.Should().NotContain("10 min", "a Placeholder air estimate is never shown as a real leg time");
+        cut.Markup.Should().NotContain("20 min", "the trip total must not sum Placeholder air estimates");
         // The trip total slot is the honest em-dash.
         var totalAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripTotalTravelTimeAria, UiStrings.TripLegTimeUnknown);
         cut.Find($"[aria-label=\"{totalAria}\"]").TextContent.Trim().Should().Be(UiStrings.TripLegTimeUnknown);
@@ -167,7 +167,7 @@ public class TripTravelTimeRenderTests : BunitTestContext
         var cut = RenderComponent<MobileTripPanel>(p => p.Add(x => x.Vm, vm));
 
         cut.Markup.Should().Contain(UiStrings.TripFidelityEstimated);
-        cut.Markup.Should().Contain("1h 20m");
+        cut.Markup.Should().Contain("1h 20 min");
         cut.Markup.Should().Contain("12 km");
         cut.Markup.Should().Contain(UiStrings.TripTotalTravelTimeLabel);
         cut.Markup.Should().NotContain(Fidelity.Placeholder);
@@ -205,7 +205,7 @@ public class TripTravelTimeRenderTests : BunitTestContext
             .Should().Contain(r => r.TextContent.Contains(UiStrings.TripApproximateEstimatesNote, StringComparison.Ordinal));
         // A fallback Estimated leg still shows the Estimated badge and a real time.
         cut.Markup.Should().Contain(UiStrings.TripFidelityEstimated);
-        cut.Markup.Should().Contain("1h 20m");
+        cut.Markup.Should().Contain("1h 20 min");
     }
 
     [Fact]
@@ -235,7 +235,7 @@ public class TripTravelTimeRenderTests : BunitTestContext
         cut.FindAll("[role='status'][aria-live='polite']")
             .Should().Contain(r => r.TextContent.Contains(UiStrings.TripApproximateEstimatesNote, StringComparison.Ordinal));
         cut.Markup.Should().Contain(UiStrings.TripFidelityEstimated);
-        cut.Markup.Should().Contain("1h 20m");
+        cut.Markup.Should().Contain("1h 20 min");
     }
 
     [Fact]
