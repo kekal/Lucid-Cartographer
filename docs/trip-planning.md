@@ -85,7 +85,9 @@ cache, sole `OrderIndex` writer, background compute) and added:
   tooltips self-explain in plain language. `TripViewModel.RecommendsOsrm` drives a
   quiet Mock-default note ("all straight-line estimates — enable OSRM for measured road
   times", linking `docs/osrm.md`) — distinct from the engine-unreachable fallback note
-  (`IsShowingApproximateEstimates`). Icon-only controls carry native `title` tooltips
+  (`IsShowingApproximateEstimates`). That link is served by `Endpoints/DocsEndpoints.cs`
+  (`GET /docs/osrm.md`, embedded operator guide — see [api-contracts.md](./api-contracts.md));
+  it is **not** a wwwroot static file (`.md` is unserved and Docker-stripped). Icon-only controls carry native `title` tooltips
   at `aria-label` parity.
 - **Per-leg travel modes end-to-end (RD1/2/3/6/7, Epic 3).** See the dedicated
   "Per-leg travel modes" section below.

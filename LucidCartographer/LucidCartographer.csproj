@@ -42,6 +42,14 @@
     <InternalsVisibleTo Include="LucidCartographer.Tests" />
   </ItemGroup>
 
+  <!-- The in-app operator guide served by DocsEndpoints (/docs/osrm.md, the Trip View
+       "How to enable OSRM" link). Embedded into the assembly so it is present at runtime
+       on every host: a wwwroot .md is unserved (unknown content type) AND stripped from
+       the Docker image (.dockerignore excludes *.md, with a negation for this one file). -->
+  <ItemGroup>
+    <EmbeddedResource Include="Endpoints\Docs\osrm.md" />
+  </ItemGroup>
+
   <!--
     Tailwind CSS compile step for local `dotnet run`.
     The Dockerfile already does this during image build; this target makes

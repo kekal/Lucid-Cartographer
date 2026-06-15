@@ -29,6 +29,8 @@ Data (EF Core / SQLite)   AppDbContext via IDbContextFactory; Fluent API + const
 
 `Program.cs` only wires things up. Registrations live in `Configuration/*Extensions.cs` (13 extension methods: Razor+compression, database, POI services, import/enrichment/dedup pipelines, browser session, export, auth, resilience, view models, MCP, OAuth frontdoor, health). Endpoints live in `Endpoints/*Endpoints.cs`. One-shot startup work lives in `Services/StartupCleanupService.cs` (migrate DB, seed admin, sweep temp files, revive stuck POIs, vacuum sessions).
 
+> **Serving in-app docs:** the Trip View "How to enable OSRM" link is backed by `Endpoints/DocsEndpoints.cs` (`GET /docs/osrm.md`) serving an **embedded resource**, not a wwwroot static file — `UseStaticFiles` won't serve `.md` (unknown content type) and the Docker image strips `*.md`. Endpoints mapped in `Program.cs` must also be re-mapped in the hand-composed integration host (`IntegrationTestBase`), which builds its own pipeline.
+
 ### Middleware order (security-critical)
 ForwardedHeaders (**first** — rewrites `X-Forwarded-Proto`) → exception handler/HSTS/HTTPS redirect (non-dev, ARCH-HIGH-05) → security headers/CSP (ARCH-CRIT-04) → response compression (after headers, BREACH-safe, ARCH-HIGH-06; skipped in dev) → WebSockets → Authentication → Authorization → LAN-bypass-or-auth → Antiforgery (ARCH-CRIT-03) → rate limiter → static files → endpoints.
 

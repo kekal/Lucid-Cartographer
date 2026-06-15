@@ -5,6 +5,10 @@ data/
 .vs/
 .vscode/
 *.md
+# ...except the in-app operator guide embedded by DocsEndpoints (/docs/osrm.md). It is
+# a .md source file that MUST reach the build context so `dotnet publish` can embed it
+# into the assembly; the blanket *.md rule above would otherwise strip it from the image.
+!Endpoints/Docs/osrm.md
 *.sln
 *.user
 *.DotSettings*

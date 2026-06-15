@@ -83,6 +83,7 @@ app.MapHealthChecks("/health"); // MED-01
 app.MapAuthEndpoints();
 app.MapOAuthEndpoints();
 app.MapPoiImageEndpoints();
+app.MapDocsEndpoints(); // /docs/osrm.md — the Trip View "How to enable OSRM" link
 
 // Same-origin noVNC proxy for the Google sign-in remote view (Docker/Linux only;
 // no-op unless Browser:RemoteView:Enabled). Behind the cookie-auth route guard.

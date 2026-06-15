@@ -1,6 +1,6 @@
 {
   "workflow_version": "1.2.0",
-  "timestamps": { "started": "2026-06-15T23:27:00+0200", "last_updated": "2026-06-15T23:45:00+0200", "completed": "2026-06-15T23:45:00+0200" },
+  "timestamps": { "started": "2026-06-15T23:27:00+0200", "last_updated": "2026-06-16T00:00:00+0200", "completed": "2026-06-16T00:00:00+0200" },
   "mode": "full_rescan",
   "scan_level": "deep",
   "project_root": "C:/backup/maps_editor",
@@ -11,7 +11,8 @@
     { "step": "step_1-3", "status": "completed", "timestamp": "2026-06-15T23:30:00+0200", "summary": "Re-classified as monolith/web (Blazor Server .NET 8 + EF Core SQLite) — unchanged. Deep-read the Wave-2 delta source: AddOutgoingTravelMode migration, AppDbContext check constraint, PoiCollectionItem.OutgoingTravelMode, TripProjections (TripLeg.Mode/TripStop.OutgoingTravelMode), TravelTimeFormatting.DisplayMinutes, TripViewModel (CanonicalStopOrder/ApplyCanonicalOrder/RecommendsOsrm/SetLegModeAsync/manual edit/schedule), LegConnector + LegModePill, MapPage takeover branch, TripTools + McpDtos, UiStrings ('min', OSRM note, Time limit/Over limit). Ground-truthed vs planning architecture.md (RD1-RD13), epics.md (33 FRs), and the 4 epic retros." },
     { "step": "step_4-9", "status": "completed", "timestamp": "2026-06-15T23:44:00+0200", "summary": "Updated docs in place (preserve-don't-rewrite): trip-planning.md (new Wave-2 sections + per-leg-modes + deferred/tech-debt), data-models.md (OutgoingTravelMode col + check constraint + AddOutgoingTravelMode migration + TravelMode dead-column note), api-contracts.md (get_trip per-leg travelMode + new set_leg_travel_mode; trip-level mode removed), component-inventory.md (TripViewModel Wave-2 surface; LegConnector/LegModePill; inert mobile TravelModeSelector), source-tree-analysis.md, architecture.md (Trip slice + MCP + TRIP-* codes), project-overview.md, development-guide.md (Trip filter incl. schema changes + reconciliation invariant), trip-planning-feature-summary.md (superseded-in-part pointer to Wave 2)." },
     { "step": "step_10", "status": "completed", "timestamp": "2026-06-15T23:45:00+0200", "summary": "index.md refreshed: header banner now notes the 2026-06-15 Trip View Realignment & Honest Schedule delta (33 FRs, RD1-RD13). All existing links remain valid; no incomplete (To be generated) markers; deployment-guide.md intentionally untouched (no infra change per RD)." },
-    { "step": "step_11-12", "status": "completed", "timestamp": "2026-06-15T23:45:00+0200", "summary": "No incomplete markers. Build/verify not required (docs only). Workflow complete." }
+    { "step": "step_11-12", "status": "completed", "timestamp": "2026-06-15T23:45:00+0200", "summary": "No incomplete markers. Build/verify not required (docs only). Workflow complete." },
+    { "step": "delta/osrm-docs-link", "status": "completed", "timestamp": "2026-06-16T00:00:00+0200", "summary": "Targeted doc delta (not a full rescan) for the uncommitted OSRM docs-link fix. Source change: the Trip View 'How to enable OSRM' link (href docs/osrm.md) was 404ing — no wwwroot/docs, UseStaticFiles won't serve .md, Docker strips *.md. Fix added a new minimal-API endpoint Endpoints/DocsEndpoints.cs (GET /docs/osrm.md, AllowAnonymous, text/plain) serving Endpoints/Docs/osrm.md as an EmbeddedResource (csproj <EmbeddedResource>; .dockerignore !Endpoints/Docs/osrm.md negation), mapped in Program.cs AND re-mapped in IntegrationTestBase (hand-composed host). New Playwright test OsrmDocsLinkIntegrationTests verifies the click serves 200 + guide content (red→green proven). Docs updated in place: api-contracts.md (new Docs endpoint section), source-tree-analysis.md (DocsEndpoints.cs + Docs/osrm.md), architecture.md (embedded-docs-serving note + integration-host mirror), trip-planning.md (RecommendsOsrm note link is now served). No schema/migration/infra change." }
   ],
   "current_step": "completed",
   "findings": {
@@ -29,7 +30,7 @@
     "component-inventory.md", "source-tree-analysis.md", "development-guide.md"
   ],
   "preserved_artifacts": [
-    "osrm.md (hand-written OSRM operator guide; still accurate, untouched)",
+    "osrm.md (hand-written OSRM operator guide; still accurate. NOTE: now ALSO shipped as an embedded-resource copy at Endpoints/Docs/osrm.md, served by DocsEndpoints at GET /docs/osrm.md — keep the two in sync)",
     "deployment-guide.md (no infrastructure change in this delta; untouched)"
   ],
   "archived": [ "docs/.archive/project-scan-report-20260615T232714.json (prior completed full_rescan report)" ],

@@ -11,6 +11,9 @@ _Minimal-API endpoints (`Endpoints/*.cs`) and the MCP tool surface (`Services/Mc
 ### POI image — `Endpoints/PoiImageEndpoints.cs`
 - **GET `/api/poi-image/{id:int}`** — streams bytes from `PoiImages`. Strong ETag (SHA-256 of bytes); honors `If-None-Match` → **304**. `Cache-Control: no-cache`, `Content-Disposition: inline`, `X-Content-Type-Options: nosniff`.
 
+### Docs — `Endpoints/DocsEndpoints.cs`
+- **GET `/docs/osrm.md`** (`.AllowAnonymous()`) — serves the in-app OSRM operator guide as `text/plain; charset=utf-8` (rendered inline in a new tab). This is the target of the Trip View Mock-estimate "How to enable OSRM" link (`UiStrings.TripMockEstimateOsrmHref`). The guide ships as an **embedded resource** (`Endpoints/Docs/osrm.md`, `<EmbeddedResource>` in the app `.csproj`), **not** a wwwroot static file — `UseStaticFiles` won't serve `.md` (unknown content type) and the Docker image strips `*.md` (`.dockerignore`, with a `!Endpoints/Docs/osrm.md` negation so the source still reaches the build context for embedding). Prose source of truth is `docs/osrm.md` (repo root); the embedded copy is kept in sync. The endpoint is mapped in `Program.cs` **and** re-mapped in the hand-composed integration host (`IntegrationTestBase`).
+
 ### OAuth 2.1 frontdoor — `Endpoints/OAuthEndpoints.cs` (only when `OAuth:Issuer` set)
 - **GET/POST `/connect/authorize`** — auth-code + PKCE (S256). Challenges to `/login` if no cookie. Echoes RFC 8707 `resource`.
 - **POST `/connect/token`** — auth-code / refresh-token exchange.

@@ -20,6 +20,7 @@ wwwroot/css/tailwind.css
 *.db-shm
 *.db-wal
 LucidCartographer/wwwroot/css/tailwind.css
+**/key-*-*-*-*.xml
 
 # Diagnostic logs (DiagnosticLogging.TeeConsoleToFile output)
 scrape-diag.log

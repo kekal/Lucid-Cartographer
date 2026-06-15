@@ -30,6 +30,8 @@ maps_editor/
 │   │   ├── AuthEndpoints.cs       #   /auth/login, /logout
 │   │   ├── OAuthEndpoints.cs      #   /connect/authorize|token|register
 │   │   ├── PoiImageEndpoints.cs   #   /api/poi-image/{id} (ETag/304)
+│   │   ├── DocsEndpoints.cs       #   /docs/osrm.md (embedded operator guide; Trip OSRM link)
+│   │   ├── Docs/osrm.md           #   embedded-resource copy of the OSRM operator guide
 │   │   ├── NoVncProxyEndpoint.cs  #   /google-session/novnc/** (HTTP+WS proxy)
 │   │   └── McpApiKeyFilter.cs     #   /mcp auth filter
 │   │
