@@ -1,11 +1,11 @@
 ---
 project_name: 'maps_editor'
 user_name: 'Yurik'
-date: '2026-06-14'
+date: '2026-06-15'
 sections_completed: ['technology_stack', 'language_rules', 'framework_rules', 'testing_rules', 'code_quality_rules', 'workflow_rules', 'critical_rules', 'trip_planning_rules']
 existing_patterns_found: 14
 status: 'complete'
-rule_count: 24
+rule_count: 30
 optimized_for_llm: true
 ---
 
@@ -54,12 +54,18 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **The `RouteSegment` Leg cache key `(FromPoiId, ToPoiId, TravelMode)` is DIRECTIONAL** ([TRIP-CACHE-01]): A→B and B→A are distinct rows, never collapsed/mirrored (one-way streets make Drive legs genuinely asymmetric).
 - **`TravelMode` and `Fidelity` are string constants** (`Data/Entities/TravelMode.cs`, `Fidelity.cs`), persisted as strings and constrained by EF **check constraints** built from each type's `.All` list via `EnumCheckSql` ([TRIP-SCHEMA-01]) — add a value to `.All` and the DB constraint follows automatically. Don't introduce int-backed enums for these.
 - **One ordering write-path:** `TripOrderingService.SetOrderAsync` is the **sole writer** of `PoiCollectionItem.OrderIndex`, committing under the shared process-wide `SqliteWriteLock` (same gate as enrichment/dedup). Registered `Scoped`. Never write `OrderIndex` elsewhere.
+- **Per-leg travel mode (the leg leaving each stop):** `PoiCollectionItem.OutgoingTravelMode` (string?, one of `TravelMode.All`) — **`null` ≡ AnyAir is ONE state** ([TRIP-LEGMODE-01]); never add an "unset" sentinel. It is **also sole-written by `TripOrderingService`** (under `SqliteWriteLock`): `SetOutgoingTravelModeAsync` for a single leg, and `SetOrderAsync` nulls it **only for stops whose successor changed** on a reorder (so unchanged legs keep their mode + cached row). A reorder that flips the trip shape (Set/Clear Finish appears/vanishes the closing leg) must pass the **prior** shape so the resurrected/vanished leg's mode resets — a `null` prior Finish is a real roundtrip shape, not "unsupplied". The per-leg mode replaces the old trip-wide `PoiCollection.TravelMode` as the leg driver; that column is **kept as a dead column** (RD1a — still written by the inert mobile `TravelModeSelector`), never dropped. Ground modes (Walk/Drive/Cycle) auto-compute; **AnyAir/null is never auto-estimated** (reads "—") — the background pass enqueues ground legs only.
+- **Round-once display model ([TRIP-RECONCILE-01]):** `TravelTimeFormatting.DisplayMinutes` (round-half-up) is the **sole rounding edge**. The displayed trip total == the sum of the displayed per-leg minutes, and arrivals derive from the same rounded legs — never truncate each leg while summing seconds for the total. Canonical seconds are untouched; honesty qualifiers ("—", Estimated/Measured/Manual, partial-trip em-dash) survive.
+- **Three leg-projection sites must stay mirrored:** `TripViewModel.BuildLegs`, `TravelTimeComputationBackgroundService.DirectionalPairs`, and MCP `TripTools.GetTrip` each build the leg set (consecutive pairs + roundtrip closing leg), decide open-vs-roundtrip shape, and look the cache up by the leg's own `(From,To,Mode)` key. Change one → change all three. The MCP `get_trip` reports each leg's `travelMode` (trip-level field removed); `set_leg_travel_mode` sets a leg by its From-stop id via the sole-writer.
+- **TSP-Sort is mode-invariant ([RD3]):** the cost matrix is built from straight-line/haversine distance, never per-leg `OutgoingTravelMode` (ordering happens before per-leg modes exist). The NN+2-opt algorithm is unchanged.
+- **Schedule conversions happen only at the UI edge:** `PoiCollection.TripStartTime` (`DateTime?`) and `TimeBudgetMinutes`/`DwellMinutes` stay canonical; the component bridge converts `datetime-local` (**ISO/invariant wire value**) and HH:MM↔minutes, and renders dates **locale-driven** (`CultureInfo.CurrentCulture`, no hard-coded order). A finish-by **deadline is computed once** into `TimeBudgetMinutes` (`deadline − start`) and never stored/recomputed ([TRIP-SCHEDULE-01]).
 - **Provider seam + haversine fallback:** travel times come through `ITravelTimeProvider` (haversine `MockTravelTimeProvider` is the default — OSRM is opt-in via `TravelTime:Provider=Osrm`, never default). The off-circuit `TravelTimeComputationBackgroundService` runs providers through the Polly `"travel-time"` pipeline and, on any provider failure, **degrades to the haversine Estimated value stamped `Source=EstimatedFallback`** ([TRIP-DEGRADE-01]) — one bad leg never fails the pass. A provider declares its own `Attribution` HTML; when an OSM-derived provider (OSRM) is active its OSM/ODbL attribution **must** surface on the map (NFR8) — haversine declares null (not OSM-derived).
 - **Validate the never-invalidated cache row at write time.** A Leg is computed iff no cache row exists for its key; the upsert still defends with an explicit guard that **never downgrades a `Manual` or `Measured` row** ([TRIP-MANUAL-01]/[TRIP-DEGRADE-01]) and `RouteSegmentInvalidationService` never deletes `Manual` rows. Keep these guards even when the current code path "can't" reach them.
 
 ### Conventions Agents Miss
 - **DB path resolution order:** `DB_PATH` env var → `Database:Path` config → `data/cartographer.db` under `ContentRootPath`.
-- **Design-decision comment codes** in source — search the codebase before changing flagged code: `ARCH-CRIT-*`, `ARCH-HIGH-*`, `ARCH-LOW-*`, `HIGH-*`, `MED-*`, `IE-*`, and the Trip slice's `TRIP-*` codes (e.g. `TRIP-CACHE-01`, `TRIP-SCHEMA-01`, `TRIP-TRAVELTIME-01`, `TRIP-OSRM-01`, `TRIP-DEGRADE-01`).
+- **Design-decision comment codes** in source — search the codebase before changing flagged code: `ARCH-CRIT-*`, `ARCH-HIGH-*`, `ARCH-LOW-*`, `HIGH-*`, `MED-*`, `IE-*`, and the Trip slice's `TRIP-*` codes (e.g. `TRIP-CACHE-01`, `TRIP-SCHEMA-01`, `TRIP-TRAVELTIME-01`, `TRIP-OSRM-01`, `TRIP-DEGRADE-01`, `TRIP-MANUAL-01`, and the Wave-2 codes `TRIP-LEGMODE-01`, `TRIP-RECONCILE-01`, `TRIP-SCHEDULE-01`).
+- **Known tech-debt / deferred:** **A11** — a per-leg `Manual` override `RouteSegment` row is orphaned when the leg's mode is later changed (harmless to display since projection keys by current mode; fix = delete/migrate the old-mode Manual row in `SetOutgoingTravelModeAsync`). **Mirror-to-mobile is deferred** — `MobileTripPanel` still has the pre-Wave-2 controls (number dwell/budget, `type="time"` start, the inert trip-wide `TravelModeSelector`) and lacks the per-leg pill / connector edit / new schedule pickers; the **shared logic/data/strings already reach mobile correctly**, only the controls are deferred, so keep shared-layer changes mobile-correct and run the mobile test filter.
 - **Auth:** PBKDF2-SHA256 @ 600,000 iterations; admin bootstrap prints a one-time password to the log. `Auth:BypassLocalAddresses` requires `Auth:TrustedProxies` behind a reverse proxy, or auth is silently bypassed for all requests.
 - `BlazorDisableThrowNavigationException=true` is intentional — don't "fix" navigation exceptions.
 
@@ -77,4 +83,4 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Update when the technology stack or core patterns change.
 - Review periodically and remove rules that become obvious over time.
 
-Last Updated: 2026-06-14
+Last Updated: 2026-06-15

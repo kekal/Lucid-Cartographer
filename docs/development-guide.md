@@ -45,7 +45,7 @@ dotnet test
 
 Three layers (`LucidCartographer.Tests/`):
 
-- **Unit** — pure logic: importers, exporters, `ImportOrchestrator`, `SetOperationService`, `PoiMatcher`, `EnrichmentStateMachine`, ViewModels, `PoiService`, and the Trip slice (`TspSolver`, `ItineraryTimeline`, `TripOrderingService`, `DistanceMatrixService`, travel-time providers). After any Trip DI/VM-ctor change, run the Trip integration test filter (the parameterless `AddTripServices` overload is what the integration host composes by hand).
+- **Unit** — pure logic: importers, exporters, `ImportOrchestrator`, `SetOperationService`, `PoiMatcher`, `EnrichmentStateMachine`, ViewModels, `PoiService`, and the Trip slice (`TspSolver`, `ItineraryTimeline` + the round-once `TravelTimeFormatting.DisplayMinutes` reconciliation invariant, `TripOrderingService`, `DistanceMatrixService`, travel-time providers, `TripViewModel` per-leg-mode projection, `TripTools`). After any Trip DI/VM-ctor **or schema** change, run the Trip integration test filter (`FullyQualifiedName~Integration&FullyQualifiedName~Trip`) — the parameterless `AddTripServices` overload is what the integration host composes by hand, and the recurring regression point.
 - **Component** — bUnit render/binding tests under `Components/`.
 - **Integration** — `IntegrationTestBase` spins up a real `WebApplication` + Playwright + a fresh temp SQLite DB per test, pointing `WebRootPath` at the app's `wwwroot`. Desktop and mobile have dedicated bases (`MobileTestBase`, `Mobile*Tests`); cover both when changing responsive UI.
 

@@ -8,6 +8,8 @@ This is the milestone summary for the **Trip Planning** capability of LucidCarto
 
 > Note: planning/implementation artifacts were archived during finalization; the source links above point at their post-archive `_bmad-output/archive/trip-planning/…` location.
 
+> **Superseded in part (2026-06-15):** a follow-on delta — **Trip View: Layout Realignment & Honest Schedule** (new Epics 1–4, 19 stories, FR-1…FR-33, RD1–RD13) — shipped the desktop Trip-View takeover, reconciled honest times, **per-leg travel modes** (replacing the trip-wide mode this summary describes), and a multi-day schedule. For the current as-built behaviour see [`trip-planning.md`](trip-planning.md) (the "Wave 2" sections); this summary remains accurate for the original Trip Planning wave only.
+
 ---
 
 ## What shipped
