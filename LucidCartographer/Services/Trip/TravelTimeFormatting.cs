@@ -10,9 +10,25 @@ namespace LucidCartographer.Services.Trip;
 public static class TravelTimeFormatting
 {
     /// <summary>
+    /// TRIP-RECONCILE-01 (Story 2.1): the SOLE rounding edge for a per-leg duration.
+    /// Rounds canonical seconds to whole minutes, nearest minute, round-half-up
+    /// (e.g. 90s ⇒ 2 min, 30s ⇒ 1 min, 29s ⇒ 0). Every place that DISPLAYS or SUMS
+    /// a leg's minutes must go through this one function so the displayed total
+    /// equals Σ of the displayed per-leg minutes (FR-13/14/15). Canonical
+    /// <see cref="Data.Entities.RouteSegment"/> seconds are NEVER mutated — only the
+    /// display model rounds (NFR2).
+    /// </summary>
+    public static int DisplayMinutes(int seconds) =>
+        (int)Math.Round(seconds / 60.0, MidpointRounding.AwayFromZero);
+
+    /// <summary>
     /// Formats a duration in seconds as "Hh Mm" (e.g. "1h 20m"), "Mm" under an
     /// hour (e.g. "12m"), or "&lt;1m" for a sub-minute positive duration. A null
     /// or negative input yields the em-dash unknown marker.
+    /// TRIP-RECONCILE-01 (Story 2.1): the minute figure is the round-once
+    /// <see cref="DisplayMinutes"/> (round-half-up), NOT a truncation of seconds/60,
+    /// so the displayed legs and the displayed total reconcile. The unit text is
+    /// unchanged here — the "m"→"min" change is Story 2.2 (FR-16).
     /// </summary>
     public static string Duration(int? seconds)
     {
@@ -21,7 +37,7 @@ public static class TravelTimeFormatting
             return UiStrings.TripLegTimeUnknown;
         }
 
-        var totalMinutes = s / 60;
+        var totalMinutes = DisplayMinutes(s);
         var hours = totalMinutes / 60;
         var minutes = totalMinutes % 60;
 
@@ -35,8 +51,10 @@ public static class TravelTimeFormatting
             return string.Format(CultureInfo.CurrentCulture, UiStrings.TripDurationMinutes, minutes);
         }
 
-        // Positive but under a minute (the Mock can produce this for very short
-        // legs) — never collapse to "0m" which would read as a free hop.
+        // TRIP-RECONCILE-01: DisplayMinutes rounded to 0 but the canonical seconds
+        // are positive (< 30s) — show "<1 min" rather than collapsing to "0m" (a free
+        // hop). This leg contributes 0 to the reconciled sum; the "<1 min" is an honest
+        // 0-contribution annotation, not a special-cased sum term.
         return s > 0 ? UiStrings.TripDurationSubMinute : UiStrings.TripDurationZero;
     }
 

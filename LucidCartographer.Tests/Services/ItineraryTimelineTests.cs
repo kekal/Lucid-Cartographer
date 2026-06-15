@@ -281,6 +281,101 @@ public class ItineraryTimelineTests
         r.IsOverBudget.Should().BeFalse("an uncertain total can never assert an overrun");
     }
 
+    // === Story 2.1 (TRIP-RECONCILE-01): round-once reconciliation ===
+
+    [Fact]
+    public void Reconcile_SubMinuteRemainders_ArrivalsAndTotalSumRoundedPerLegMinutes()
+    {
+        // 3 stops open path, no dwell. Legs of 90s + 90s — each previously drifted:
+        // raw seconds 90+90=180s (3m), but DisplayMinutes(90)=2 each ⇒ Σ=4 min.
+        // Arrivals + total must derive from the rounded 2-min legs, NOT raw seconds.
+        var stops = new[] { Stop(1), Stop(2), Stop(3) };
+        var legs = new[] { Measured(90), Measured(90) };
+
+        var r = ItineraryTimeline.Compute(stops, legs, [], isRoundtrip: false, tripStart: null, budgetMinutes: null);
+
+        // Each displayed per-leg minute count (the sole rounding edge).
+        var legMinutes = legs.Select(l => TravelTimeFormatting.DisplayMinutes(l.DurationSeconds!.Value)).ToArray();
+        legMinutes.Should().Equal(2, 2);
+
+        // arrival(2) = leg1 rounded = 2 min = 120s; arrival(3) = (2+2) min = 240s.
+        r.Stops[1].OffsetSeconds.Should().Be(legMinutes[0] * 60);
+        r.Stops[2].OffsetSeconds.Should().Be((legMinutes[0] + legMinutes[1]) * 60);
+        // Total == Σ displayed per-leg minutes (×60). NOT Duration(180s)=3m.
+        r.TotalSeconds.Should().Be(legMinutes.Sum() * 60);
+        r.TotalSeconds.Should().Be(240, "round-once: 2+2 min, not the raw-seconds 3 min");
+    }
+
+    [Fact]
+    public void Reconcile_WithDwell_ArrivalsAreRunningSumOfRoundedLegsPlusDwell()
+    {
+        // Roundtrip, 2 stops. Start dwell 15m, stop2 dwell 10m. Legs 150s out, 30s back.
+        // DisplayMinutes(150)=3 (2.5 rounds up), DisplayMinutes(30)=1 (half rounds up).
+        var stops = new[] { Stop(1, dwell: 15), Stop(2, dwell: 10) };
+        var legs = new[] { Measured(150), Measured(30) };
+
+        var r = ItineraryTimeline.Compute(stops, legs, [], isRoundtrip: true, tripStart: null, budgetMinutes: null);
+
+        var leg1 = TravelTimeFormatting.DisplayMinutes(150); // 3
+        var leg2 = TravelTimeFormatting.DisplayMinutes(30);  // 1
+        leg1.Should().Be(3);
+        leg2.Should().Be(1);
+
+        // arrival(2) = Start dwell 15m + leg1 3m = 18m.
+        r.Stops[1].OffsetSeconds.Should().Be((15 + leg1) * 60);
+        // return = arrival(2) + stop2 dwell 10m + leg2 1m = (15+3+10+1) = 29m.
+        r.FinishOrReturn!.OffsetSeconds.Should().Be((15 + leg1 + 10 + leg2) * 60);
+        r.TotalSeconds.Should().Be((15 + leg1 + 10 + leg2) * 60);
+    }
+
+    [Fact]
+    public void Reconcile_PartialTrip_AnyLeg_GivesUnknownArrivalAndTotalEmDash()
+    {
+        // An Any/Air Placeholder leg (null duration) ⇒ that arrival "—" and total unknown.
+        var stops = new[] { Stop(1), Stop(2), Stop(3) };
+        var legs = new[] { Measured(90), Leg(null, Fidelity.Placeholder) };
+
+        var r = ItineraryTimeline.Compute(stops, legs, [], isRoundtrip: false, tripStart: null, budgetMinutes: null);
+
+        r.Stops[1].IsUnknown.Should().BeFalse();
+        r.Stops[2].IsUnknown.Should().BeTrue("an Any/Air leg makes the arrival uncomputable");
+        r.IsTotalUnknown.Should().BeTrue();
+        r.TotalSeconds.Should().BeNull("partial trip ⇒ total em-dash, no silent zero");
+    }
+
+    [Fact]
+    public void Reconcile_MixedFidelity_QualifierPreservedOnRoundedTotal()
+    {
+        // Measured + Estimated sub-minute-remainder legs: rounding must not disturb the
+        // surviving Estimated qualifier on the downstream arrival and the total.
+        var stops = new[] { Stop(1), Stop(2), Stop(3) };
+        var legs = new[] { Measured(90), Leg(150, Fidelity.Estimated) };
+
+        var r = ItineraryTimeline.Compute(stops, legs, [], isRoundtrip: false, tripStart: null, budgetMinutes: null);
+
+        r.Stops[1].QualifyingFidelity.Should().BeNull();
+        r.Stops[2].QualifyingFidelity.Should().Be(Fidelity.Estimated);
+        r.Stops[2].OffsetSeconds.Should().Be((TravelTimeFormatting.DisplayMinutes(90)
+            + TravelTimeFormatting.DisplayMinutes(150)) * 60);
+        r.TotalQualifyingFidelity.Should().Be(Fidelity.Estimated);
+        r.IsTotalUnknown.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Reconcile_Budget_ComparesRoundedTotal()
+    {
+        // Legs 90s + 90s ⇒ rounded total 4 min (240s); raw would be 3 min (180s).
+        // A 3-min budget is now EXCEEDED by the honest rounded 4-min total.
+        var stops = new[] { Stop(1), Stop(2), Stop(3) };
+        var legs = new[] { Measured(90), Measured(90) };
+
+        var over = ItineraryTimeline.Compute(stops, legs, [], isRoundtrip: false, tripStart: null, budgetMinutes: 3);
+        var ok = ItineraryTimeline.Compute(stops, legs, [], isRoundtrip: false, tripStart: null, budgetMinutes: 4);
+
+        over.IsOverBudget.Should().BeTrue("the reconciled 4-min total exceeds a 3-min budget");
+        ok.IsOverBudget.Should().BeFalse("exactly at the reconciled 4-min budget is not over");
+    }
+
     // === Edge: fewer than two placeable stops ⇒ empty ===
 
     [Fact]

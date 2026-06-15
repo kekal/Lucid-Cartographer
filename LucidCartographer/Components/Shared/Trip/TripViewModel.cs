@@ -1191,8 +1191,16 @@ public sealed class TripViewModel(
     {
         IsAnyLegComputing = OrderedLegs.Any(l => l.Fidelity is null);
         var allDurationsKnown = OrderedLegs.Count > 0 && OrderedLegs.All(l => l.DurationSeconds is not null);
+        // TRIP-RECONCILE-01 (Story 2.1): the displayed total is Σ of the ROUND-ONCE
+        // per-leg minutes (×60 to keep this seconds-typed field), NOT Duration(Σ raw
+        // seconds). The per-leg connector shows Duration(legSeconds) = DisplayMinutes(leg)
+        // and the total now sums those same rounded minutes, so the displayed total equals
+        // Σ of the displayed per-leg times (FR-13). A leg with DisplayMinutes==0 && seconds>0
+        // shows "<1 min" but contributes 0 — consistent (a 0-contribution annotation), not
+        // special-cased. Null total (partial em-dash) whenever any leg is uncomputed/Any —
+        // unchanged.
         TotalTravelTimeSeconds = allDurationsKnown
-            ? OrderedLegs.Sum(l => l.DurationSeconds!.Value)
+            ? OrderedLegs.Sum(l => TravelTimeFormatting.DisplayMinutes(l.DurationSeconds!.Value)) * 60
             : null;
     }
 

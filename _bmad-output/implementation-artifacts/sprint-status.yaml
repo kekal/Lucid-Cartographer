@@ -37,8 +37,8 @@ development_status:
   epic-1-retrospective: done
 
   # Epic 2: Trustworthy & legible trip times
-  epic-2: backlog
-  2-1-reconciled-travel-time-arithmetic: backlog
+  epic-2: in-progress
+  2-1-reconciled-travel-time-arithmetic: done
   2-2-minute-unit-reads-min: backlog
   2-3-self-explaining-fidelity-badges: backlog
   2-4-mock-default-estimate-note-and-osrm-recommendation: backlog

@@ -149,7 +149,10 @@ public static class ItineraryTimeline
             }
             else
             {
-                cumulativeSeconds += travel;
+                // TRIP-RECONCILE-01 (Story 2.1): accumulate the ROUND-ONCE per-leg minutes
+                // (×60), not the raw seconds, so cumulative arrivals carry no stray seconds
+                // and reconcile with the per-leg display (Duration = same DisplayMinutes).
+                cumulativeSeconds += TravelTimeFormatting.DisplayMinutes(travel) * 60;
             }
 
             arrivals.Add(unknownFromHere
@@ -174,7 +177,8 @@ public static class ItineraryTimeline
             }
             else
             {
-                cumulativeSeconds += travel;
+                // TRIP-RECONCILE-01: same round-once accumulation for the closing leg.
+                cumulativeSeconds += TravelTimeFormatting.DisplayMinutes(travel) * 60;
             }
 
             finishOrReturn = unknownFromHere

@@ -179,6 +179,59 @@ public class TripViewModelTravelTimeTests
         vm.OrderedLegs.Should().OnlyContain(l => l.IsMeasured);
     }
 
+    // --- Story 2.1 (TRIP-RECONCILE-01): displayed total == Σ displayed per-leg ---
+
+    [Fact]
+    public async Task ReconciledTotal_EqualsSumOfDisplayedPerLegMinutes_NotRawSeconds()
+    {
+        var factory = Seed(placeable: 2);
+        // Roundtrip ⇒ legs 1→2 and 2→1, each 90s. Raw Σ = 180s (Duration ⇒ "3m"),
+        // but each leg DISPLAYS as DisplayMinutes(90)=2m, so the honest total is 4m.
+        await AddSegmentAsync(factory, 1, 2, 90, 8000, Fidelity.Estimated);
+        await AddSegmentAsync(factory, 2, 1, 90, 8000, Fidelity.Estimated);
+
+        await using var vm = await EnabledVmAsync(factory, 2);
+
+        // Total stored as Σ DisplayMinutes(leg) × 60 = (2+2) × 60 = 240, NOT raw 180.
+        vm.TotalTravelTimeSeconds.Should().Be(240);
+
+        // The reconciliation invariant: displayed total == Σ of displayed per-leg times.
+        var displayedTotal = TravelTimeFormatting.Duration(vm.TotalTravelTimeSeconds);
+        var sumOfPerLeg = vm.OrderedLegs.Sum(l => TravelTimeFormatting.DisplayMinutes(l.DurationSeconds!.Value));
+        TravelTimeFormatting.Duration(sumOfPerLeg * 60).Should().Be(displayedTotal);
+        displayedTotal.Should().Be("4m", "round-once: 2m + 2m, not Duration(180s)='3m'");
+    }
+
+    [Fact]
+    public async Task ReconciledTotal_PartialTrip_AnyLeg_IsEmDash()
+    {
+        var factory = Seed(placeable: 2);
+        // Only one leg computed; the other is uncomputed (Any/Air) ⇒ partial em-dash.
+        await AddSegmentAsync(factory, 1, 2, 90, 8000, Fidelity.Estimated);
+
+        await using var vm = await EnabledVmAsync(factory, 2);
+
+        vm.TotalTravelTimeSeconds.Should().BeNull("any uncomputed leg ⇒ total em-dash");
+        TravelTimeFormatting.Duration(vm.TotalTravelTimeSeconds)
+            .Should().Be(UiStrings.TripLegTimeUnknown);
+    }
+
+    [Fact]
+    public async Task ReconciledTotal_EstimatedFallbackLegs_KeepRealDuration_AndReconcile()
+    {
+        var factory = Seed(placeable: 2);
+        // Engine-unreachable fallback: real Estimated durations with sub-minute remainders.
+        await AddSegmentAsync(factory, 1, 2, 150, 8000, Fidelity.Estimated, TravelTimeSource.EstimatedFallback);
+        await AddSegmentAsync(factory, 2, 1, 30, 8000, Fidelity.Estimated, TravelTimeSource.EstimatedFallback);
+
+        await using var vm = await EnabledVmAsync(factory, 2);
+
+        vm.IsShowingApproximateEstimates.Should().BeTrue("EstimatedFallback legs degrade the trip");
+        // DisplayMinutes(150)=3, DisplayMinutes(30)=1 ⇒ total 4m (240s), not Duration(180s)='3m'.
+        vm.TotalTravelTimeSeconds.Should().Be(240);
+        TravelTimeFormatting.Duration(vm.TotalTravelTimeSeconds).Should().Be("4m");
+    }
+
     // --- Story 2.3 (TRIP-DEGRADE-01): IsShowingApproximateEstimates flag ---
 
     [Fact]
