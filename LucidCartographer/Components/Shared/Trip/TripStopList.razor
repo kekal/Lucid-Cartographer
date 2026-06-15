@@ -238,10 +238,12 @@
                         </div>
                         @* TRIP-DWELL-01 (Story 2.5, AC4): an unplaceable stop has no
                            travel time but still carries dwell. The row is not
-                           selectable, so no stopPropagation is needed here. *@
-                        <input type="number" min="0" max="@TripViewModel.MaxDwellMinutes" inputmode="numeric"
-                               class="w-12 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
-                               placeholder="@UiStrings.TripDwellPlaceholder"
+                           selectable, so no stopPropagation is needed here. Story 4.4
+                           (FR-30): native HH:MM duration picker; HH:MM↔minutes only at
+                           the UI edge. *@
+                        <input type="time"
+                               class="w-20 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
+                               placeholder="@UiStrings.TripDwellHhmmPlaceholder"
                                aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDwellAria, row.Name)"
                                value="@DwellMinutes(row)"
                                @onchange="e => OnDwellMinutesChangedAsync(row.PoiId, e.Value)" />
@@ -347,12 +349,13 @@
                                 <div class="text-xs text-on-surface-variant break-words">@row.Address</div>
                             }
                         </div>
-                        @* COLUMN 4 — Dwell input (TRIP-DWELL-01). type=number stays here
-                           (the HH:MM picker is Story 4.4). stopPropagation so editing
-                           never selects/reorders the row (2.2 selection lesson). *@
-                        <input type="number" min="0" max="@TripViewModel.MaxDwellMinutes" inputmode="numeric"
-                               class="w-12 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
-                               placeholder="@UiStrings.TripDwellPlaceholder"
+                        @* COLUMN 4 — Dwell input (TRIP-DWELL-01). Story 4.4 (FR-30):
+                           native HH:MM duration picker (24h cap fine — dwell >24h is
+                           implausible). HH:MM↔minutes only at the UI edge. stopPropagation
+                           so editing never selects/reorders the row (2.2 selection lesson). *@
+                        <input type="time"
+                               class="w-20 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
+                               placeholder="@UiStrings.TripDwellHhmmPlaceholder"
                                aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDwellAria, row.Name)"
                                value="@DwellMinutes(row)"
                                @onchange="e => OnDwellMinutesChangedAsync(row.PoiId, e.Value)"
@@ -634,14 +637,17 @@
     // commands); the interim ManualMinutes/OnManualMinutesChanged helpers moved
     // there with it.
 
-    // TRIP-DWELL-01: the current dwell minutes for a row, or empty when unset.
+    // TRIP-DWELL-01 + Story 4.4 (FR-30): the dwell as the native <input type="time">
+    // wire value "HH:mm" (h = m/60, mins = m%60), or empty when unset. Canonical
+    // DwellMinutes stays minutes — HH:MM↔minutes is only this UI-edge conversion (NFR2).
     private static string DwellMinutes(TripStopRow row) =>
         row.DwellMinutes is { } m
-            ? m.ToString(System.Globalization.CultureInfo.CurrentCulture)
+            ? $"{m / 60:D2}:{m % 60:D2}"
             : string.Empty;
 
-    // TRIP-DWELL-01: parse the entered minutes and persist via the VM. Empty/blank
-    // clears the dwell (null). A non-numeric value is ignored (no write).
+    // TRIP-DWELL-01 + Story 4.4 (FR-30): parse the entered HH:mm duration and persist
+    // canonical minutes via the VM. Empty/blank clears the dwell (null). The native
+    // time control emits invariant "HH:mm"; an unparseable value is ignored (no write).
     private async Task OnDwellMinutesChangedAsync(int poiId, object? raw)
     {
         var text = raw?.ToString();
@@ -651,9 +657,9 @@
             return;
         }
 
-        if (int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.CurrentCulture, out var minutes) && minutes >= 0)
+        if (TimeOnly.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var time))
         {
-            await Vm.SetDwellMinutesAsync(poiId, minutes);
+            await Vm.SetDwellMinutesAsync(poiId, time.Hour * 60 + time.Minute);
         }
     }
 

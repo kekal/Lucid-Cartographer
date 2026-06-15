@@ -1,6 +1,26 @@
 # Story 4.4: Dwell HH:MM picker
 
-Status: ready-for-dev
+Status: done
+
+## Dev Agent Record
+
+Both desktop dwell inputs (placeable + unplaceable rows) changed `type="number"` → `type="time"`.
+`DwellMinutes(row)` formats canonical minutes as invariant `HH:mm`; `OnDwellMinutesChangedAsync`
+parses `HH:mm` (TimeOnly, InvariantCulture) → minutes → `SetDwellMinutesAsync`, empty → null.
+HH:MM↔minutes only at the UI edge; canonical `DwellMinutes` and the timeline unchanged; no
+VM/service/schema/ctor change. New additive `TripDwellHhmmPlaceholder` (mobile keeps "min" — its
+dwell input is the deferred mirror, untouched). Existing dwell tests branched desktop(time)/
+mobile(number) faithfully.
+
+Review: orchestrator self-review (small, well-covered markup change). Verified HH:MM round-trip on
+both row types, canonical-minutes invariance, mobile untouched. 911 fast + 20 Trip integration
+green; build clean. (Note: `type="time"` ignores the placeholder visually — harmless.)
+
+## File List
+
+- LucidCartographer/Components/Shared/Trip/TripStopList.razor (MOD — HH:MM dwell, both rows)
+- LucidCartographer/Services/UiStrings.cs (MOD — TripDwellHhmmPlaceholder)
+- LucidCartographer.Tests/Components/Trip/TripStopListTests.cs (MOD — dwell HH:MM tests)
 
 ## Story
 

@@ -73,11 +73,11 @@ public class TripStopListTests : BunitTestContext
         var badgeAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripStopBadgeAria, 1, 3);
         cut.Find($"[aria-label=\"{badgeAria}\"]").TextContent.Trim().Should().Be("1");
 
-        // Story 2.5 (TRIP-DWELL-01): the dwell slot is now an empty minutes input
-        // (unset â‡’ no value) carrying its per-stop UiStrings aria-label.
+        // Story 2.5 (TRIP-DWELL-01) / Story 4.4 (FR-30): the dwell slot is now an empty
+        // HH:MM picker (unset ⇒ no value) carrying its per-stop UiStrings aria-label.
         var dwellAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripDwellAria, "P1");
         var dwell = cut.Find($"input[aria-label=\"{dwellAria}\"]");
-        dwell.GetAttribute("type").Should().Be("number");
+        dwell.GetAttribute("type").Should().Be("time");
         dwell.GetAttribute("value").Should().BeNullOrEmpty("an unset dwell prefills nothing");
         // Story 2.1: with no cached RouteSegment rows the leg slot shows the
         // computing state (em-dash + TripLegComputingAria), superseding the inert
@@ -887,13 +887,23 @@ public class TripStopListTests : BunitTestContext
             ? (IRenderedFragment)RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm))
             : RenderComponent<MobileTripPanel>(p => p.Add(x => x.Vm, vm));
 
+        var isDesktop = surface == typeof(TripStopList);
         foreach (var name in new[] { "P1", "P2", "P3" })
         {
             var input = cut.Find($"input[aria-label=\"{DwellAria(name)}\"]");
-            input.GetAttribute("type").Should().Be("number");
-            input.GetAttribute("min").Should().Be("0");
-            input.GetAttribute("max").Should().Be(TripViewModel.MaxDwellMinutes.ToString(CultureInfo.InvariantCulture));
-            input.GetAttribute("inputmode").Should().Be("numeric");
+            if (isDesktop)
+            {
+                // Story 4.4 (FR-30): the desktop dwell control is a native HH:MM picker.
+                input.GetAttribute("type").Should().Be("time");
+            }
+            else
+            {
+                // Mobile keeps the minutes input (deferred mirror).
+                input.GetAttribute("type").Should().Be("number");
+                input.GetAttribute("min").Should().Be("0");
+                input.GetAttribute("max").Should().Be(TripViewModel.MaxDwellMinutes.ToString(CultureInfo.InvariantCulture));
+                input.GetAttribute("inputmode").Should().Be("numeric");
+            }
         }
     }
 
@@ -909,7 +919,10 @@ public class TripStopListTests : BunitTestContext
             ? (IRenderedFragment)RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm))
             : RenderComponent<MobileTripPanel>(p => p.Add(x => x.Vm, vm));
 
-        cut.Find($"input[aria-label=\"{DwellAria("P1")}\"]").GetAttribute("value").Should().Be("45");
+        // Story 4.4 (FR-30): desktop renders the canonical 45 minutes as the HH:mm wire
+        // value "00:45"; mobile keeps the raw-minutes value "45".
+        var expected = surface == typeof(TripStopList) ? "00:45" : "45";
+        cut.Find($"input[aria-label=\"{DwellAria("P1")}\"]").GetAttribute("value").Should().Be(expected);
         cut.Find($"input[aria-label=\"{DwellAria("P2")}\"]").GetAttribute("value").Should().BeNullOrEmpty();
     }
 
@@ -924,7 +937,9 @@ public class TripStopListTests : BunitTestContext
             ? (IRenderedFragment)RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm))
             : RenderComponent<MobileTripPanel>(p => p.Add(x => x.Vm, vm));
 
-        cut.Find($"input[aria-label=\"{DwellAria("P1")}\"]").Change("30");
+        // Story 4.4 (FR-30): desktop edits in HH:mm ("00:30"); mobile edits in minutes.
+        var entered = surface == typeof(TripStopList) ? "00:30" : "30";
+        cut.Find($"input[aria-label=\"{DwellAria("P1")}\"]").Change(entered);
 
         cut.WaitForAssertion(() =>
             vm.StopRows.First(r => r.PoiId == 1).DwellMinutes.Should().Be(30, "editing the input persists via the VM"));
@@ -941,8 +956,69 @@ public class TripStopListTests : BunitTestContext
             ? (IRenderedFragment)RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm))
             : RenderComponent<MobileTripPanel>(p => p.Add(x => x.Vm, vm));
 
-        // The unplaceable row carries a dwell input identically (AC4).
-        cut.Find($"input[aria-label=\"{DwellAria("NoCoords")}\"]").GetAttribute("type").Should().Be("number");
+        // The unplaceable row carries a dwell input identically (AC4). Story 4.4
+        // (FR-30): desktop is the HH:MM picker; mobile keeps the minutes input.
+        var expectedType = surface == typeof(TripStopList) ? "time" : "number";
+        cut.Find($"input[aria-label=\"{DwellAria("NoCoords")}\"]").GetAttribute("type").Should().Be(expectedType);
+    }
+
+    // === Story 4.4 (FR-30): desktop dwell HH:MM picker ===
+
+    [Theory]
+    [InlineData(45, "00:45")]
+    [InlineData(90, "01:30")]
+    [InlineData(0, "00:00")]
+    [InlineData(125, "02:05")]
+    public async Task Dwell_Input_Desktop_RoundTripsMinutesToHhmm(int minutes, string expected)
+    {
+        // The desktop dwell control is a native HH:MM picker; a set value renders as the
+        // invariant "HH:mm" wire value. Canonical DwellMinutes stays minutes.
+        await using var vm = await EnabledVmAsync(placeable: 2);
+        await vm.SetDwellMinutesAsync(poiId: 1, minutes: minutes);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        cut.Find($"input[aria-label=\"{DwellAria("P1")}\"]").GetAttribute("value").Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task Dwell_Input_Desktop_EntersHhmm_PersistsCanonicalMinutes()
+    {
+        // Entering "01:30" persists the canonical 90 minutes via the VM.
+        await using var vm = await EnabledVmAsync(placeable: 2);
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        cut.Find($"input[aria-label=\"{DwellAria("P1")}\"]").Change("01:30");
+
+        cut.WaitForAssertion(() =>
+            vm.StopRows.First(r => r.PoiId == 1).DwellMinutes.Should().Be(90));
+    }
+
+    [Fact]
+    public async Task Dwell_Input_Desktop_Clearing_PersistsNull()
+    {
+        // Clearing the HH:MM control persists null (dwell removed).
+        await using var vm = await EnabledVmAsync(placeable: 2);
+        await vm.SetDwellMinutesAsync(poiId: 1, minutes: 60);
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        cut.Find($"input[aria-label=\"{DwellAria("P1")}\"]").Change(string.Empty);
+
+        cut.WaitForAssertion(() =>
+            vm.StopRows.First(r => r.PoiId == 1).DwellMinutes.Should().BeNull());
+    }
+
+    [Fact]
+    public async Task Dwell_Input_Desktop_UnplaceableRow_EntersHhmm_PersistsMinutes()
+    {
+        // An unplaceable row's dwell HH:MM picker persists canonical minutes too (AC4).
+        await using var vm = await MixedVmAsync(); // POI 99 is unplaceable
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        cut.Find($"input[aria-label=\"{DwellAria("NoCoords")}\"]").Change("00:45");
+
+        cut.WaitForAssertion(() =>
+            vm.StopRows.First(r => r.PoiId == 99).DwellMinutes.Should().Be(45));
     }
 
     [Fact]
@@ -953,7 +1029,7 @@ public class TripStopListTests : BunitTestContext
         await using var vm = await EnabledVmAsync(placeable: 2);
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
 
-        cut.Find($"input[aria-label=\"{DwellAria("P1")}\"]").Change("20");
+        cut.Find($"input[aria-label=\"{DwellAria("P1")}\"]").Change("00:20");
 
         cut.WaitForAssertion(() =>
             vm.StopRows.First(r => r.PoiId == 1).DwellMinutes.Should().Be(20));
@@ -1176,7 +1252,7 @@ public class TripStopListTests : BunitTestContext
         focusBtn.HasAttribute("blazor:onclick:stoppropagation").Should().BeTrue();
 
         // Editing the dwell input must not select the row.
-        cut.Find($"li[data-poi-id='1'] input[aria-label=\"{DwellAria(fullName)}\"]").Change("15");
+        cut.Find($"li[data-poi-id='1'] input[aria-label=\"{DwellAria(fullName)}\"]").Change("00:15");
         cut.WaitForAssertion(() => vm.StopRows.First(r => r.PoiId == 1).DwellMinutes.Should().Be(15));
         vm.SelectedStopPoiId.Should().BeNull("editing dwell must not select the row");
 

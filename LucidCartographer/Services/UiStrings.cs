@@ -97,6 +97,10 @@ public static class UiStrings
     // stop's POI name, giving the input a per-stop accessible name. The placeholder
     // hints the unit on an empty field (the old "—" placeholder string is superseded).
     public const string TripDwellPlaceholder = "min";
+    // Story 4.4 (FR-30): the desktop dwell control is a native HH:MM duration picker
+    // (<input type="time">), so its hint reads "hh:mm" instead of "min". Mobile keeps
+    // the minutes input (deferred mirror) and its "min" placeholder above.
+    public const string TripDwellHhmmPlaceholder = "hh:mm";
     public const string TripDwellAria = "Dwell time in minutes at {0}";
     public const string TripTimelinePlaceholder = "—";
     public const string TripTimelineAria = "Arrival time (computed in a later step)";
