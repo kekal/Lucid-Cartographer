@@ -37,13 +37,13 @@ development_status:
   epic-1-retrospective: done
 
   # Epic 2: Trustworthy & legible trip times
-  epic-2: in-progress
+  epic-2: done
   2-1-reconciled-travel-time-arithmetic: done
   2-2-minute-unit-reads-min: done
   2-3-self-explaining-fidelity-badges: done
   2-4-mock-default-estimate-note-and-osrm-recommendation: done
   2-5-discoverable-icon-button-tooltips: done
-  epic-2-retrospective: optional
+  epic-2-retrospective: done
 
   # Epic 3: Honest per-leg travel modes
   epic-3: backlog
