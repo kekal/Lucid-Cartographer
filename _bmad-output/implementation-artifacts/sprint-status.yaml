@@ -61,5 +61,5 @@ development_status:
   4-2-date-aware-multi-day-arrivals: done
   4-3-time-limit-as-duration-or-finish-by-deadline: done
   4-4-dwell-hhmm-picker: done
-  4-5-finish-designation-and-roundtrip-readout: backlog
+  4-5-finish-designation-and-roundtrip-readout: done
   epic-4-retrospective: optional

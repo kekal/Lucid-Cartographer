@@ -141,6 +141,116 @@ public class TripTimelineRenderTests : BunitTestContext
         cut.Markup.Should().Contain(UiStrings.TripTimelineFinishLabel);
     }
 
+    // === Story 4.5 (FR-31/32/33, UX-DR7): finish designation & roundtrip readout ===
+    // The footer's three states across the live VM+service, all copy via UiStrings.
+
+    // AC1 — no Finish (roundtrip): footer reads "Return to start", never "Finish".
+    [Fact]
+    public async Task FinishFooter_Roundtrip_ReadsReturnToStart_NotFinish()
+    {
+        var factory = Seed(placeable: 3);
+        await AddSegmentAsync(factory, 1, 2, 3600, Fidelity.Manual);
+        await AddSegmentAsync(factory, 2, 3, 3600, Fidelity.Manual);
+        await AddSegmentAsync(factory, 3, 1, 3600, Fidelity.Manual); // closing leg
+        await using var vm = await EnabledVmAsync(factory, placeable: 3);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        vm.IsRoundtrip.Should().BeTrue("no Finish ⇒ the default roundtrip shape");
+        // The footer label is the roundtrip "Return to start" — distinct from "Finish".
+        // Scope to the footer span (the per-row finish controls also carry "Finish" in
+        // their aria/title, so a whole-markup NotContain would be a false negative).
+        FinishFooterLabel(cut).Should().Be(UiStrings.TripTimelineFinishLabel,
+            "a roundtrip footer reads 'Return to start', never 'Finish' (UX-DR7)");
+    }
+
+    // AC2 — press Finish: stop pinned to N, footer switches to "Finish" + that stop's
+    // arrival, and NEVER "Return to start" while a Finish is set.
+    [Fact]
+    public async Task FinishFooter_SetFinish_ReadsFinish_PinnedToN_NeverReturnToStart()
+    {
+        var factory = Seed(placeable: 3);
+        await AddSegmentAsync(factory, 1, 2, 3600, Fidelity.Manual);
+        await AddSegmentAsync(factory, 2, 3, 3600, Fidelity.Manual);
+        await using var vm = await EnabledVmAsync(factory, placeable: 3);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        // Designate stop 3 the Finish (an open path over 3 stops).
+        await cut.InvokeAsync(() => vm.SetFinishAsync(3));
+        cut.Render();
+
+        vm.IsRoundtrip.Should().BeFalse("a distinct Finish opens the path");
+        vm.OrderedStops[^1].PoiId.Should().Be(3, "the Finish is pinned to Order N");
+        vm.OrderedStops[^1].IsFinish.Should().BeTrue();
+
+        // Footer now reads "Finish" and NEVER "Return to start" while the Finish is set.
+        FinishFooterLabel(cut).Should().Be(UiStrings.TripTimelineFinishOpenLabel,
+            "an open path footer reads 'Finish', never 'Return to start' while a Finish is set (UX-DR7)");
+        cut.Markup.Should().NotContain(UiStrings.TripTimelineFinishLabel,
+            "'Return to start' is the roundtrip-only footer label — it appears nowhere else");
+    }
+
+    // AC3 — unset Finish: footer reverts to "Return to start"; order/dwell preserved
+    // (no data loss). Dwell survival is asserted at the VM level too.
+    [Fact]
+    public async Task FinishFooter_ClearFinish_RevertsToReturnToStart_NoDataLoss()
+    {
+        var factory = Seed(placeable: 3);
+        await AddSegmentAsync(factory, 1, 2, 3600, Fidelity.Manual);
+        await AddSegmentAsync(factory, 2, 3, 3600, Fidelity.Manual);
+        await AddSegmentAsync(factory, 3, 1, 3600, Fidelity.Manual);
+        await using var vm = await EnabledVmAsync(factory, placeable: 3);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+        // Set a dwell on stop 2 so we can prove it survives the Finish round-trip.
+        await cut.InvokeAsync(() => vm.SetDwellMinutesAsync(2, 30));
+
+        await cut.InvokeAsync(() => vm.SetFinishAsync(3));
+        cut.Render();
+        FinishFooterLabel(cut).Should().Be(UiStrings.TripTimelineFinishOpenLabel);
+
+        await cut.InvokeAsync(() => vm.ClearFinishAsync());
+        cut.Render();
+
+        vm.IsRoundtrip.Should().BeTrue("clearing the Finish returns to a roundtrip");
+        FinishFooterLabel(cut).Should().Be(UiStrings.TripTimelineFinishLabel, "the footer reverts to 'Return to start'");
+
+        // No data loss: order stays 1..3 contiguous and the dwell on stop 2 survives.
+        vm.OrderedStops.Select(s => s.OrderIndex).Should().BeEquivalentTo(new[] { 1, 2, 3 });
+        vm.StopRows.First(r => r.PoiId == 2).DwellMinutes.Should().Be(30, "dwell survives the Finish set/clear");
+    }
+
+    // Story 4.5 (date-aware footer, ties to 4.2): the FOOTER readout itself shows its
+    // date when the return/finish arrival lands on a later calendar day than the start.
+    [Fact]
+    public async Task FinishFooter_MultiDayReturn_ShowsLocaleDate()
+    {
+        var factory = Seed(placeable: 2);
+        // Start 22:00; out 3h ⇒ arrival(2) 01:00 next day; closing 3h ⇒ return 04:00 next day.
+        await AddSegmentAsync(factory, 1, 2, 3 * 3600, Fidelity.Manual);
+        await AddSegmentAsync(factory, 2, 1, 3 * 3600, Fidelity.Manual);
+        await using var vm = await EnabledVmAsync(factory);
+
+        var start = new DateTime(2026, 6, 15, 22, 0, 0);
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+        await cut.InvokeAsync(() => vm.SetTripStartTimeAsync(start));
+        cut.Render();
+
+        // The return-to-start arrival is 06:00... on the NEXT day — its locale date must
+        // appear in the footer's aria-label (which carries the full date-aware ArrivalText).
+        var nextDay = start.AddHours(6); // 2026-06-16 04:00
+        nextDay.Date.Should().BeAfter(start.Date);
+        // The footer aria is "Trip ends at {0}" — match on the stable prefix before {0}
+        // so this targets the dedicated FOOTER readout, not a per-row arrival.
+        var finishAriaPrefix = UiStrings.TripTimelineFinishAria[..UiStrings.TripTimelineFinishAria.IndexOf("{0}", StringComparison.Ordinal)];
+        var footerLabel = cut.FindAll("[aria-label]")
+            .Select(e => e.GetAttribute("aria-label") ?? string.Empty)
+            .First(a => a.StartsWith(finishAriaPrefix, StringComparison.Ordinal));
+        footerLabel.Should().Contain(nextDay.ToString("d", CultureInfo.CurrentCulture),
+            "the footer return/finish arrival is date-aware on a multi-day trip (passes Vm.TripStartTime)");
+    }
+
     // === Story 4.2 (FR-27, UX-DR12): date-aware multi-day arrivals on BOTH surfaces ===
 
     [Fact]
@@ -502,5 +612,18 @@ public class TripTimelineRenderTests : BunitTestContext
         await input.ChangeAsync(new ChangeEventArgs { Value = "300" });
 
         vm.TimeBudgetMinutes.Should().Be(300);
+    }
+
+    // Story 4.5: reads the finish/return FOOTER label only (the leading <span> of the
+    // footer row whose value span carries the "Trip ends at …" aria). Scoped to the
+    // footer so the per-row finish controls' "Finish" aria/title can't leak in.
+    private static string FinishFooterLabel(IRenderedComponent<TripStopList> cut)
+    {
+        var finishAriaPrefix = UiStrings.TripTimelineFinishAria[
+            ..UiStrings.TripTimelineFinishAria.IndexOf("{0}", StringComparison.Ordinal)];
+        var valueSpan = cut.FindAll("[aria-label]")
+            .First(e => (e.GetAttribute("aria-label") ?? string.Empty).StartsWith(finishAriaPrefix, StringComparison.Ordinal));
+        // The footer is "<div><span>{label}</span><span aria-label='Trip ends at …'>…</span></div>".
+        return valueSpan.ParentElement!.Children[0].TextContent.Trim();
     }
 }

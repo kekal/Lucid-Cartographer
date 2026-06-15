@@ -535,6 +535,39 @@ public class TripViewModelTests
         vm.StartFinishAnnouncement.Should().Be(UiStrings.TripRoundtripAnnounce);
     }
 
+    // Story 4.5 (FR-33): unsetting the Finish reverts to a roundtrip with NO data loss —
+    // Stop Order, per-stop dwell, AND an unaffected interior leg's mode all survive the
+    // set/clear round-trip. (The shape flip only resets the appearing/vanishing closing
+    // leg; an interior leg whose successor is unchanged keeps its mode — Story 3.3.)
+    [Fact]
+    public async Task SetThenClearFinish_PreservesOrder_Dwell_AndInteriorLegMode()
+    {
+        var factory = SeedFactory(placeable: 3);
+        await using var vm = await EnabledVmAsync(factory, 3);
+
+        // Seed user data BEFORE designating: a dwell on stop 2 and a Drive mode on the
+        // interior leg leaving stop 1 (1→2, unaffected by the roundtrip↔open-path flip).
+        await vm.SetDwellMinutesAsync(2, 45);
+        await vm.SetLegModeAsync(1, TravelMode.Drive);
+        vm.OrderedStops.First(s => s.PoiId == 1).OutgoingTravelMode.Should().Be(TravelMode.Drive);
+
+        await vm.SetFinishAsync(3); // open path: 3 pinned to N
+        vm.IsRoundtrip.Should().BeFalse();
+        vm.OrderedStops[^1].PoiId.Should().Be(3, "Finish pinned to Order N");
+
+        await vm.ClearFinishAsync(); // back to roundtrip
+
+        vm.IsRoundtrip.Should().BeTrue();
+        vm.FinishPoiId.Should().BeNull();
+        // Order intact + contiguous.
+        vm.OrderedStops.Select(s => s.OrderIndex).Should().BeEquivalentTo(new[] { 1, 2, 3 });
+        // Dwell intact.
+        vm.StopRows.First(r => r.PoiId == 2).DwellMinutes.Should().Be(45, "dwell is preserved across the Finish round-trip");
+        // The unaffected interior leg's mode intact (no spurious reset — NFR9 / Story 3.3).
+        vm.OrderedStops.First(s => s.PoiId == 1).OutgoingTravelMode.Should().Be(TravelMode.Drive,
+            "an interior leg whose successor never changed keeps its mode — no data loss");
+    }
+
     [Fact]
     public async Task ClearStartAsync_ReleasesPin_AndAnnounces()
     {

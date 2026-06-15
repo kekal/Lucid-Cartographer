@@ -1,6 +1,14 @@
 # Story 4.5: Finish designation & roundtrip readout
 
-Status: ready-for-dev
+Status: done
+
+Review: orchestrator self-review (test-only story — `git diff --stat` confirms NO production change;
+the existing finish/return spine was already correct). Spot-checked the SetFinish footer test: it
+genuinely asserts open-path, pin-to-N (`OrderedStops[^1]` is the Finish), footer ==
+`TripTimelineFinishOpenLabel`, and "Return to start" absent (footer-scoped helper avoids the
+per-row-control false negative) — not tautological. The date-aware footer was already passing
+`Vm.TripStartTime` via `ArrivalText` (Story 4.2). 916 fast + 20 Trip integration + 55 mobile green;
+build clean.
 
 ## Story
 
@@ -71,8 +79,31 @@ found, fix it in the VM/ordering (not the component) and add a regression test.
 
 ## Dev Agent Record
 
-(to be filled)
+Verify-and-fix: the spine was already correct, no production code changed. Verified:
+- AC1 roundtrip: `IsRoundtrip => FinishPoiId is null`; footer picks `TripTimelineFinishLabel`
+  ("Return to start") + the return-to-Start arrival (`Timeline.FinishOrReturn`).
+- AC2 SetFinish: `SetFinishAsync` → `TripOrderingService.SetFinishAsync` pins the stop to
+  Order N (`OrderedStops[^1].IsFinish`), `IsRoundtrip` flips false, footer switches to
+  `TripTimelineFinishOpenLabel` ("Finish") + that stop's arrival; never "Return to start".
+- AC3 ClearFinish: reverts to roundtrip, closing leg restored, Stop Order/dwell/interior
+  leg mode all preserved (no data loss).
+- Date-aware footer (4.2 tie-in): the footer already calls `ArrivalText(finish)`, which
+  threads `Vm.TripStartTime` into `TravelTimeFormatting.Arrival` → `WallClockText` shows the
+  date for a later-day return/finish. ALREADY correct — no fix needed.
+
+No bug found; added coverage only. No new ctor dependency. Build clean (0 warnings,
+TreatWarningsAsErrors). Fast 916 passed, Trip integration 20 passed, Mobile 55 passed.
+
+Tests added:
+- `TripTimelineRenderTests.cs` (component, real VM+service): `FinishFooter_Roundtrip_…`
+  (footer = "Return to start"), `FinishFooter_SetFinish_…` (footer = "Finish", pinned to N,
+  never "Return to start"), `FinishFooter_ClearFinish_RevertsToReturnToStart_NoDataLoss`
+  (revert + dwell survives), `FinishFooter_MultiDayReturn_ShowsLocaleDate` (footer aria
+  carries the next-day date). Added a `FinishFooterLabel` helper that scopes the assertion
+  to the footer span (the per-row Finish controls also carry "Finish" in aria/title).
+- `TripViewModelTests.cs` (VM): `SetThenClearFinish_PreservesOrder_Dwell_AndInteriorLegMode`.
 
 ## File List
 
-(to be filled)
+- LucidCartographer.Tests/Components/Trip/TripTimelineRenderTests.cs (tests + helper)
+- LucidCartographer.Tests/ViewModels/TripViewModelTests.cs (no-data-loss VM test)
