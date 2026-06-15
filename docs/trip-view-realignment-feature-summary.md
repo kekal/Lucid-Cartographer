@@ -37,7 +37,8 @@ span real calendar days with a goal it can be held to. By feature group:
   feature's one schema migration.
 - **G/H — Multi-day schedule & honest finish (E4):** the start is a real date+time, arrivals roll
   across days showing their dates, the time limit can be an HH:MM duration or a finish-by deadline
-  (with an "Over limit" warn), dwell uses an HH:MM picker, and a designated Finish reads "Finish" +
+  (with an "Over limit" warn), the time-limit and dwell durations are HH:MM text fields (not a
+  `type="time"` clock — a duration has no AM/PM), and a designated Finish reads "Finish" +
   its dated arrival instead of "Return to start" — revertably.
 
 **Single canonical order:** Stop Order is now one ordering for the collection — the plain list

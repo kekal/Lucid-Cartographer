@@ -43,7 +43,7 @@ Flip Trip View on for a Collection and it becomes an ordered, mapped trip:
 
 Wave-1 affordances exist on both the desktop and `Mobile*` render paths. Wave-2 added
 desktop-only **controls** (per-leg mode pill, leg-time inline edit, datetime-local
-start, HH:MM dwell/time-limit pickers) while its **shared logic** (the reconciled
+start, HH:MM dwell/time-limit text fields) while its **shared logic** (the reconciled
 display model, per-leg-mode VM projection, date-aware formatting, `UiStrings`) reaches
 mobile by nature — `MobileTripPanel` stays correct, only its new controls are deferred
 to the mirror phase (see "Deferred / tech-debt"). All copy routes through `UiStrings`.
@@ -97,10 +97,17 @@ cache, sole `OrderIndex` writer, background compute) and added:
   (`TravelTimeFormatting.WallClockText`). The renamed **Time limit** is entered as an
   HH:MM duration OR a finish-by deadline computed **once** as `deadline − start` and
   stored as `TimeBudgetMinutes` (TRIP-SCHEDULE-01 — never recomputed); a soft amber
-  **"Over limit"** chip shows when the known total exceeds it. Dwell uses an HH:MM
-  picker. A designated Finish reads "Finish" + its dated arrival; roundtrip default
-  reads "Return to start" (`IsRoundtrip => FinishPoiId is null`). All HH:MM/date ↔
-  canonical conversions happen only at the UI edge.
+  **"Over limit"** chip shows when the known total exceeds it. The Time-limit duration
+  and the per-stop **Dwell** are HH:MM **text inputs** (`type="text"`, not `type="time"`):
+  a duration is not a time of day, so the locale AM/PM clock affordance of `type="time"`
+  is meaningless/misleading in 12-hour locales. They parse strictly with
+  `TimeOnly.TryParseExact(["H:mm","HH:mm"])` so a seconds-bearing (`01:30:00`),
+  single-digit-minute (`2:5`), or bare-minute (`90`) entry is rejected (no write) —
+  restoring the structural rigor `type="time"` used to enforce. A designated Finish reads
+  "Finish" + its dated arrival; roundtrip default reads "Return to start"
+  (`IsRoundtrip => FinishPoiId is null`). All HH:MM/date ↔ canonical conversions happen
+  only at the UI edge. (The mobile panel keeps its numeric-minutes dwell input — the
+  per-leg/schedule mirror to mobile is still deferred.)
 
 ## Data model
 
@@ -436,8 +443,8 @@ Two overloads:
 
 - **Mirror-to-mobile is deferred.** `MobileTripPanel` still carries the Wave-1 controls
   (incl. the inert trip-wide `TravelModeSelector`); the Wave-2 desktop controls (per-leg
-  mode pill, connector inline edit, datetime-local start, HH:MM time-limit / finish-by /
-  dwell pickers) are NOT yet surfaced on mobile. Shared logic/data already reach mobile
+  mode pill, connector inline edit, datetime-local start, finish-by deadline picker, and
+  the HH:MM time-limit / dwell text fields) are NOT yet surfaced on mobile. Shared logic/data already reach mobile
   correctly — only the controls are pending.
 - **`PoiCollection.TravelMode` is a dead-ish column** (RD1a fallback): no longer drives
   legs, but still written by the inert mobile selector and not dropped. Removal is tied
