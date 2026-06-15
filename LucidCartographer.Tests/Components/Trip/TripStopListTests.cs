@@ -956,4 +956,266 @@ public class TripStopListTests : BunitTestContext
         input.HasAttribute("blazor:onclick:stoppropagation").Should().BeTrue();
         input.HasAttribute("blazor:onkeydown:stoppropagation").Should().BeTrue();
     }
+
+    // === Story 1.2: wide trip-scoped table with trip-only columns ===
+
+    private static string FocusAria(string name) =>
+        string.Format(CultureInfo.CurrentCulture, UiStrings.TripFocusOnMapAria, name);
+
+    private static string OpenMapsAria(string name) =>
+        string.Format(CultureInfo.CurrentCulture, UiStrings.TripOpenInGoogleMapsAria, name);
+
+    /// <summary>
+    /// Seed with rich POI fields (full name, address, enrichment flags, GoogleMapsUrl)
+    /// so the Story 1.2 Name column + Actions have real data to project. P1 enriched
+    /// with an explicit maps URL + address; P2 needs-manual-url; P3 waiting (default).
+    /// </summary>
+    private static async Task<TripViewModel> RichVmAsync()
+    {
+        var factory = TestDbHelper.CreateFactory();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.PoiCollections.Add(new PoiCollection { Id = CollectionId, Name = "Trip", Color = "#005bbf" });
+            db.Pois.Add(new Poi
+            {
+                Id = 1,
+                Name = "A Very Long Point Of Interest Name That Should Not Be Truncated Away",
+                Latitude = 51, Longitude = 21, AddedDate = new DateTime(2025, 1, 1),
+                Address = "123 Example Street, Krakow",
+                IsEnriched = true,
+                GoogleMapsUrl = "https://www.google.com/maps/place/Wawel",
+            });
+            db.Pois.Add(new Poi
+            {
+                Id = 2, Name = "P2", Latitude = 52, Longitude = 22, AddedDate = new DateTime(2025, 1, 2),
+                EnrichmentNeedsManualUrl = true,
+            });
+            db.Pois.Add(new Poi
+            {
+                Id = 3, Name = "P3", Latitude = 53, Longitude = 23, AddedDate = new DateTime(2025, 1, 3),
+            });
+            db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = 1, PoiCollectionId = CollectionId });
+            db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = 2, PoiCollectionId = CollectionId });
+            db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = 3, PoiCollectionId = CollectionId });
+            await db.SaveChangesAsync();
+        }
+
+        var writeLock = new SqliteWriteLock();
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
+        var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), TestDbHelper.CreateInvalidationService(factory), NullLogger<TripViewModel>.Instance);
+        await vm.LoadAsync(CollectionId, 3);
+        await vm.ToggleAsync();
+        return vm;
+    }
+
+    [Fact]
+    public async Task WideTable_RendersAllSevenColumns_PerRow()
+    {
+        // AC1/FR-2: each row shows reorder gutter (drag handle + ▲▼), stop-# badge,
+        // name, dwell, arrival, start/finish, and actions (Focus + Open-in-Maps).
+        await using var vm = await RichVmAsync();
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        var row = cut.Find("li[data-poi-id='1']");
+        // Reorder gutter: drag handle + ▲▼.
+        row.QuerySelector($"[aria-label=\"{string.Format(CultureInfo.CurrentCulture, UiStrings.TripDragHandle, "A Very Long Point Of Interest Name That Should Not Be Truncated Away")}\"]").Should().NotBeNull();
+        row.QuerySelector($"button[aria-label=\"{MoveUpLabel("A Very Long Point Of Interest Name That Should Not Be Truncated Away")}\"]").Should().NotBeNull();
+        row.QuerySelector($"button[aria-label=\"{MoveDownLabel("A Very Long Point Of Interest Name That Should Not Be Truncated Away")}\"]").Should().NotBeNull();
+        // Stop-# badge.
+        var badgeAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripStopBadgeAria, 1, 3);
+        row.QuerySelector($"[aria-label=\"{badgeAria}\"]").Should().NotBeNull();
+        // Dwell input.
+        row.QuerySelector($"input[aria-label=\"{DwellAria("A Very Long Point Of Interest Name That Should Not Be Truncated Away")}\"]").Should().NotBeNull();
+        // Start/Finish controls.
+        row.QuerySelector($"button[aria-label=\"{SetStartLabel("A Very Long Point Of Interest Name That Should Not Be Truncated Away")}\"]").Should().NotBeNull();
+        row.QuerySelector($"button[aria-label=\"{SetFinishLabel("A Very Long Point Of Interest Name That Should Not Be Truncated Away")}\"]").Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task WideTable_ShowsFullName_NotTruncatedAway()
+    {
+        // AC1/UX-DR1: the full POI name is present (not clipped to a tiny width).
+        await using var vm = await RichVmAsync();
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        const string fullName = "A Very Long Point Of Interest Name That Should Not Be Truncated Away";
+        cut.Find("li[data-poi-id='1']").TextContent.Should().Contain(fullName);
+        // The name span must not carry the `truncate` utility (the old cramped behavior).
+        var nameSpan = cut.Find("li[data-poi-id='1'] span[title=\"" + fullName + "\"]");
+        nameSpan.GetAttribute("class").Should().NotContain("truncate");
+    }
+
+    [Fact]
+    public async Task WideTable_ShowsAddressSubLine_AndEnrichmentIcon()
+    {
+        // AC1: address sub-line (when present) + enrichment-state icon mirroring PoiTable.
+        await using var vm = await RichVmAsync();
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        // Address sub-line on the enriched POI with an address.
+        cut.Find("li[data-poi-id='1']").TextContent.Should().Contain("123 Example Street, Krakow");
+        // Enriched ⇒ location_on/muted with the "Enriched" title.
+        var enrichedIcon = cut.Find($"li[data-poi-id='1'] [title=\"{UiStrings.TripEnrichmentEnriched}\"]");
+        enrichedIcon.TextContent.Trim().Should().Be("location_on");
+        // Needs-manual-url ⇒ error/red.
+        var failedIcon = cut.Find($"li[data-poi-id='2'] [title=\"{UiStrings.TripEnrichmentFailed}\"]");
+        failedIcon.TextContent.Trim().Should().Be("error");
+        // Waiting (default) ⇒ hourglass_empty/amber.
+        var waitingIcon = cut.Find($"li[data-poi-id='3'] [title=\"{UiStrings.TripEnrichmentWaiting}\"]");
+        waitingIcon.TextContent.Trim().Should().Be("hourglass_empty");
+    }
+
+    [Fact]
+    public async Task WideTable_Actions_AreExactly_Focus_AndOpenInGoogleMaps()
+    {
+        // AC2: Actions are Focus on map + Open in Google Maps ONLY — no select checkbox,
+        // coords, collection chips, added-date, move-to/copy/delete, no batch toolbar.
+        await using var vm = await RichVmAsync();
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        const string fullName = "A Very Long Point Of Interest Name That Should Not Be Truncated Away";
+        var row = cut.Find("li[data-poi-id='1']");
+
+        // Focus on map present.
+        row.QuerySelector($"button[aria-label=\"{FocusAria(fullName)}\"]").Should().NotBeNull();
+        // Open in Google Maps anchor present with the projected URL.
+        var openLink = row.QuerySelector($"a[aria-label=\"{OpenMapsAria(fullName)}\"]");
+        openLink.Should().NotBeNull();
+        openLink!.GetAttribute("href").Should().Be("https://www.google.com/maps/place/Wawel");
+        openLink.GetAttribute("target").Should().Be("_blank");
+
+        // Absent: the PoiTable management actions/columns.
+        cut.FindAll("input[type='checkbox']").Should().BeEmpty("no Select checkbox");
+        cut.Markup.Should().NotContain("drive_file_move", "no Move-to-collection action");
+        cut.Markup.Should().NotContain("content_copy", "no Copy action");
+        cut.Markup.Should().NotContain("delete", "no Delete action");
+        cut.Markup.Should().NotContain(UiStrings.FilteredResults, "no PoiTable batch toolbar/header");
+    }
+
+    [Fact]
+    public async Task WideTable_PerLegTime_IsNotInsideAStopRow()
+    {
+        // AC2/FR-3: per-leg travel time/distance/fidelity lives in the inter-row
+        // connector, NOT inside any stop <li>.
+        var factory = TestDbHelper.CreateFactory();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.PoiCollections.Add(new PoiCollection { Id = CollectionId, Name = "Trip", Color = "#005bbf" });
+            for (var i = 1; i <= 2; i++)
+            {
+                db.Pois.Add(new Poi { Id = i, Name = $"P{i}", Latitude = 50 + i, Longitude = 20 + i, AddedDate = new DateTime(2025, 1, i) });
+                db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = i, PoiCollectionId = CollectionId });
+            }
+            db.RouteSegments.Add(new RouteSegment { FromPoiId = 1, ToPoiId = 2, TravelMode = TravelMode.AnyAir, DurationSeconds = 4800, DistanceMeters = 12000, Fidelity = Fidelity.Estimated, Source = "Mock", ComputedAt = DateTime.UtcNow });
+            db.RouteSegments.Add(new RouteSegment { FromPoiId = 2, ToPoiId = 1, TravelMode = TravelMode.AnyAir, DurationSeconds = 4800, DistanceMeters = 12000, Fidelity = Fidelity.Estimated, Source = "Mock", ComputedAt = DateTime.UtcNow });
+            await db.SaveChangesAsync();
+        }
+        var writeLock = new SqliteWriteLock();
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
+        await using var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), TestDbHelper.CreateInvalidationService(factory), NullLogger<TripViewModel>.Instance);
+        await vm.LoadAsync(CollectionId, 2);
+        await vm.ToggleAsync();
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        // The leg time + distance render in a connector div, not in a stop <li>.
+        var connector = cut.Find("div.trip-leg-connector");
+        connector.TextContent.Should().Contain("1h 20m").And.Contain("12 km");
+        connector.Closest("li").Should().BeNull("the per-leg info must sit between rows, not inside a stop row");
+
+        // No stop row contains the per-leg distance or the fidelity badge. (The leg
+        // TIME is not asserted here because the Arrival column — which legitimately
+        // STAYS a row column — can share the same duration string as the offset; the
+        // connector check above already proves the leg time lives between rows.)
+        foreach (var li in cut.FindAll("li[data-poi-id]"))
+        {
+            li.TextContent.Should().NotContain("12 km", "per-leg distance is not a stop-row column");
+            li.TextContent.Should().NotContain(UiStrings.TripFidelityEstimated, "the fidelity badge is not a stop-row column");
+        }
+    }
+
+    [Fact]
+    public async Task WideTable_RowClickSelects_ButActionClicksDoNot()
+    {
+        // AC3: row click selects; dwell/action clicks stopPropagation (no selection).
+        await using var vm = await RichVmAsync();
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        const string fullName = "A Very Long Point Of Interest Name That Should Not Be Truncated Away";
+
+        // Both actions stopPropagation so a click on them never bubbles to select the
+        // row (structural guard — the Open-in-Maps anchor navigates, the Focus button
+        // has its own handler; both declare onclick stopPropagation in markup).
+        var openLink = cut.Find($"li[data-poi-id='1'] a[aria-label=\"{OpenMapsAria(fullName)}\"]");
+        openLink.HasAttribute("blazor:onclick:stoppropagation").Should().BeTrue();
+        var focusBtn = cut.Find($"li[data-poi-id='1'] button[aria-label=\"{FocusAria(fullName)}\"]");
+        focusBtn.HasAttribute("blazor:onclick:stoppropagation").Should().BeTrue();
+
+        // Editing the dwell input must not select the row.
+        cut.Find($"li[data-poi-id='1'] input[aria-label=\"{DwellAria(fullName)}\"]").Change("15");
+        cut.WaitForAssertion(() => vm.StopRows.First(r => r.PoiId == 1).DwellMinutes.Should().Be(15));
+        vm.SelectedStopPoiId.Should().BeNull("editing dwell must not select the row");
+
+        // A genuine row-body click DOES select.
+        cut.Find("li[data-poi-id='1']").Click();
+        cut.WaitForAssertion(() => vm.SelectedStopPoiId.Should().Be(1));
+    }
+
+    [Fact]
+    public async Task WideTable_FocusButton_InvokesOnFocusClicked_WhenWired()
+    {
+        // AC1/FR-2: the Focus-on-map button wires to the host callback (parity with
+        // PoiTable's OnFocusClicked → MapPageViewModel.HandleFocusPoiAsync).
+        await using var vm = await RichVmAsync();
+        int? focused = null;
+        var cut = RenderComponent<TripStopList>(p => p
+            .Add(x => x.Vm, vm)
+            .Add(x => x.OnFocusClicked, (int id) => focused = id));
+
+        const string fullName = "A Very Long Point Of Interest Name That Should Not Be Truncated Away";
+        await cut.Find($"li[data-poi-id='1'] button[aria-label=\"{FocusAria(fullName)}\"]").ClickAsync(new MouseEventArgs());
+
+        focused.Should().Be(1, "Focus on map forwards the POI id to the host map-focus handler");
+        vm.SelectedStopPoiId.Should().BeNull("with the host wired, Focus does not fall back to selecting the row");
+    }
+
+    [Fact]
+    public async Task WideTable_AllRowsShareTheSameGridTemplate_AcrossVariedStates()
+    {
+        // AC4/FR-11/12: columns stay aligned across placeable, unplaceable, pinned, and
+        // long/short-name states — every row uses the SAME grid-template-columns.
+        var factory = SeedFactory(placeable: 4);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            // P1 pinned Start, P4 pinned Finish; plus an unplaceable POI.
+            var c = await db.PoiCollections.FirstAsync(x => x.Id == CollectionId);
+            c.StartPoiId = 1;
+            c.FinishPoiId = 4;
+            db.Pois.Add(new Poi { Id = 99, Name = "NoCoords", Latitude = null, Longitude = null, AddedDate = new DateTime(2025, 1, 9) });
+            db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = 99, PoiCollectionId = CollectionId });
+            await db.SaveChangesAsync();
+        }
+        var writeLock = new SqliteWriteLock();
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
+        await using var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), TestDbHelper.CreateInvalidationService(factory), NullLogger<TripViewModel>.Instance);
+        await vm.LoadAsync(CollectionId, 4);
+        await vm.ToggleAsync();
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        var rows = cut.FindAll("li[data-poi-id]");
+        rows.Should().HaveCount(5, "4 placeable (incl. pinned) + 1 unplaceable");
+
+        // Every row — placeable, pinned, long-name, and the unplaceable one — declares
+        // the identical grid-template-columns so the columns line up (FR-11/12).
+        var templates = rows
+            .Select(r => r.GetAttribute("style"))
+            .Where(s => s is not null)
+            .Select(s => s!)
+            .ToList();
+        templates.Should().HaveCount(5);
+        templates.Should().OnlyContain(s => s.Contains("display:grid"));
+        var first = templates[0];
+        templates.Should().AllBe(first, "all rows share one column template ⇒ aligned columns");
+    }
 }

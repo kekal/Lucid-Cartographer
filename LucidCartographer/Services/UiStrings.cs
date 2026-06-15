@@ -79,6 +79,18 @@ public static class UiStrings
     // {0} = stop count; announced via the panel's aria-live region.
     public const string TripStopCountAria = "{0} stop trip";
     public const string TripStopListEmpty = "No placeable stops yet.";
+    // Story 1.2 (FR-2): the wide trip-table row Actions — Focus on map + Open in
+    // Google Maps ONLY. {0} = POI name for the per-row accessible name; the title
+    // is the short shared label. Mirrors PoiTable's intent, routed through UiStrings.
+    public const string TripFocusOnMap = "Focus on map";
+    public const string TripFocusOnMapAria = "Focus map on {0}";
+    public const string TripOpenInGoogleMaps = "Open in Google Maps";
+    public const string TripOpenInGoogleMapsAria = "Open {0} in Google Maps";
+    // Story 1.2: enrichment-state icon titles for the Name column (mirrors PoiTable's
+    // mapping — error/red, location_on/muted, hourglass_empty/amber).
+    public const string TripEnrichmentFailed = "Enrichment failed — paste a Google Maps URL";
+    public const string TripEnrichmentEnriched = "Enriched";
+    public const string TripEnrichmentWaiting = "Waiting for enrichment";
     // {0} = this stop's number, {1} = total stops. Row-level screen-reader label.
     public const string TripStopBadgeAria = "Stop {0} of {1}";
     // TRIP-DWELL-01 (Story 2.5): the dwell-minutes input on each stop row. {0} = the

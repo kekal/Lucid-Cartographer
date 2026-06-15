@@ -141,39 +141,67 @@
     }
     else
     {
-        @* `trip-stop-list` scopes the JS scroll-into-view helper (TRIP-SELECT-05). *@
+        @* Story 1.2 (FR-2/11/12): a WIDE, full-width, column-ALIGNED trip-scoped
+           table. Every row shares ONE CSS-grid template (GridTemplate) so the seven
+           columns — reorder gutter · stop-# badge · name · dwell · arrival ·
+           start/finish · actions — line up across every row state (placeable,
+           unplaceable, pinned Start/Finish, dwell set/empty, long/short names).
+           Rendered as <li> rows (no <table> — the desktop-takeover tests assert no
+           <table> when Trip View is on) inside the <ul> that scopes the JS
+           scroll-into-view helper (TRIP-SELECT-05). Per-leg travel info is NOT a row
+           column: it renders as an interim single-line connector BETWEEN consecutive
+           rows (Story 1.3 turns it into the real LegConnector). *@
         <ul class="flex-1 overflow-y-auto trip-stop-list" aria-label="@UiStrings.TripStopListAria">
-            @foreach (var row in Vm.StopRows)
+            @for (var index = 0; index < Vm.StopRows.Count; index++)
             {
+                var row = Vm.StopRows[index];
                 @if (!row.IsPlaceable)
                 {
                     @* [TRIP-PLACE-04] "Not placeable" row (UX-DR10/UX-DR11): kept in
                        the list — never dropped — but de-emphasized, NOT selectable
-                       (no marker to pan to), and with the not-placeable marker
-                       replacing the routed order badge so the placeable numbering
-                       reads contiguous with no visible gap. The aria-label tells a
-                       screen reader the honest story; the title carries the full
-                       provenance sentence. *@
+                       (no marker to pan to). Uses the SAME grid template so its
+                       columns align with the placeable rows; the not-placeable marker
+                       fills the badge slot and the "Not placeable" note sits in the
+                       arrival slot. *@
                     <li @key="row.PoiId" data-poi-id="@row.PoiId"
                         aria-label="@UiStrings.TripStopNotPlaceableAria"
                         title="@UiStrings.TripStopNotPlaceableDetail"
-                        class="flex items-center gap-2 px-2 py-2 border-b border-surface-container opacity-60">
-                        <span class="w-4 flex-shrink-0" aria-hidden="true"></span>
+                        style="display:grid;grid-template-columns:@GridTemplate;align-items:center"
+                        class="gap-2 px-2 py-2 border-b border-surface-container opacity-60">
+                        @* Reorder gutter — empty (unplaceable rows don't reorder). *@
+                        <span aria-hidden="true"></span>
                         @* Not-placeable marker in the badge slot — outlined, muted,
                            no number (explicit empty markers are first-class). *@
-                        <span class="inline-flex items-center justify-center w-5 h-5 rounded-full border border-on-surface-variant text-on-surface-variant text-xs flex-shrink-0"
+                        <span class="inline-flex items-center justify-center w-5 h-5 rounded-full border border-on-surface-variant text-on-surface-variant text-xs"
                               aria-hidden="true">—</span>
-                        <span class="flex-1 min-w-0 truncate text-sm text-on-surface-variant" title="@row.Name">@row.Name</span>
-                        <span class="text-xs text-on-surface-variant flex-shrink-0">@UiStrings.TripStopNotPlaceable</span>
+                        @* Name column — full name (no truncation) + address sub-line
+                           + enrichment icon, identical shape to the placeable row. *@
+                        <div class="min-w-0">
+                            <div class="flex items-center gap-1.5 min-w-0">
+                                @{ var (uIcon, uIconClass, uIconTitle) = EnrichmentIcon(row); }
+                                <span class="material-symbols-outlined text-base @uIconClass flex-shrink-0" aria-hidden="true" title="@uIconTitle">@uIcon</span>
+                                <span class="text-sm text-on-surface-variant break-words" title="@row.Name">@row.Name</span>
+                            </div>
+                            @if (!string.IsNullOrEmpty(row.Address))
+                            {
+                                <div class="text-xs text-on-surface-variant break-words">@row.Address</div>
+                            }
+                        </div>
                         @* TRIP-DWELL-01 (Story 2.5, AC4): an unplaceable stop has no
                            travel time but still carries dwell. The row is not
                            selectable, so no stopPropagation is needed here. *@
                         <input type="number" min="0" max="@TripViewModel.MaxDwellMinutes" inputmode="numeric"
-                               class="w-10 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface flex-shrink-0"
+                               class="w-12 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
                                placeholder="@UiStrings.TripDwellPlaceholder"
                                aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDwellAria, row.Name)"
                                value="@DwellMinutes(row)"
                                @onchange="e => OnDwellMinutesChangedAsync(row.PoiId, e.Value)" />
+                        @* Arrival slot — the unplaceable note (no routed arrival). *@
+                        <span class="text-xs text-on-surface-variant">@UiStrings.TripStopNotPlaceable</span>
+                        @* Start/Finish slot — empty (unplaceable rows can't be pinned). *@
+                        <span aria-hidden="true"></span>
+                        @* Actions slot — empty for an unplaceable row. *@
+                        <span aria-hidden="true"></span>
                     </li>
                 }
                 else
@@ -182,10 +210,12 @@
                     var selected = Vm.SelectedStopPoiId == row.PoiId;
                     var number = row.DisplayOrder!.Value;
                     var role = Vm.StopRole(row.PoiId);
+                    var arrival = ArrivalFor(row.PoiId);
                     @* TRIP-SELECT-05: selectable row — click / Enter / Space select the
                        stop (list→map). data-poi-id lets the scroll helper locate it on
                        the map→list direction. Selected rows get a primary-token ring +
-                       tint and expose aria-current to AT (AC3). *@
+                       tint and expose aria-current to AT (AC3). The shared grid template
+                       keeps the seven columns aligned across every row state (FR-11/12). *@
                     <li @key="row.PoiId" data-poi-id="@row.PoiId"
                         role="button" tabindex="0"
                         aria-current="@(selected ? "true" : null)"
@@ -198,161 +228,112 @@
                         @ondrop="() => OnDropAsync(stop.OrderIndex)"
                         @ondrop:preventDefault
                         @ondragend="OnDragEnd"
-                        class="flex items-center gap-1 px-2 py-2 border-b border-surface-container cursor-pointer @(selected ? "bg-primary/10 ring-1 ring-inset ring-primary" : "hover:bg-surface-container")">
-                        @* TRIP-ORDER-04: drag handle (pointer reorder path, UX-DR3).
-                           The whole row is draggable (native HTML5 DnD, no JS module);
-                           the handle is the visual + accessible affordance for it. *@
-                        <span class="w-4 flex-shrink-0 cursor-grab text-on-surface-variant select-none"
-                              aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDragHandle, row.Name)"
-                              title="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDragHandle, row.Name)">
-                            <span aria-hidden="true">⠿</span>
+                        style="display:grid;grid-template-columns:@GridTemplate;align-items:center"
+                        class="gap-2 px-2 py-2 border-b border-surface-container cursor-pointer @(selected ? "bg-primary/10 ring-1 ring-inset ring-primary" : "hover:bg-surface-container")">
+                        @* COLUMN 1 — reorder gutter: drag handle (⠿) + ▲▼ move buttons.
+                           TRIP-ORDER-04: the whole row is draggable (native HTML5 DnD);
+                           the handle is the visual + accessible affordance. TRIP-ORDER-03:
+                           the ▲▼ are real Tab-reachable buttons, disabled at the pin-aware
+                           window edges; both stopPropagation so reordering never selects. *@
+                        <span class="flex items-center gap-0.5">
+                            <span class="cursor-grab text-on-surface-variant select-none"
+                                  aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDragHandle, row.Name)"
+                                  title="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDragHandle, row.Name)">
+                                <span aria-hidden="true">⠿</span>
+                            </span>
+                            <span class="flex flex-col">
+                                <button type="button"
+                                        class="inline-flex items-center justify-center w-5 h-5 rounded text-on-surface-variant enabled:hover:bg-surface-container-high disabled:opacity-40"
+                                        aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopUp, row.Name)"
+                                        disabled="@(!Vm.CanMoveUp(stop))"
+                                        @onclick="() => Vm.MoveStopUpAsync(row.PoiId)"
+                                        @onclick:stopPropagation
+                                        @onkeydown:stopPropagation>
+                                    <span aria-hidden="true">▲</span>
+                                </button>
+                                <button type="button"
+                                        class="inline-flex items-center justify-center w-5 h-5 rounded text-on-surface-variant enabled:hover:bg-surface-container-high disabled:opacity-40"
+                                        aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopDown, row.Name)"
+                                        disabled="@(!Vm.CanMoveDown(stop))"
+                                        @onclick="() => Vm.MoveStopDownAsync(row.PoiId)"
+                                        @onclick:stopPropagation
+                                        @onkeydown:stopPropagation>
+                                    <span aria-hidden="true">▼</span>
+                                </button>
+                            </span>
                         </span>
-                        @* Order badge: primary-filled numbered circle (UX-DR2). The
-                           descriptive "Stop X of Y" label conveys the position; the
-                           bare numeral is hidden so it isn't read twice. The number is
-                           the presented routed order over the placeable subset —
-                           contiguous 1..M ([TRIP-ORDER-UNPLACE-01]).
-                           TRIP-STARTFINISH-03: a pinned Start badge carries a distinct
-                           primary ring, a pinned Finish a distinct muted ring; the
-                           numeral stays readable and the aria-label names the role. *@
-                        <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary text-on-primary text-xs font-bold flex-shrink-0@(role == TripStopRole.Start ? " ring-2 ring-primary ring-offset-1" : role == TripStopRole.Finish ? " ring-2 ring-on-surface-variant ring-offset-1" : "")"
-                              aria-label="@BadgeAria(role, number)">
-                            <span aria-hidden="true">@number</span>
+                        @* COLUMN 2 — Stop # badge with Start/Finish ring + glyph.
+                           Primary-filled numbered circle (UX-DR2); the descriptive
+                           "Stop X of Y" label conveys the position. A pinned Start
+                           carries a distinct primary ring + trip_origin glyph, a Finish
+                           a muted ring + sports_score glyph (TRIP-STARTFINISH-03). *@
+                        <span class="flex items-center gap-1">
+                            <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary text-on-primary text-xs font-bold flex-shrink-0@(role == TripStopRole.Start ? " ring-2 ring-primary ring-offset-1" : role == TripStopRole.Finish ? " ring-2 ring-on-surface-variant ring-offset-1" : "")"
+                                  aria-label="@BadgeAria(role, number)">
+                                <span aria-hidden="true">@number</span>
+                            </span>
+                            @if (role == TripStopRole.Start)
+                            {
+                                <span class="material-symbols-outlined text-primary flex-shrink-0" style="font-size:16px" aria-hidden="true">trip_origin</span>
+                            }
+                            else if (role == TripStopRole.Finish)
+                            {
+                                <span class="material-symbols-outlined text-on-surface-variant flex-shrink-0" style="font-size:16px" aria-hidden="true">sports_score</span>
+                            }
                         </span>
-                        @* TRIP-STARTFINISH-03: distinct Start/Finish glyph beside the
-                           badge (Material Symbols Outlined per DESIGN.md icon spec) —
-                           decorative; the badge's aria-label carries the role. *@
-                        @if (role == TripStopRole.Start)
-                        {
-                            <span class="material-symbols-outlined text-primary flex-shrink-0" style="font-size:16px" aria-hidden="true">trip_origin</span>
-                        }
-                        else if (role == TripStopRole.Finish)
-                        {
-                            <span class="material-symbols-outlined text-on-surface-variant flex-shrink-0" style="font-size:16px" aria-hidden="true">sports_score</span>
-                        }
-                        <span class="flex-1 min-w-0 truncate text-sm text-on-surface" title="@row.Name">@row.Name</span>
-                        @* TRIP-DWELL-01 (Story 2.5): per-stop dwell minutes input,
-                           on every row (placeable AND unplaceable). Prefills the
-                           persisted value; empty clears (null). stopPropagation so
-                           editing dwell never selects/reorders the row; kept compact
-                           with no layout-shifting sibling (2.2 selection lesson). *@
+                        @* COLUMN 3 — Name: the FULL POI name (UX-DR1, never truncated to
+                           an unreadable width — it wraps in the wide space) + the muted
+                           address sub-line (only when present) + the enrichment-state
+                           icon (mirrors PoiTable's mapping). *@
+                        <div class="min-w-0">
+                            <div class="flex items-center gap-1.5 min-w-0">
+                                @{ var (icon, iconClass, iconTitle) = EnrichmentIcon(row); }
+                                <span class="material-symbols-outlined text-base @iconClass flex-shrink-0" aria-hidden="true" title="@iconTitle">@icon</span>
+                                <span class="text-sm font-medium text-on-surface break-words" title="@row.Name">@row.Name</span>
+                            </div>
+                            @if (!string.IsNullOrEmpty(row.Address))
+                            {
+                                <div class="text-xs text-on-surface-variant break-words">@row.Address</div>
+                            }
+                        </div>
+                        @* COLUMN 4 — Dwell input (TRIP-DWELL-01). type=number stays here
+                           (the HH:MM picker is Story 4.4). stopPropagation so editing
+                           never selects/reorders the row (2.2 selection lesson). *@
                         <input type="number" min="0" max="@TripViewModel.MaxDwellMinutes" inputmode="numeric"
-                               class="w-10 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface flex-shrink-0"
+                               class="w-12 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
                                placeholder="@UiStrings.TripDwellPlaceholder"
                                aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDwellAria, row.Name)"
                                value="@DwellMinutes(row)"
                                @onchange="e => OnDwellMinutesChangedAsync(row.PoiId, e.Value)"
                                @onclick:stopPropagation
                                @onkeydown:stopPropagation />
-                        @* TRIP-TRAVELTIME-01 (AC4): the leg DEPARTING this stop —
-                           travel time + distance + Fidelity badge. No cache row yet
-                           ⇒ "—" + computing. Placeholder/null fidelity ⇒ no badge. *@
-                        @{ var arrival = ArrivalFor(row.PoiId); }
-                        <span class="flex items-center gap-1.5 flex-shrink-0">
-                            @{ var leg = LegFrom(row.PoiId); }
-                            @if (leg is not null)
+                        @* COLUMN 5 — Arrival (TRIP-TIMELINE-01): the per-stop honest
+                           arrival (relative offset always). Stays a row column. In the
+                           wide region it can show the fuller ArrivalText. *@
+                        <span class="text-xs text-on-surface-variant text-right">
+                            @if (arrival is not null)
                             {
-                                <span class="flex flex-col items-end leading-tight min-w-0 max-w-[3.5rem]">
-                                    @* TRIP-TIMELINE-01 (Story 2.6, AC2/AC3): the honest
-                                       arrival, stacked above the leg time (read-only text,
-                                       no new horizontal element). Capped + truncating so a
-                                       long "+1h 20m · Estimated" never widens the leg column
-                                       and starves the name span (the 2.2/2.5 panel-beside-map
-                                       width lesson — the full text is in the title/aria). *@
-                                    @if (arrival is not null)
-                                    {
-                                        <span class="text-[10px] text-on-surface-variant truncate max-w-full"
-                                              title="@ArrivalText(arrival)"
-                                              aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripTimelineArrivalAria, ArrivalText(arrival))">
-                                            @ArrivalCompactText(arrival)
-                                        </span>
-                                    }
-                                    <span class="text-xs text-on-surface @(leg.DurationSeconds is null ? "italic text-on-surface-variant" : "")"
-                                          aria-label="@(leg.DurationSeconds is null ? UiStrings.TripLegComputingAria : string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegTravelTimeAria, TravelTimeFormatting.Duration(leg.DurationSeconds)))">
-                                        @TravelTimeFormatting.Duration(leg.DurationSeconds)
-                                    </span>
-                                    <span class="text-[10px] text-on-surface-variant"
-                                          aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegDistanceAria, TravelTimeFormatting.Distance(leg.DistanceMeters))">
-                                        @TravelTimeFormatting.Distance(leg.DistanceMeters)
-                                    </span>
+                                @* The VISIBLE value keeps the compact form (it carries the
+                                   honest "~" approximation marker over an Estimated leg —
+                                   never a clean, confident offset; TRIP-TIMELINE-01); the
+                                   fuller ArrivalText (with the qualifier word) sits in the
+                                   title + aria-label, which the wide region has room for. *@
+                                <span title="@ArrivalText(arrival)"
+                                      aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripTimelineArrivalAria, ArrivalText(arrival))">
+                                    @ArrivalCompactText(arrival)
                                 </span>
-                                <FidelityBadge Fidelity="@leg.Fidelity" />
-                                @* TRIP-MANUAL-01 (AC5): manual minutes input — only
-                                   under Any/Air. Entering a value upserts a Manual
-                                   leg (minutes→seconds at this UI edge). *@
-                                @if (Vm.TravelMode == LucidCartographer.Data.Entities.TravelMode.AnyAir)
-                                {
-                                    <input type="number" min="0" max="@TripViewModel.MaxManualLegMinutes" inputmode="numeric"
-                                           class="w-12 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
-                                           placeholder="@UiStrings.TripManualMinutesPlaceholder"
-                                           aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripManualMinutesAria, row.Name)"
-                                           value="@ManualMinutes(leg)"
-                                           @onchange="e => OnManualMinutesChangedAsync(leg, e.Value)"
-                                           @onclick:stopPropagation
-                                           @onkeydown:stopPropagation />
-                                }
                             }
                             else
                             {
-                                @* No departing leg (open-path Finish). Still show the
-                                   honest arrival for this stop, stacked compactly. *@
-                                @if (arrival is not null)
-                                {
-                                    <span class="text-[10px] text-on-surface-variant truncate max-w-[3.5rem] text-right"
-                                          title="@ArrivalText(arrival)"
-                                          aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripTimelineArrivalAria, ArrivalText(arrival))">
-                                        @ArrivalCompactText(arrival)
-                                    </span>
-                                }
-                                else
-                                {
-                                    <span class="text-xs text-on-surface-variant w-6 text-right"
-                                          aria-label="@UiStrings.TripLegNoTravelTimeAria">@UiStrings.TripLegTimeUnknown</span>
-                                }
+                                <span aria-label="@UiStrings.TripLegNoTravelTimeAria">@UiStrings.TripLegTimeUnknown</span>
                             }
                         </span>
-                        @* TRIP-ORDER-03: keyboard move controls (NFR4 / AR-9 build-
-                           blocker) — real buttons, Tab-reachable, Enter/Space natively
-                           activatable, disabled at the edges of the pin-aware movable
-                           window and on pinned Start/Finish rows. stopPropagation so
-                           activating a move never also selects the row. *@
-                        @* Stacked into a narrow column (Story 1.7) so the Start/
-                           Finish controls beside it fit the w-64 panel without
-                           starving the POI name's flex space. *@
-                        <span class="flex flex-col flex-shrink-0">
+                        @* COLUMN 6 — Start/Finish controls (TRIP-STARTFINISH-04): ○/⚑
+                           buttons, aria-pressed reflects the pinned state, disabled on the
+                           opposite pin; stopPropagation so designating never selects. *@
+                        <span class="flex items-center gap-0.5">
                             <button type="button"
-                                    class="inline-flex items-center justify-center w-6 h-6 rounded text-on-surface-variant flex-shrink-0 enabled:hover:bg-surface-container-high disabled:opacity-40"
-                                    aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopUp, row.Name)"
-                                    disabled="@(!Vm.CanMoveUp(stop))"
-                                    @onclick="() => Vm.MoveStopUpAsync(row.PoiId)"
-                                    @onclick:stopPropagation
-                                    @onkeydown:stopPropagation>
-                                <span aria-hidden="true">▲</span>
-                            </button>
-                            <button type="button"
-                                    class="inline-flex items-center justify-center w-6 h-6 rounded text-on-surface-variant flex-shrink-0 enabled:hover:bg-surface-container-high disabled:opacity-40"
-                                    aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopDown, row.Name)"
-                                    disabled="@(!Vm.CanMoveDown(stop))"
-                                    @onclick="() => Vm.MoveStopDownAsync(row.PoiId)"
-                                    @onclick:stopPropagation
-                                    @onkeydown:stopPropagation>
-                                <span aria-hidden="true">▼</span>
-                            </button>
-                        </span>
-                        @* TRIP-STARTFINISH-04: per-row Set/Unset Start & Finish
-                           controls (FR-14, UX-DR2/UX-DR12). Real buttons,
-                           aria-labelled via UiStrings, aria-pressed reflects the
-                           pinned state. "Set as Finish" is disabled on the current
-                           Start row and vice versa (the AC-6 rejection surfaced as
-                           a disabled control, not an error). stopPropagation so
-                           designating never also selects the row. The 24px visual
-                           extends to a ≥44px hit target via padding + negative
-                           margin, keeping the compact w-64 panel row's POI name
-                           readable and its click centre on the selectable area. *@
-                        <span class="flex flex-col flex-shrink-0">
-                            <button type="button"
-                                    class="inline-flex items-center justify-center w-6 h-6 rounded flex-shrink-0 enabled:hover:bg-surface-container-high disabled:opacity-40 @(role == TripStopRole.Start ? "text-primary" : "text-on-surface-variant")"
-                                    style="padding:10px;margin:-10px;box-sizing:content-box"
+                                    class="inline-flex items-center justify-center w-6 h-6 rounded enabled:hover:bg-surface-container-high disabled:opacity-40 @(role == TripStopRole.Start ? "text-primary" : "text-on-surface-variant")"
                                     aria-label="@StartControlAria(role, row.Name)"
                                     aria-pressed="@(role == TripStopRole.Start ? "true" : "false")"
                                     disabled="@(!Vm.CanSetStart(row.PoiId))"
@@ -362,8 +343,7 @@
                                 <span class="material-symbols-outlined" style="font-size:18px" aria-hidden="true">trip_origin</span>
                             </button>
                             <button type="button"
-                                    class="inline-flex items-center justify-center w-6 h-6 rounded flex-shrink-0 enabled:hover:bg-surface-container-high disabled:opacity-40 @(role == TripStopRole.Finish ? "text-primary" : "text-on-surface-variant")"
-                                    style="padding:10px;margin:-10px;box-sizing:content-box"
+                                    class="inline-flex items-center justify-center w-6 h-6 rounded enabled:hover:bg-surface-container-high disabled:opacity-40 @(role == TripStopRole.Finish ? "text-primary" : "text-on-surface-variant")"
                                     aria-label="@FinishControlAria(role, row.Name)"
                                     aria-pressed="@(role == TripStopRole.Finish ? "true" : "false")"
                                     disabled="@(!Vm.CanSetFinish(row.PoiId))"
@@ -373,7 +353,65 @@
                                 <span class="material-symbols-outlined" style="font-size:18px" aria-hidden="true">sports_score</span>
                             </button>
                         </span>
+                        @* COLUMN 7 — Actions: Focus on map + Open in Google Maps ONLY
+                           (FR-2; mirrors PoiTable:133-148). No select/coords/collection/
+                           added-date/move/copy/delete. Both stopPropagation. *@
+                        <span class="flex items-center justify-end gap-0.5">
+                            <button type="button"
+                                    class="inline-flex items-center justify-center w-7 h-7 rounded text-on-surface-variant hover:text-primary hover:bg-surface-container-high"
+                                    aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripFocusOnMapAria, row.Name)"
+                                    title="@UiStrings.TripFocusOnMap"
+                                    @onclick="() => OnFocusClickAsync(row.PoiId)"
+                                    @onclick:stopPropagation
+                                    @onkeydown:stopPropagation>
+                                <span class="material-symbols-outlined text-base" aria-hidden="true">my_location</span>
+                            </button>
+                            <a href="@row.GoogleMapsUrl" target="_blank" rel="noopener"
+                               class="inline-flex items-center justify-center w-7 h-7 rounded text-primary hover:bg-surface-container-high"
+                               aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripOpenInGoogleMapsAria, row.Name)"
+                               title="@UiStrings.TripOpenInGoogleMaps"
+                               @onclick:stopPropagation>
+                                <span class="material-symbols-outlined text-base" aria-hidden="true">open_in_new</span>
+                            </a>
+                        </span>
                     </li>
+                }
+
+                @* INTERIM PROTO-CONNECTOR (Story 1.2, FR-3): per-leg travel time +
+                   distance + FidelityBadge (+ manual minutes under Any/Air) relocated
+                   OUT of the stop row into a simple single-line element BETWEEN
+                   consecutive rows. Story 1.3 replaces this with the real LegConnector.
+                   Rendered as a <div> (NOT an <li>) so the row-count assertions
+                   (one <li> per stop) stay intact. Keyed off the row's DEPARTING leg —
+                   the same LegFrom the row used to show; preserves "—"/computing/manual
+                   behavior. *@
+                var connectorLeg = LegFrom(row.PoiId);
+                @if (connectorLeg is not null)
+                {
+                    <div class="trip-leg-connector flex items-center gap-2 px-2 py-1 text-xs border-b border-surface-container"
+                         aria-hidden="false">
+                        <span class="text-on-surface-variant" aria-hidden="true">↓</span>
+                        <span class="@(connectorLeg.DurationSeconds is null ? "italic text-on-surface-variant" : "text-on-surface")"
+                              aria-label="@(connectorLeg.DurationSeconds is null ? UiStrings.TripLegComputingAria : string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegTravelTimeAria, TravelTimeFormatting.Duration(connectorLeg.DurationSeconds)))">
+                            @TravelTimeFormatting.Duration(connectorLeg.DurationSeconds)
+                        </span>
+                        <span class="text-on-surface-variant"
+                              aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegDistanceAria, TravelTimeFormatting.Distance(connectorLeg.DistanceMeters))">
+                            @TravelTimeFormatting.Distance(connectorLeg.DistanceMeters)
+                        </span>
+                        <FidelityBadge Fidelity="@connectorLeg.Fidelity" />
+                        @* TRIP-MANUAL-01 (AC5): manual minutes input — only under
+                           Any/Air. Entering a value upserts a Manual leg. *@
+                        @if (Vm.TravelMode == LucidCartographer.Data.Entities.TravelMode.AnyAir)
+                        {
+                            <input type="number" min="0" max="@TripViewModel.MaxManualLegMinutes" inputmode="numeric"
+                                   class="w-12 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
+                                   placeholder="@UiStrings.TripManualMinutesPlaceholder"
+                                   aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripManualMinutesAria, NameFor(connectorLeg.FromPoiId))"
+                                   value="@ManualMinutes(connectorLeg)"
+                                   @onchange="e => OnManualMinutesChangedAsync(connectorLeg, e.Value)" />
+                        }
+                    </div>
                 }
             }
         </ul>
@@ -397,6 +435,22 @@
 @code {
     [Parameter, EditorRequired] public TripViewModel Vm { get; set; } = null!;
 
+    // Story 1.2 (FR-2, "Focus on map"): map-focus parity with the plain PoiTable.
+    // MapPage wires this to the SAME handler PoiTable uses (Vm.HandleFocusPoiAsync on
+    // the MapPageViewModel) so the Trip list pans the map identically. When unwired
+    // (e.g. a bUnit render without a host), the Focus button falls back to selecting
+    // the stop (TripSelectionSource.List), which MapPage's selection sync already pans.
+    [Parameter] public EventCallback<int> OnFocusClicked { get; set; }
+
+    // Story 1.2 (FR-11/12): the single shared CSS-grid column template applied to
+    // every row (placeable, unplaceable, pinned, long/short name) so the seven
+    // columns — reorder gutter · stop-# badge · name · dwell · arrival ·
+    // start/finish · actions — line up across all row states. The name column flexes
+    // (1fr, min 0) so the full name has room without starving the fixed control
+    // columns; everything else is content-sized.
+    private const string GridTemplate =
+        "auto auto minmax(0,1fr) auto auto auto auto";
+
     protected override void OnInitialized() => Vm.StateChanged += OnVmChanged;
 
     private void OnVmChanged() => InvokeAsync(StateHasChanged);
@@ -405,6 +459,38 @@
     // next, or the roundtrip closing leg from the last stop back to the Start).
     private TripLeg? LegFrom(int poiId) =>
         Vm.OrderedLegs.FirstOrDefault(l => l.FromPoiId == poiId);
+
+    // Story 1.2: the POI name for a stop id (used by the interim leg connector's
+    // manual-minutes input aria-label, which keys off the departing stop).
+    private string NameFor(int poiId) =>
+        Vm.OrderedStops.FirstOrDefault(s => s.PoiId == poiId)?.Name ?? string.Empty;
+
+    // Story 1.2 (FR-2): the enrichment-state icon for the Name column. Mirrors
+    // PoiTable.razor:100-107 exactly — error/red when manual URL is needed,
+    // location_on/muted when enriched, else hourglass_empty/amber. All titles via
+    // UiStrings (the projection carries the flags; the component holds no Poi logic).
+    private static (string Icon, string Class, string Title) EnrichmentIcon(TripStopRow row) => row switch
+    {
+        { EnrichmentNeedsManualUrl: true } => ("error", "text-red-500", UiStrings.TripEnrichmentFailed),
+        { IsEnriched: true } => ("location_on", "text-on-surface-variant", UiStrings.TripEnrichmentEnriched),
+        _ => ("hourglass_empty", "text-amber-500", UiStrings.TripEnrichmentWaiting),
+    };
+
+    // Story 1.2 (FR-2, "Focus on map"): prefer the host-wired map-focus parity
+    // callback (Vm.HandleFocusPoiAsync on MapPageViewModel via MapPage). When it is
+    // not wired, fall back to selecting the stop — MapPage's selection sync pans the
+    // map to a List selection, so the map still focuses the stop.
+    private async Task OnFocusClickAsync(int poiId)
+    {
+        if (OnFocusClicked.HasDelegate)
+        {
+            await OnFocusClicked.InvokeAsync(poiId);
+        }
+        else
+        {
+            Vm.SelectStop(poiId, TripSelectionSource.List);
+        }
+    }
 
     // TRIP-TIMELINE-01 (Story 2.6): the per-stop arrival for a row's PoiId, or null
     // (an unplaceable row has no routed arrival). The first matching routed-stop

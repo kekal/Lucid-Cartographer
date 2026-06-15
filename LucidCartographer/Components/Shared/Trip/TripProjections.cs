@@ -104,10 +104,26 @@ public sealed record TripStop(
 /// <c>PoiCollectionItem.DwellMinutes</c>. Present on placeable and unplaceable rows
 /// alike; presentation only — the timeline that consumes it is Story 2.6.
 /// </para>
+/// <para>
+/// Story 1.2 (wide trip-scoped table, FR-2): the Name column + Actions need a few
+/// more presentation fields read from the already-loaded <c>Poi</c> in the membership
+/// read — pure projection, no new ctor dependency. <see cref="Address"/> backs the
+/// muted address sub-line (only rendered when present); <see cref="IsEnriched"/> /
+/// <see cref="EnrichmentNeedsManualUrl"/> pick the enrichment-state icon (mirroring
+/// PoiTable's mapping); <see cref="GoogleMapsUrl"/> is the resolved
+/// <see cref="PoiUrlHelper.GetGoogleMapsUrl"/> result for the "Open in Google Maps"
+/// anchor (computed in the projection so the component carries no Poi/helper logic,
+/// NFR1). Carried on every row; the unplaceable-row treatment ignores the action/icon
+/// fields (it renders the "Not placeable" marker instead).
+/// </para>
 /// </summary>
 public sealed record TripStopRow(
     int? DisplayOrder,
     int PoiId,
     string Name,
     bool IsPlaceable,
-    int? DwellMinutes = null);
+    int? DwellMinutes = null,
+    string? Address = null,
+    bool IsEnriched = false,
+    bool EnrichmentNeedsManualUrl = false,
+    string? GoogleMapsUrl = null);

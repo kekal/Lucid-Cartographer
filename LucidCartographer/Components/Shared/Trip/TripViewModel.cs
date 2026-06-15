@@ -805,6 +805,15 @@ public sealed class TripViewModel(
                 ci.Poi.AddedDate,
                 // TRIP-DWELL-01 (Story 2.5): carry the per-membership dwell minutes.
                 ci.DwellMinutes,
+                // Story 1.2 (FR-2): the Name-column + Actions presentation fields,
+                // read from the already-loaded Poi (no extra round-trip, no new ctor
+                // dependency). Address backs the sub-line; the enrichment flags pick
+                // the state icon; GoogleMapsUrl/Category feed PoiUrlHelper below.
+                ci.Poi.Address,
+                ci.Poi.IsEnriched,
+                ci.Poi.EnrichmentNeedsManualUrl,
+                ci.Poi.GoogleMapsUrl,
+                ci.Poi.Category,
             })
             .ToListAsync(_cts.Token);
 
@@ -823,6 +832,24 @@ public sealed class TripViewModel(
                 r.PoiId == finishPoiId))
             .ToList();
 
+        // Story 1.2 (FR-2): per-PoiId presentation fields for the Name column +
+        // Actions. The Google Maps URL is resolved HERE (projection edge) via the
+        // shared PoiUrlHelper over a lightweight Poi carrying only the fields the
+        // helper reads — keeping the component free of Poi/helper logic (NFR1).
+        var presentationByPoiId = members.ToDictionary(
+            r => r.PoiId,
+            r => (
+                Dwell: r.DwellMinutes,
+                r.Address,
+                r.IsEnriched,
+                r.EnrichmentNeedsManualUrl,
+                GoogleMapsUrl: PoiUrlHelper.GetGoogleMapsUrl(new Poi
+                {
+                    Name = r.Name,
+                    Category = r.Category,
+                    GoogleMapsUrl = r.GoogleMapsUrl,
+                })));
+
         // Unplaceable rows trail the routed stops in a stable, deterministic
         // order (AddedDate, then PoiId — the same tie-break the ordering service
         // uses). They carry no routed number. [TRIP-PLACE-04]
@@ -831,19 +858,24 @@ public sealed class TripViewModel(
             .OrderBy(r => r.AddedDate)
             .ThenBy(r => r.PoiId)
             // TRIP-DWELL-01: an unplaceable stop still carries its membership dwell.
-            .Select(r => new TripStopRow(DisplayOrder: null, r.PoiId, r.Name, IsPlaceable: false, r.DwellMinutes));
-
-        // TRIP-DWELL-01: dwell minutes per membership, keyed by PoiId, so placeable
-        // rows (built from the ordered stop projection) can carry it too.
-        var dwellByPoiId = members.ToDictionary(r => r.PoiId, r => r.DwellMinutes);
+            // Story 1.2: it also carries the Name-column presentation fields (address,
+            // enrichment) even though it renders the "Not placeable" treatment.
+            .Select(r =>
+            {
+                var p = presentationByPoiId[r.PoiId];
+                return new TripStopRow(
+                    DisplayOrder: null, r.PoiId, r.Name, IsPlaceable: false, p.Dwell,
+                    p.Address, p.IsEnriched, p.EnrichmentNeedsManualUrl, p.GoogleMapsUrl);
+            });
 
         var rows = stops
-            .Select(s => new TripStopRow(
-                s.OrderIndex,
-                s.PoiId,
-                s.Name,
-                IsPlaceable: true,
-                dwellByPoiId.TryGetValue(s.PoiId, out var dwell) ? dwell : null))
+            .Select(s =>
+            {
+                var p = presentationByPoiId[s.PoiId];
+                return new TripStopRow(
+                    s.OrderIndex, s.PoiId, s.Name, IsPlaceable: true, p.Dwell,
+                    p.Address, p.IsEnriched, p.EnrichmentNeedsManualUrl, p.GoogleMapsUrl);
+            })
             .Concat(unplaceable)
             .ToList();
 

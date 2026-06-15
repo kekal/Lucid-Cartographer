@@ -328,7 +328,10 @@ else
                  class="flex-shrink-0 bg-white shadow-inner overflow-hidden flex flex-col">
                 @if (TripVm.IsTripViewEnabled)
                 {
-                    <TripStopList Vm="TripVm" />
+                    @* Story 1.2 (FR-2): the Trip list's "Focus on map" action wires to
+                       the SAME map-focus handler the plain PoiTable uses
+                       (Vm.HandleFocusPoiAsync on MapPageViewModel) for parity. *@
+                    <TripStopList Vm="TripVm" OnFocusClicked="Vm.HandleFocusPoiAsync" />
                 }
                 else
                 {

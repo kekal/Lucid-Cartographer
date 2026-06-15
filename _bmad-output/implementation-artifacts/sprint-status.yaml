@@ -31,7 +31,7 @@ development_status:
   # Epic 1: Readable Trip View takeover (desktop)
   epic-1: in-progress
   1-1-switch-the-desktop-list-region-into-the-trip: done
-  1-2-wide-trip-scoped-table-with-trip-only-columns: backlog
+  1-2-wide-trip-scoped-table-with-trip-only-columns: done
   1-3-inter-row-leg-connector: backlog
   1-4-canonical-stop-order-shared-across-both-views: backlog
   epic-1-retrospective: optional
