@@ -750,20 +750,30 @@ public class TripStopListTests : BunitTestContext
     }
 
     [Fact]
-    public async Task ManualInput_Present_OnAnyAirLeg_Absent_OnDriveLeg()
+    public async Task ManualTime_IsClickToEdit_OnAnyLeg_GroundAndAnyAir()
     {
-        // The manual minutes input now gates on the LEG's own mode (Story 3.4), not
-        // the removed trip-wide mode. An Any/Air leg (default) carries the input.
-        await using var anyAir = await EnabledVmWithModeAsync(placeable: 2, mode: TravelMode.AnyAir);
-        var cutAir = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, anyAir));
+        // Story 3.5 (UX-DR6): the manual minutes edit is no longer gated on the leg's
+        // mode — the travel time is CLICK-TO-EDIT on ANY leg (ground or Any/Air). The
+        // input is hidden at rest and appears when the leg's time button is clicked.
+        await using var vm = await EnabledVmWithModeAsync(placeable: 2, mode: TravelMode.AnyAir);
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
         var aria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripManualMinutesAria, "P1");
-        cutAir.FindAll($"input[aria-label=\"{aria}\"]").Should().NotBeEmpty("Any/Air legs carry the manual minutes input");
+        var editTitle = string.Format(CultureInfo.CurrentCulture, UiStrings.TripLegEditTimeAria, "P1");
 
-        // Set the 1â†’2 leg's mode to Drive (per-leg). Its manual input must vanish while
-        // the OTHER (Any/Air) leg keeps it.
-        await anyAir.SetLegModeAsync(1, TravelMode.Drive);
-        cutAir.WaitForAssertion(() =>
-            cutAir.FindAll($"input[aria-label=\"{aria}\"]").Should().BeEmpty("the manual input is hidden once the leg's own mode is Drive"));
+        // At rest: no input; a click-to-edit time button is present even on the Any/Air leg.
+        cut.FindAll($"input[aria-label=\"{aria}\"]").Should().BeEmpty("the input is hidden until the time is clicked");
+        cut.Find($"button[title=\"{editTitle}\"]").Click();
+        cut.WaitForAssertion(() =>
+            cut.FindAll($"input[aria-label=\"{aria}\"]").Should().NotBeEmpty("clicking the Any/Air leg's time opens the inline editor"));
+
+        // Set the 1â†’2 leg's mode to Drive (per-leg) and re-render fresh: the click-to-edit
+        // time button is STILL present on the ground leg (no mode gate, Story 3.5).
+        await vm.SetLegModeAsync(1, TravelMode.Drive);
+        var cutDrive = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+        cutDrive.FindAll($"input[aria-label=\"{aria}\"]").Should().BeEmpty("the ground leg's input is also hidden at rest");
+        cutDrive.Find($"button[title=\"{editTitle}\"]").Click();
+        cutDrive.WaitForAssertion(() =>
+            cutDrive.FindAll($"input[aria-label=\"{aria}\"]").Should().NotBeEmpty("a ground (Drive) leg's time is click-to-edit too"));
     }
 
     [Fact]
@@ -792,6 +802,9 @@ public class TripStopListTests : BunitTestContext
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
 
         var aria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripManualMinutesAria, "P1");
+        // Story 3.5 (UX-DR6): open the inline editor by clicking the leg's time button.
+        var editTitle = string.Format(CultureInfo.CurrentCulture, UiStrings.TripLegEditTimeAria, "P1");
+        cut.Find($"button[title=\"{editTitle}\"]").Click();
         cut.Find($"input[aria-label=\"{aria}\"]").Change("90");
 
         cut.WaitForAssertion(() =>
@@ -813,6 +826,9 @@ public class TripStopListTests : BunitTestContext
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
 
         var aria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripManualMinutesAria, "P1");
+        // Story 3.5 (UX-DR6): open the inline editor; it pre-fills the existing Manual minutes.
+        var editTitle = string.Format(CultureInfo.CurrentCulture, UiStrings.TripLegEditTimeAria, "P1");
+        cut.Find($"button[title=\"{editTitle}\"]").Click();
         cut.Find($"input[aria-label=\"{aria}\"]").GetAttribute("value").Should().Be("75");
     }
 

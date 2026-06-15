@@ -257,6 +257,10 @@ public static class UiStrings
     // origin stop, giving the input a per-leg accessible name.
     public const string TripManualMinutesPlaceholder = "min";
     public const string TripManualMinutesAria = "Manual travel time in minutes for the leg departing {0}";
+    // Story 3.5 (UX-DR6): the click-to-edit affordance on the connector's travel time,
+    // available on ANY leg (ground or Any/Air). Clicking the time opens the inline minutes
+    // input. {0} = the leg's origin stop name.
+    public const string TripLegEditTimeAria = "Edit travel time for the leg departing {0}";
     // Story 1.3 (NFR7): the inter-row leg connector's reset (↺) affordance — a real,
     // focusable button that reverts a Manual leg override back to the computed time.
     // Rendered only on a Manual leg; hidden at rest, revealed on hover/focus. {0} =

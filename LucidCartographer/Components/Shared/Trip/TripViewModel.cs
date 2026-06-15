@@ -1455,10 +1455,12 @@ public sealed class TripViewModel(
     }
 
     /// <summary>
-    /// TRIP-MANUAL-01 (AC5): upserts a manual travel time for an Any/Air leg. The
-    /// minutes entered at the UI edge are converted to canonical seconds (×60,
-    /// AR-11) and stored on the directional <c>(from, to, AnyAir)</c>
-    /// <see cref="RouteSegment"/> row with <see cref="Fidelity.Manual"/>,
+    /// TRIP-MANUAL-01 (AC5) / Story 3.5 (RD7, FR-25): upserts a manual travel time for
+    /// ANY leg (ground or Any/Air). The minutes entered at the UI edge are converted to
+    /// canonical seconds (×60, AR-11) and stored on the directional
+    /// <c>(from, to, legMode)</c> — the From-stop's own OutgoingTravelMode (null ≡ AnyAir),
+    /// NOT a hardcoded AnyAir (TRIP-CACHE-01) — <see cref="RouteSegment"/> row with
+    /// <see cref="Fidelity.Manual"/>,
     /// <c>Source = "Manual"</c>, <c>GeometryPolyline = null</c>, and the haversine
     /// distance for display. Persisted under the shared write lock so it survives
     /// reorder and recompute. After the write: refresh + Notify.
@@ -1488,10 +1490,16 @@ public sealed class TripViewModel(
         var meters = GeoUtils.HaversineDistance(from.Lat, from.Lon, to.Lat, to.Lon);
         // Convert minutes ↔ seconds only here, at the UI edge (AR-11).
         var seconds = minutes * 60;
+        // Story 3.5 (RD7, TRIP-CACHE-01): the Manual row is keyed by THIS leg's own
+        // mode (the From-stop's OutgoingTravelMode, null ≡ AnyAir) — NOT a hardcoded
+        // AnyAir. Setting Manual on a ground leg overwrites its auto (Estimated/Measured)
+        // row at the ground key (an explicit user override — allowed; "never downgrade"
+        // is about AUTO compute, not user action).
+        var mode = from.OutgoingTravelMode ?? Data.Entities.TravelMode.AnyAir;
 
         try
         {
-            await UpsertManualSegmentAsync(fromPoiId, toPoiId, seconds, meters);
+            await UpsertManualSegmentAsync(fromPoiId, toPoiId, mode, seconds, meters);
             await RefreshProjectionsAsync(collectionId);
         }
         catch (OperationCanceledException)
@@ -1683,10 +1691,12 @@ public sealed class TripViewModel(
     }
 
     /// <summary>
-    /// TRIP-MANUAL-01: clears a manual Any/Air leg time. Deletes the
-    /// <c>(from, to, AnyAir)</c> cache row so the leg reverts to the Placeholder
-    /// the Mock recomputes (shown "—"). The background trigger is signalled to
-    /// refill the now-missing row. No-op when no row exists.
+    /// TRIP-MANUAL-01 / Story 3.5 (FR-25): clears a manual leg time on ANY leg. Deletes
+    /// the <c>(from, to, legMode)</c> cache row — keyed by the From-stop's own mode (null
+    /// ≡ AnyAir), NOT a hardcoded AnyAir — then signals the background compute. A GROUND
+    /// leg reverts to its re-computed Estimated/Measured value (the compute re-creates the
+    /// missing ground row); an Any/Air leg reverts to "—" (compute skips it, FR-21).
+    /// No-op when no row exists.
     /// </summary>
     public async Task ClearManualLegTimeAsync(int fromPoiId, int toPoiId)
     {
@@ -1695,9 +1705,17 @@ public sealed class TripViewModel(
             return;
         }
 
+        // Story 3.5 (FR-25): reset deletes the Manual row at THIS leg's own (From,To,Mode)
+        // key. For a ground leg the subsequent Signal()ed compute pass re-creates the
+        // Estimated/Measured row (it enqueues ground legs lacking a row, Story 3.2); for an
+        // Any/Air leg the compute skips it (FR-21) so it returns to "—". Resolve the mode
+        // from the From-stop; default to AnyAir when the stop is gone (delete is a no-op then).
+        var mode = OrderedStops.FirstOrDefault(s => s.PoiId == fromPoiId)?.OutgoingTravelMode
+                   ?? Data.Entities.TravelMode.AnyAir;
+
         try
         {
-            await DeleteSegmentAsync(fromPoiId, toPoiId);
+            await DeleteSegmentAsync(fromPoiId, toPoiId, mode);
             await RefreshProjectionsAsync(collectionId);
             travelTimeTrigger.Signal();
         }
@@ -1803,13 +1821,13 @@ public sealed class TripViewModel(
         Notify();
     }
 
-    private async Task UpsertManualSegmentAsync(int fromPoiId, int toPoiId, int seconds, double meters)
+    private async Task UpsertManualSegmentAsync(int fromPoiId, int toPoiId, string mode, int seconds, double meters)
     {
         await using var db = await factory.CreateDbContextAsync(_cts.Token);
         var existing = await db.RouteSegments.FirstOrDefaultAsync(
             r => r.FromPoiId == fromPoiId
                  && r.ToPoiId == toPoiId
-                 && r.TravelMode == Data.Entities.TravelMode.AnyAir,
+                 && r.TravelMode == mode,
             _cts.Token);
 
         if (existing is null)
@@ -1818,7 +1836,7 @@ public sealed class TripViewModel(
             {
                 FromPoiId = fromPoiId,
                 ToPoiId = toPoiId,
-                TravelMode = Data.Entities.TravelMode.AnyAir,
+                TravelMode = mode,
                 DurationSeconds = seconds,
                 DistanceMeters = meters,
                 GeometryPolyline = null,
@@ -1848,13 +1866,13 @@ public sealed class TripViewModel(
         }
     }
 
-    private async Task DeleteSegmentAsync(int fromPoiId, int toPoiId)
+    private async Task DeleteSegmentAsync(int fromPoiId, int toPoiId, string mode)
     {
         await using var db = await factory.CreateDbContextAsync(_cts.Token);
         var existing = await db.RouteSegments.FirstOrDefaultAsync(
             r => r.FromPoiId == fromPoiId
                  && r.ToPoiId == toPoiId
-                 && r.TravelMode == Data.Entities.TravelMode.AnyAir,
+                 && r.TravelMode == mode,
             _cts.Token);
         if (existing is null)
         {

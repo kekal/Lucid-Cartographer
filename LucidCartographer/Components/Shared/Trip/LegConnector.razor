@@ -1,28 +1,51 @@
 @using LucidCartographer.Services.Trip
 
-@* Story 1.3 (FR-3, UX-DR2/DR11): the inter-row leg connector. A small,
-   PRESENTATIONAL component (NFR1) that renders ONE compact line on the shared
-   edge between the two stops a leg connects — the ↓ glyph, the travel time, the
-   distance, and the provenance FidelityBadge — plus a reset (↺) affordance that
-   appears only on a Manual leg (hover/focus-revealed) and the Any/Air manual-
-   minutes input. It raises VM COMMANDS only (Set/ClearManualLegTimeAsync); it
-   never touches services/DB and never mutates its own state. Inset (left pad)
-   approximates the name column (UX-DR2 [ASSUMPTION]); token-styled
+@* Story 1.3 (FR-3, UX-DR2/DR11) + Story 3.5 (RD7, UX-DR6): the inter-row leg
+   connector. A small, PRESENTATIONAL component (NFR1) that renders ONE compact
+   line on the shared edge between the two stops a leg connects — the ↓ glyph, the
+   travel time, the distance, and the provenance FidelityBadge — plus a reset (↺)
+   affordance that appears only on a Manual leg (hover/focus-revealed) and a
+   CLICK-TO-EDIT manual-minutes field on ANY leg (ground or Any/Air). It raises VM
+   COMMANDS only (Set/ClearManualLegTimeAsync); it never touches services/DB and
+   never mutates DB/VM state (its only local state is the transient editing flag).
+   Inset (left pad) approximates the name column (UX-DR2 [ASSUMPTION]); token-styled
    surface-container / text-xs, neutral — never an error tone (UX-DR11). *@
 
 <div class="trip-leg-connector group flex items-center gap-2 pl-10 pr-2 py-1 text-xs bg-surface-container border-b border-surface-container">
     @* Decorative downward glyph — the connector's "between these stops" cue. *@
     <span class="text-on-surface-variant" aria-hidden="true">↓</span>
 
-    @* Travel time. Uncomputed (null DurationSeconds) ⇒ "—", styled neutral/muted
-       (NOT an error colour, UX-DR11) and announced as "computing"; a known time
-       reads on-surface with its travel-time accessible name. *@
-    <span class="@(Leg.DurationSeconds is null ? "italic text-on-surface-variant" : "text-on-surface")"
-          aria-label="@(Leg.DurationSeconds is null
-              ? UiStrings.TripLegComputingAria
-              : string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegTravelTimeAria, TravelTimeFormatting.Duration(Leg.DurationSeconds)))">
-        @TravelTimeFormatting.Duration(Leg.DurationSeconds)
-    </span>
+    @* Story 3.5 (UX-DR6): travel time is CLICK-TO-EDIT on ANY leg. At rest it is a
+       button showing the formatted time (or "—" when uncomputed, styled neutral/muted,
+       NOT an error colour, UX-DR11). Clicking turns it into the inline minutes input.
+       stopPropagation so editing never selects/reorders the row. *@
+    @if (_editing)
+    {
+        <input type="number" min="0" max="@TripViewModel.MaxManualLegMinutes" inputmode="numeric"
+               class="w-12 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
+               placeholder="@UiStrings.TripManualMinutesPlaceholder"
+               aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripManualMinutesAria, FromName)"
+               value="@ManualMinutes(Leg)"
+               autofocus
+               @onchange="OnManualMinutesChangedAsync"
+               @onblur="StopEditing"
+               @onclick:stopPropagation
+               @onkeydown:stopPropagation />
+    }
+    else
+    {
+        <button type="button"
+                class="@(Leg.DurationSeconds is null ? "italic text-on-surface-variant" : "text-on-surface") hover:underline"
+                aria-label="@(Leg.DurationSeconds is null
+                    ? UiStrings.TripLegComputingAria
+                    : string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegTravelTimeAria, TravelTimeFormatting.Duration(Leg.DurationSeconds)))"
+                title="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegEditTimeAria, FromName)"
+                @onclick="StartEditing"
+                @onclick:stopPropagation
+                @onkeydown:stopPropagation>
+            @TravelTimeFormatting.Duration(Leg.DurationSeconds)
+        </button>
+    }
 
     @* "·" separator, decorative — the distance follows. *@
     <span class="text-on-surface-variant" aria-hidden="true">·</span>
@@ -38,22 +61,6 @@
        trip-wide TravelModeSelector — each leg sets its own Walk/Drive/Cycle/Any-Air.
        Presentational: it raises Vm.SetLegModeAsync only (NFR1). *@
     <LegModePill Leg="Leg" Vm="Vm" />
-
-    @* TRIP-MANUAL-01 (Story 2.2, AC5): manual minutes input — only on an Any/Air leg.
-       Gated on THIS leg's own mode (Leg.Mode), not the removed trip-wide mode (Story
-       3.4). Entering a value upserts a Manual leg; clearing reverts to the Placeholder.
-       stopPropagation so editing never selects/reorders an adjacent row. *@
-    @if (Leg.Mode == LucidCartographer.Data.Entities.TravelMode.AnyAir)
-    {
-        <input type="number" min="0" max="@TripViewModel.MaxManualLegMinutes" inputmode="numeric"
-               class="w-12 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
-               placeholder="@UiStrings.TripManualMinutesPlaceholder"
-               aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripManualMinutesAria, FromName)"
-               value="@ManualMinutes(Leg)"
-               @onchange="OnManualMinutesChangedAsync"
-               @onclick:stopPropagation
-               @onkeydown:stopPropagation />
-    }
 
     @* Reset (↺): a real, focusable button — rendered ONLY for a Manual leg (an
        existing override to revert). Hidden at rest, revealed on hover/focus
@@ -88,6 +95,15 @@
     /// </summary>
     [Parameter, EditorRequired] public TripViewModel Vm { get; set; } = null!;
 
+    // Story 3.5 (UX-DR6): transient, presentation-only flag — true while the travel
+    // time is being edited inline (the time button was clicked). Not VM/DB state; it
+    // never persists and toggling it raises no command. Click-to-edit on ANY leg.
+    private bool _editing;
+
+    private void StartEditing() => _editing = true;
+
+    private void StopEditing() => _editing = false;
+
     // The leg-origin stop's POI name, used for the manual-input + reset
     // accessible names (the leg is keyed off its departing stop).
     private string FromName =>
@@ -105,6 +121,10 @@
     // value clears the manual entry (reverts to the Placeholder).
     private async Task OnManualMinutesChangedAsync(ChangeEventArgs e)
     {
+        // Story 3.5 (UX-DR6): a committed value closes the inline editor (back to the
+        // click-to-edit button showing the new/auto time).
+        _editing = false;
+
         var text = e.Value?.ToString();
         if (string.IsNullOrWhiteSpace(text))
         {

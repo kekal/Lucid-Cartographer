@@ -15,11 +15,12 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace LucidCartographer.Tests.Components;
 
 /// <summary>
-/// bUnit coverage for the Story 1.3 inter-row <see cref="LegConnector"/> — a
+/// bUnit coverage for the Story 1.3 / 3.5 inter-row <see cref="LegConnector"/> — a
 /// presentational component (NFR1) that renders the per-leg ↓ + travel time +
-/// distance + fidelity badge, an Any/Air manual-minutes input, and a Manual-only
-/// reset (↺). Asserts the uncomputed neutral "—" (UX-DR11), the reset's
-/// Manual-only presence, and that the reset raises Vm.ClearManualLegTimeAsync.
+/// distance + fidelity badge, a CLICK-TO-EDIT manual-minutes editor on ANY leg
+/// (ground or Any/Air, UX-DR6), and a Manual-only reset (↺). Asserts the uncomputed
+/// neutral "—" (UX-DR11), click-to-edit on any leg raising Vm.SetManualLegTimeAsync,
+/// the reset's Manual-only presence, and that the reset raises Vm.ClearManualLegTimeAsync.
 /// </summary>
 public class LegConnectorTests : BunitTestContext
 {
@@ -169,21 +170,54 @@ public class LegConnectorTests : BunitTestContext
             .Fidelity.Should().NotBe(Fidelity.Manual, "reset cleared the manual override via Vm.ClearManualLegTimeAsync");
     }
 
-    [Fact]
-    public async Task LegConnector_ManualInput_Present_UnderAnyAir_Absent_UnderDrive()
+    [Theory]
+    [InlineData(TravelMode.AnyAir)]
+    [InlineData(TravelMode.Drive)]
+    public async Task LegConnector_TimeIsClickToEdit_OnAnyLeg(string mode)
     {
+        // Story 3.5 (UX-DR6): the travel time is a click-to-edit button on ANY leg
+        // (ground or Any/Air). The manual input is NOT present at rest; clicking the
+        // time button opens the inline minutes input.
+        var seg = mode == TravelMode.AnyAir ? null : EstimatedSeg(1, 2, 4800, 12000, mode);
+        await using var vm = await EnabledVmAsync(mode: mode, seg: seg);
         var manualAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripManualMinutesAria, "P1");
 
-        await using var anyAir = await EnabledVmAsync(mode: TravelMode.AnyAir);
-        var cutAir = RenderComponent<LegConnector>(p => p
-            .Add(x => x.Leg, Leg(anyAir, 1, 2))
-            .Add(x => x.Vm, anyAir));
-        cutAir.FindAll($"input[aria-label=\"{manualAria}\"]").Should().NotBeEmpty("Any/Air legs carry the manual minutes input");
+        var cut = RenderComponent<LegConnector>(p => p
+            .Add(x => x.Leg, Leg(vm, 1, 2))
+            .Add(x => x.Vm, vm));
 
-        await using var drive = await EnabledVmAsync(mode: TravelMode.Drive, seg: EstimatedSeg(1, 2, 4800, 12000, TravelMode.Drive));
-        var cutDrive = RenderComponent<LegConnector>(p => p
-            .Add(x => x.Leg, Leg(drive, 1, 2))
-            .Add(x => x.Vm, drive));
-        cutDrive.FindAll($"input[aria-label=\"{manualAria}\"]").Should().BeEmpty("the manual input is hidden under non-Any/Air modes");
+        // At rest the time is a button, not an input.
+        cut.FindAll($"input[aria-label=\"{manualAria}\"]").Should().BeEmpty("the minutes input is hidden until the time is clicked");
+        var editTitle = string.Format(CultureInfo.CurrentCulture, UiStrings.TripLegEditTimeAria, "P1");
+        var timeButton = cut.Find($"button[title=\"{editTitle}\"]");
+
+        // Clicking the time turns it into the inline minutes input — on EITHER mode.
+        await timeButton.ClickAsync(new MouseEventArgs());
+        cut.FindAll($"input[aria-label=\"{manualAria}\"]").Should().NotBeEmpty("clicking the time opens the inline editor on any leg");
+    }
+
+    [Theory]
+    [InlineData(TravelMode.AnyAir)]
+    [InlineData(TravelMode.Drive)]
+    public async Task LegConnector_EnteringValue_RaisesSetManualLegTime_OnAnyLeg(string mode)
+    {
+        // Story 3.5: entering a value in the inline editor raises Vm.SetManualLegTimeAsync,
+        // writing a Manual row at the leg's OWN mode key — for ground AND Any/Air legs.
+        var seg = mode == TravelMode.AnyAir ? null : EstimatedSeg(1, 2, 4800, 12000, mode);
+        await using var vm = await EnabledVmAsync(mode: mode, seg: seg);
+        var manualAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripManualMinutesAria, "P1");
+        var editTitle = string.Format(CultureInfo.CurrentCulture, UiStrings.TripLegEditTimeAria, "P1");
+
+        var cut = RenderComponent<LegConnector>(p => p
+            .Add(x => x.Leg, Leg(vm, 1, 2))
+            .Add(x => x.Vm, vm));
+
+        await cut.Find($"button[title=\"{editTitle}\"]").ClickAsync(new MouseEventArgs());
+        cut.Find($"input[aria-label=\"{manualAria}\"]").Change("75");
+
+        var leg = vm.OrderedLegs.First(l => l.FromPoiId == 1 && l.ToPoiId == 2);
+        leg.Fidelity.Should().Be(Fidelity.Manual, "entering a value set a Manual override via Vm.SetManualLegTimeAsync");
+        leg.DurationSeconds.Should().Be(75 * 60);
+        leg.Mode.Should().Be(mode, "the Manual row is keyed by the leg's own mode (not hardcoded AnyAir)");
     }
 }

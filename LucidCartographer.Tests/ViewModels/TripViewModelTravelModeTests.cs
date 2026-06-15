@@ -301,4 +301,83 @@ public class TripViewModelTravelModeTests
         leg.Fidelity.Should().BeNull("no row â‡’ uncomputed (em-dash, no badge)");
         leg.DurationSeconds.Should().BeNull();
     }
+
+    [Fact]
+    public async Task SetManualLegTime_OnGroundLeg_WritesManualRow_AtGroundKey_NotAnyAir()
+    {
+        // Story 3.5 (RD7, TRIP-CACHE-01): a Manual override on a GROUND leg is keyed by
+        // the leg's OWN mode (the From-stop's OutgoingTravelMode = Drive), NOT AnyAir.
+        var (vm, _, factory) = await EnabledVmAsync(placeable: 2);
+        await using var _v = vm;
+        await vm.SetLegModeAsync(fromPoiId: 1, TravelMode.Drive);
+
+        await vm.SetManualLegTimeAsync(1, 2, minutes: 30);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var driveRow = await db.RouteSegments.FirstOrDefaultAsync(r => r.FromPoiId == 1 && r.ToPoiId == 2 && r.TravelMode == TravelMode.Drive);
+            driveRow.Should().NotBeNull("the Manual row is written at the leg's own (From,To,Drive) key");
+            driveRow!.DurationSeconds.Should().Be(30 * 60);
+            driveRow.Fidelity.Should().Be(Fidelity.Manual);
+            driveRow.Source.Should().Be("Manual");
+
+            (await db.RouteSegments.AnyAsync(r => r.FromPoiId == 1 && r.ToPoiId == 2 && r.TravelMode == TravelMode.AnyAir))
+                .Should().BeFalse("the manual write must NOT use the hardcoded AnyAir key");
+        }
+
+        var leg = vm.OrderedLegs.First(l => l.FromPoiId == 1 && l.ToPoiId == 2);
+        leg.Mode.Should().Be(TravelMode.Drive);
+        leg.Fidelity.Should().Be(Fidelity.Manual);
+        leg.DurationSeconds.Should().Be(1800);
+    }
+
+    [Fact]
+    public async Task SetManualLegTime_OnGroundLeg_OverwritesExistingAutoRow()
+    {
+        // Story 3.5: setting Manual on a ground leg with an existing auto (Estimated)
+        // row overwrites that (From,To,ground) row to Manual (explicit user override).
+        var (vm, _, factory) = await EnabledVmAsync(placeable: 2);
+        await using var _v = vm;
+        await vm.SetLegModeAsync(fromPoiId: 1, TravelMode.Drive);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.RouteSegments.Add(new RouteSegment { FromPoiId = 1, ToPoiId = 2, TravelMode = TravelMode.Drive, DurationSeconds = 1200, DistanceMeters = 5000, Fidelity = Fidelity.Estimated, Source = "Mock", ComputedAt = DateTime.UtcNow });
+            await db.SaveChangesAsync();
+        }
+
+        await vm.SetManualLegTimeAsync(1, 2, minutes: 20);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var rows = await db.RouteSegments.Where(r => r.FromPoiId == 1 && r.ToPoiId == 2 && r.TravelMode == TravelMode.Drive).ToListAsync();
+            rows.Should().HaveCount(1, "the existing auto row is updated in place, not duplicated");
+            rows[0].Fidelity.Should().Be(Fidelity.Manual);
+            rows[0].DurationSeconds.Should().Be(20 * 60);
+            rows[0].Source.Should().Be("Manual");
+        }
+    }
+
+    [Fact]
+    public async Task ClearManualLegTime_OnGroundLeg_DeletesGroundRow_AndSignalsCompute()
+    {
+        // Story 3.5 (FR-25): reset on a ground leg deletes the (From,To,Drive) Manual row
+        // and signals the background compute (which re-creates the Estimated/Measured row).
+        var (vm, trigger, factory) = await EnabledVmAsync(placeable: 2);
+        await using var _v = vm;
+        await vm.SetLegModeAsync(fromPoiId: 1, TravelMode.Drive);
+        await vm.SetManualLegTimeAsync(1, 2, minutes: 30);
+
+        await vm.ClearManualLegTimeAsync(1, 2);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            (await db.RouteSegments.AnyAsync(r => r.FromPoiId == 1 && r.ToPoiId == 2 && r.TravelMode == TravelMode.Drive))
+                .Should().BeFalse("reset deletes the ground Manual row so the compute re-creates an auto row");
+        }
+
+        // A pending signal is available ⇒ the off-circuit compute was kicked to refill
+        // the now-missing ground row (WaitAsync returns true immediately on the queued signal).
+        var signalled = await trigger.WaitAsync(TimeSpan.FromMilliseconds(50), CancellationToken.None);
+        signalled.Should().BeTrue("clearing signals the off-circuit compute to refill the ground row");
+    }
 }
