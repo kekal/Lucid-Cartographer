@@ -68,11 +68,12 @@
         <span class="sr-only" role="status" aria-live="polite">@Vm.LastSortAnnouncement</span>
     }
 
-    @* TRIP-TIMELINE-01 (Story 2.6, AC2/AC5): header inputs for the wall-clock trip
-       start time + the soft time budget (minutes), and the soft AMBER overrun flag.
+    @* TRIP-TIMELINE-01 (Story 2.6) / Story 4.3 (FR-28/29): header inputs for the
+       wall-clock trip start time, the soft TIME LIMIT (as an HH:MM duration ≤24h OR a
+       finish-by deadline for the >24h horizon), and the soft AMBER over-limit flag.
        Kept in the header — NOT in the clickable stop rows (the 2.2/2.5 width lesson).
-       The overrun is a soft warn (warn/amber convention), never tertiary/red, and is
-       shown only when the KNOWN total exceeds the set budget. *@
+       The over-limit chip is a soft warn (amber convention), never tertiary/red, and is
+       shown only when the KNOWN total exceeds the set limit. *@
     @if (Vm.OrderedLegs.Count > 0)
     {
         <div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 border-b border-surface-container-high flex-shrink-0 text-xs min-w-0">
@@ -84,24 +85,47 @@
                        value="@StartTimeValue()"
                        @onchange="OnStartTimeChangedAsync" />
             </label>
+            @* Story 4.3 (FR-28): the time LIMIT as an HH:MM DURATION (≤24h). Native
+               <input type="time"> — HH:MM ↔ minutes converts only at this UI edge
+               (DurationValue/OnDurationChangedAsync); the VM keeps canonical minutes.
+               When the limit was set via the deadline path to >24h it can't be shown
+               in an HH:MM control, so the value renders empty (the deadline path owns
+               the >24h horizon — AC4). *@
             <label class="flex items-center gap-1 text-on-surface-variant min-w-0">
-                <span class="flex-shrink-0">@UiStrings.TripBudgetLabel</span>
-                <input type="number" min="0" max="@TripViewModel.MaxBudgetMinutes" inputmode="numeric"
-                       class="w-12 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
-                       placeholder="@UiStrings.TripBudgetPlaceholder"
-                       aria-label="@UiStrings.TripBudgetAria"
-                       value="@BudgetValue()"
-                       @onchange="OnBudgetChangedAsync" />
+                <span class="flex-shrink-0">@UiStrings.TripTimeLimitLabel</span>
+                <input type="time"
+                       class="min-w-0 w-auto text-xs px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
+                       placeholder="@UiStrings.TripTimeLimitPlaceholder"
+                       aria-label="@UiStrings.TripTimeLimitAria"
+                       value="@DurationValue()"
+                       @onchange="OnDurationChangedAsync" />
             </label>
+            @* Story 4.3 (FR-29, TRIP-SCHEDULE-01): the finish-by DEADLINE alternative —
+               a time GOAL (distinct from the Finish STOP of Story 4.5). REQUIRES a start;
+               on change it computes (deadline − start) minutes ONCE and persists only the
+               resulting minutes, so it never recomputes when the start/trip later change.
+               Disabled (with a short hint) when no start is set. This is the >24h path. *@
+            <label class="flex items-center gap-1 text-on-surface-variant min-w-0">
+                <span class="flex-shrink-0">@UiStrings.TripFinishByLabel</span>
+                <input type="datetime-local"
+                       class="min-w-0 w-auto text-xs px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface disabled:opacity-50"
+                       aria-label="@UiStrings.TripFinishByAria"
+                       disabled="@(Vm.TripStartTime is null)"
+                       @onchange="OnFinishByChangedAsync" />
+            </label>
+            @if (Vm.TripStartTime is null)
+            {
+                <span class="text-on-surface-variant opacity-70">@UiStrings.TripFinishByNeedsStartHint</span>
+            }
             @if (Vm.Timeline.IsOverBudget)
             {
-                @* Soft amber (warn) overrun — the project's muted amber soft-state tone
+                @* Soft amber (warn) over-limit — the project's muted amber soft-state tone
                    (text-amber-600, as used elsewhere), on a neutral surface chip. NEVER
-                   tertiary/red. There is no `warn` Tailwind token (2.3 finding). *@
+                   tertiary/red (UX-DR8). There is no `warn` Tailwind token (2.3 finding). *@
                 <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-amber-600 bg-surface-container"
-                      role="status" aria-label="@UiStrings.TripBudgetOverrunAria">
+                      role="status" aria-label="@UiStrings.TripOverLimitAria">
                     <span class="material-symbols-outlined" style="font-size:14px" aria-hidden="true">schedule</span>
-                    @UiStrings.TripBudgetOverrunLabel
+                    @UiStrings.TripOverLimitLabel
                 </span>
             }
         </div>
@@ -525,10 +549,14 @@
             ? t.ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture)
             : string.Empty;
 
-    // TRIP-TIMELINE-01: the budget-minutes input value, or empty when unset.
-    private string BudgetValue() =>
-        Vm.TimeBudgetMinutes is { } m
-            ? m.ToString(System.Globalization.CultureInfo.CurrentCulture)
+    // Story 4.3 (FR-28): the time-limit DURATION input value as HH:mm, or empty. The
+    // native <input type="time"> wire value is invariant "HH:mm" regardless of locale.
+    // Only representable for a ≤24h (≤1440 min) limit — a larger limit (set via the
+    // finish-by deadline path) can't be shown in an HH:MM control, so it renders empty
+    // (AC4: the deadline path owns the >24h horizon). m=0 still shows "00:00".
+    private string DurationValue() =>
+        Vm.TimeBudgetMinutes is { } m && m <= 1440
+            ? $"{m / 60:D2}:{m % 60:D2}"
             : string.Empty;
 
     // Story 4.1 (FR-26, RD10): parse the entered datetime-local value and persist the
@@ -550,9 +578,13 @@
         }
     }
 
-    // TRIP-TIMELINE-01: parse the entered budget minutes and persist via the VM.
-    // Empty/blank clears the budget (⇒ no overrun flag). Non-numeric is ignored.
-    private async Task OnBudgetChangedAsync(ChangeEventArgs e)
+    // Story 4.3 (FR-28): parse the entered HH:MM duration → minutes and persist via the
+    // VM. Empty/blank clears the limit (⇒ no over-limit flag). HH:MM ↔ minutes converts
+    // ONLY here at the UI edge — TimeBudgetMinutes stays canonical (NFR2). The native
+    // <input type="time"> emits invariant "HH:mm" (or "HH:mm:ss" with seconds enabled);
+    // TimeOnly.Parse handles both. The ≤24h scope is enforced by the control (max 23:59);
+    // SetTimeBudgetMinutesAsync also range-guards.
+    private async Task OnDurationChangedAsync(ChangeEventArgs e)
     {
         var text = e.Value?.ToString();
         if (string.IsNullOrWhiteSpace(text))
@@ -561,9 +593,39 @@
             return;
         }
 
-        if (int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.CurrentCulture, out var minutes) && minutes >= 0)
+        if (TimeOnly.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var time))
         {
-            await Vm.SetTimeBudgetMinutesAsync(minutes);
+            await Vm.SetTimeBudgetMinutesAsync((int)time.ToTimeSpan().TotalMinutes);
+        }
+    }
+
+    // Story 4.3 (FR-29, TRIP-SCHEDULE-01): the finish-by DEADLINE alternative. REQUIRES a
+    // start (the input is disabled without one). On change, compute (deadline − start)
+    // minutes ONCE here and persist only the resulting minutes — the deadline itself is
+    // NEVER persisted, so the limit never recomputes when the start/trip later change. The
+    // browser emits ISO "yyyy-MM-ddTHH:mm" ⇒ parse InvariantCulture. Guard 0 ≤ minutes ≤
+    // MaxBudgetMinutes (a multi-day deadline yields >1440 min — the >24h path, AC4).
+    private async Task OnFinishByChangedAsync(ChangeEventArgs e)
+    {
+        if (Vm.TripStartTime is not { } start)
+        {
+            return;
+        }
+
+        var text = e.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            await Vm.SetTimeBudgetMinutesAsync(null);
+            return;
+        }
+
+        if (DateTime.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var deadline))
+        {
+            var minutes = (int)Math.Round((deadline - start).TotalMinutes);
+            if (minutes >= 0 && minutes <= TripViewModel.MaxBudgetMinutes)
+            {
+                await Vm.SetTimeBudgetMinutesAsync(minutes);
+            }
         }
     }
 

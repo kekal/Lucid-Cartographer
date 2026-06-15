@@ -1,6 +1,29 @@
 # Story 4.3: Time limit as duration or finish-by deadline, with "Over limit"
 
-Status: ready-for-dev
+Status: done
+
+## Dev Agent Record
+
+Renamed budget→limit (new `TripTimeLimit*`/`TripFinishBy*`/`TripOverLimit*` keys; old `TripBudget*`
+kept for the deferred mobile mirror). Desktop raw-minutes input → HH:MM `<input type="time">`
+duration (≤24h; `DurationValue` renders empty for >1440 since HH:MM can't represent it).
+New `<input type="datetime-local">` "Finish by": disabled without a start; on change computes
+`round((deadline−start).TotalMinutes)` ONCE, guards `0..MaxBudgetMinutes` (86400), persists ONLY the
+minutes — the deadline is never stored (no `value` binding) so it never recomputes when start/trip
+change (TRIP-SCHEDULE-01). A multi-day deadline yields >1440 min (the >24h path). Over-limit chip
+renamed, amber soft-warn kept. `TimeBudgetMinutes` canonical; no VM math / schema / ctor change.
+
+Adversarial review: 0 CRIT / 0 HIGH / 0 MED / 1 LOW → SHIP. Compute-once (verified: no stored
+deadline; changing start after leaves minutes unchanged), requires-start (disabled + null-guard, no
+NRE), >24h (2880 persists, not clamped; IsOverBudget magnitude-agnostic), and rename completeness
+(zero desktop TripBudget* refs; mobile intact) all confirmed. LOW (unreachable empty-deadline clear
+branch) accepted as defensive. 904 fast + 20 Trip integration + 55 mobile green; build clean.
+
+## File List
+
+- LucidCartographer/Components/Shared/Trip/TripStopList.razor (MOD — HH:MM limit + finish-by deadline + rename)
+- LucidCartographer/Services/UiStrings.cs (MOD — TripTimeLimit*/TripFinishBy*/TripOverLimit*)
+- LucidCartographer.Tests/Components/Trip/TripTimelineRenderTests.cs (MOD — duration/deadline/rename tests)
 
 ## Story
 

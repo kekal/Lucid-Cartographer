@@ -300,6 +300,7 @@ public static class UiStrings
     public const string TripStartTimeLabel = "Start time";
     public const string TripStartTimeAria = "Trip start time (wall-clock)";
     // The time-budget input (header). Label + accessible name; minutes.
+    // (Mobile — the deferred mirror — still uses these raw-minutes strings.)
     public const string TripBudgetLabel = "Time budget";
     public const string TripBudgetAria = "Time budget in minutes";
     public const string TripBudgetPlaceholder = "min";
@@ -307,6 +308,24 @@ public static class UiStrings
     // the set budget. Honest, factual — a soft warning, not an error.
     public const string TripBudgetOverrunLabel = "Over budget";
     public const string TripBudgetOverrunAria = "The trip total exceeds the time budget";
+
+    // Story 4.3 (FR-28/29, TRIP-SCHEDULE-01, UX-DR8): the "Time limit" rename. The
+    // desktop control offers TWO ways to set the canonical TimeBudgetMinutes: an HH:MM
+    // duration (≤24h) and a finish-by deadline (any horizon, >24h). The label/aria/
+    // placeholder below replace the old "Time budget" copy on the desktop surface; the
+    // overrun chip reads "Over limit". (Mobile keeps the TripBudget* strings above.)
+    public const string TripTimeLimitLabel = "Time limit";
+    public const string TripTimeLimitAria = "Time limit as a duration (HH:MM, up to 24h)";
+    public const string TripTimeLimitPlaceholder = "hh:mm";
+    // Story 4.3 (FR-29): the finish-by deadline alternative (a TIME GOAL, computed once
+    // into minutes — distinct from the Finish STOP of Story 4.5). Requires a start.
+    public const string TripFinishByLabel = "Finish by";
+    public const string TripFinishByAria = "Finish-by deadline (date and time); requires a start time";
+    // Shown when no start time is set: the deadline input needs a start to compute against.
+    public const string TripFinishByNeedsStartHint = "Set a start time to use a finish-by deadline";
+    // The soft (amber, never red) over-limit flag — the Story 4.3 rename of the overrun chip.
+    public const string TripOverLimitLabel = "Over limit";
+    public const string TripOverLimitAria = "The trip total exceeds the time limit";
 
     // Data Sources Page
     public const string DataSourcesPageTitle = "Data Sources - Lucid Cartographer";

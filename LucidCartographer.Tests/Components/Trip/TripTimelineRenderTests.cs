@@ -197,14 +197,15 @@ public class TripTimelineRenderTests : BunitTestContext
         // Under budget â‡’ no flag.
         await cut.InvokeAsync(() => vm.SetTimeBudgetMinutesAsync(180));
         cut.Render();
-        cut.Markup.Should().NotContain(UiStrings.TripBudgetOverrunLabel, "120m under a 180m budget â‡’ no overrun");
+        cut.Markup.Should().NotContain(UiStrings.TripOverLimitLabel, "120m under a 180m limit â‡’ no over-limit");
 
         // Over budget â‡’ flag, amber tone, NEVER an error-red token.
         await cut.InvokeAsync(() => vm.SetTimeBudgetMinutesAsync(60));
         cut.Render();
-        cut.Markup.Should().Contain(UiStrings.TripBudgetOverrunLabel, "120m over a 60m budget â‡’ overrun");
-        cut.Markup.Should().Contain("text-amber-600", "the overrun is a soft amber warn");
-        cut.Markup.Should().NotContain("text-tertiary", "the overrun is NEVER red/tertiary");
+        // Story 4.3: the desktop chip is renamed "Over limit" (amber soft-warn, never red).
+        cut.Markup.Should().Contain(UiStrings.TripOverLimitLabel, "120m over a 60m limit â‡’ over-limit");
+        cut.Markup.Should().Contain("text-amber-600", "the over-limit chip is a soft amber warn");
+        cut.Markup.Should().NotContain("text-tertiary", "the over-limit chip is NEVER red/tertiary");
         cut.Markup.Should().NotContain("text-error");
     }
 
@@ -219,7 +220,7 @@ public class TripTimelineRenderTests : BunitTestContext
         await cut.InvokeAsync(() => vm.SetTimeBudgetMinutesAsync(1));
         cut.Render();
 
-        cut.Markup.Should().NotContain(UiStrings.TripBudgetOverrunLabel, "an uncertain total never shows a false overrun");
+        cut.Markup.Should().NotContain(UiStrings.TripOverLimitLabel, "an uncertain total never shows a false over-limit");
     }
 
     // === Inputs invoke the VM ===
@@ -279,8 +280,10 @@ public class TripTimelineRenderTests : BunitTestContext
         input.GetAttribute("value").Should().Be("2026-06-04T09:30");
     }
 
+    // === Story 4.3 (FR-28/29): time-limit duration (HH:MM) + finish-by deadline ===
+
     [Fact]
-    public async Task TripStopList_BudgetInput_InvokesVm()
+    public async Task TripStopList_TimeLimitDuration_IsHhmm_AndPersistsMinutes()
     {
         var factory = Seed();
         await AddSegmentAsync(factory, 1, 2, 3600, Fidelity.Manual);
@@ -289,10 +292,160 @@ public class TripTimelineRenderTests : BunitTestContext
 
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
 
-        var input = cut.Find($"input[aria-label=\"{UiStrings.TripBudgetAria}\"]");
-        await input.ChangeAsync(new ChangeEventArgs { Value = "240" });
+        // The desktop limit is an HH:MM duration picker (native time input), not raw minutes.
+        var input = cut.Find($"input[aria-label=\"{UiStrings.TripTimeLimitAria}\"]");
+        input.GetAttribute("type").Should().Be("time", "the desktop time limit is an HH:MM duration picker (FR-28)");
 
-        vm.TimeBudgetMinutes.Should().Be(240, "the budget input drives the VM");
+        // Entering "02:00" persists 120 canonical minutes (HH:MM → minutes at the UI edge).
+        await input.ChangeAsync(new ChangeEventArgs { Value = "02:00" });
+        vm.TimeBudgetMinutes.Should().Be(120, "02:00 ⇒ 120 minutes");
+    }
+
+    [Fact]
+    public async Task TripStopList_TimeLimitDuration_RoundTripsMinutes_Hhmm()
+    {
+        var factory = Seed();
+        await AddSegmentAsync(factory, 1, 2, 3600, Fidelity.Manual);
+        await AddSegmentAsync(factory, 2, 1, 3600, Fidelity.Manual);
+        await using var vm = await EnabledVmAsync(factory);
+        // 90 minutes ⇒ "01:30" in the HH:MM control.
+        await vm.SetTimeBudgetMinutesAsync(90);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        var input = cut.Find($"input[aria-label=\"{UiStrings.TripTimeLimitAria}\"]");
+        input.GetAttribute("value").Should().Be("01:30", "90 minutes renders as the HH:MM duration 01:30");
+    }
+
+    [Fact]
+    public async Task TripStopList_TimeLimitDuration_Cleared_NullsVm()
+    {
+        var factory = Seed();
+        await AddSegmentAsync(factory, 1, 2, 3600, Fidelity.Manual);
+        await AddSegmentAsync(factory, 2, 1, 3600, Fidelity.Manual);
+        await using var vm = await EnabledVmAsync(factory);
+        await vm.SetTimeBudgetMinutesAsync(90);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        var input = cut.Find($"input[aria-label=\"{UiStrings.TripTimeLimitAria}\"]");
+        await input.ChangeAsync(new ChangeEventArgs { Value = "" });
+        vm.TimeBudgetMinutes.Should().BeNull("clearing the duration clears the limit");
+    }
+
+    [Fact]
+    public async Task TripStopList_TimeLimitDuration_OverDayLimit_RendersEmpty()
+    {
+        var factory = Seed();
+        await AddSegmentAsync(factory, 1, 2, 3600, Fidelity.Manual);
+        await AddSegmentAsync(factory, 2, 1, 3600, Fidelity.Manual);
+        await using var vm = await EnabledVmAsync(factory);
+        // A >24h limit (2880 min) — only representable via the deadline path; the HH:MM
+        // control can't show it, so its value is empty (AC4).
+        await vm.SetTimeBudgetMinutesAsync(2880);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        var input = cut.Find($"input[aria-label=\"{UiStrings.TripTimeLimitAria}\"]");
+        input.GetAttribute("value").Should().BeNullOrEmpty("a >24h limit can't be shown in the HH:MM control");
+    }
+
+    [Fact]
+    public async Task TripStopList_FinishByDeadline_DisabledWithoutStart()
+    {
+        var factory = Seed();
+        await AddSegmentAsync(factory, 1, 2, 3600, Fidelity.Manual);
+        await AddSegmentAsync(factory, 2, 1, 3600, Fidelity.Manual);
+        await using var vm = await EnabledVmAsync(factory);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        // No start ⇒ the finish-by deadline input is disabled (it needs a start) + a hint shows.
+        var input = cut.Find($"input[aria-label=\"{UiStrings.TripFinishByAria}\"]");
+        input.HasAttribute("disabled").Should().BeTrue("the finish-by deadline requires a start time");
+        cut.Markup.Should().Contain(UiStrings.TripFinishByNeedsStartHint, "a hint explains the deadline needs a start");
+    }
+
+    [Fact]
+    public async Task TripStopList_FinishByDeadline_ComputesMinutesOnce_FromDeadlineMinusStart()
+    {
+        var factory = Seed();
+        await AddSegmentAsync(factory, 1, 2, 3600, Fidelity.Manual);
+        await AddSegmentAsync(factory, 2, 1, 3600, Fidelity.Manual);
+        await using var vm = await EnabledVmAsync(factory);
+        var start = new DateTime(2026, 6, 4, 9, 0, 0);
+        await vm.SetTripStartTimeAsync(start);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        var input = cut.Find($"input[aria-label=\"{UiStrings.TripFinishByAria}\"]");
+        input.HasAttribute("disabled").Should().BeFalse("a start is set ⇒ the deadline input is enabled");
+
+        // Deadline 4h after start ⇒ 240 minutes (computed once: deadline − start).
+        await input.ChangeAsync(new ChangeEventArgs { Value = "2026-06-04T13:00" });
+        vm.TimeBudgetMinutes.Should().Be(240, "13:00 − 09:00 = 240 minutes, computed once");
+    }
+
+    [Fact]
+    public async Task TripStopList_FinishByDeadline_MultiDay_ProducesOver24hLimit()
+    {
+        var factory = Seed();
+        await AddSegmentAsync(factory, 1, 2, 3600, Fidelity.Manual);
+        await AddSegmentAsync(factory, 2, 1, 3600, Fidelity.Manual);
+        await using var vm = await EnabledVmAsync(factory);
+        // The >24h path (AC4): a multi-day deadline yields >1440 minutes.
+        var start = new DateTime(2026, 6, 4, 9, 0, 0);
+        await vm.SetTripStartTimeAsync(start);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        var input = cut.Find($"input[aria-label=\"{UiStrings.TripFinishByAria}\"]");
+        // Two days after start ⇒ 2 × 24 × 60 = 2880 minutes (>1440 — the multi-day horizon).
+        await input.ChangeAsync(new ChangeEventArgs { Value = "2026-06-06T09:00" });
+        vm.TimeBudgetMinutes.Should().Be(2880, "a 2-day finish-by deadline yields a >24h limit (2880 min)");
+    }
+
+    [Fact]
+    public async Task TripStopList_FinishByDeadline_DoesNotRecompute_WhenStartLaterChanges()
+    {
+        var factory = Seed();
+        await AddSegmentAsync(factory, 1, 2, 3600, Fidelity.Manual);
+        await AddSegmentAsync(factory, 2, 1, 3600, Fidelity.Manual);
+        await using var vm = await EnabledVmAsync(factory);
+        await vm.SetTripStartTimeAsync(new DateTime(2026, 6, 4, 9, 0, 0));
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        // Set the deadline ⇒ 240 minutes persisted (computed once).
+        var deadline = cut.Find($"input[aria-label=\"{UiStrings.TripFinishByAria}\"]");
+        await deadline.ChangeAsync(new ChangeEventArgs { Value = "2026-06-04T13:00" });
+        vm.TimeBudgetMinutes.Should().Be(240);
+
+        // TRIP-SCHEDULE-01: changing the start LATER does NOT recompute the stored limit —
+        // only the resulting minutes were persisted, never the deadline itself.
+        await cut.InvokeAsync(() => vm.SetTripStartTimeAsync(new DateTime(2026, 6, 4, 7, 0, 0)));
+        cut.Render();
+        vm.TimeBudgetMinutes.Should().Be(240, "the limit is fixed minutes; it never recomputes when the start changes");
+    }
+
+    [Fact]
+    public async Task TripStopList_TimeLimitCopy_ReadsTimeLimit_AndOverLimit()
+    {
+        var factory = Seed();
+        await AddSegmentAsync(factory, 1, 2, 3600, Fidelity.Manual);
+        await AddSegmentAsync(factory, 2, 1, 3600, Fidelity.Manual);
+        await using var vm = await EnabledVmAsync(factory);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        cut.Markup.Should().Contain(UiStrings.TripTimeLimitLabel, "the desktop control reads 'Time limit'");
+        UiStrings.TripTimeLimitLabel.Should().Be("Time limit");
+        UiStrings.TripOverLimitLabel.Should().Be("Over limit");
+
+        // Over-limit chip reads "Over limit".
+        await cut.InvokeAsync(() => vm.SetTimeBudgetMinutesAsync(60)); // total 120 > 60
+        cut.Render();
+        cut.Markup.Should().Contain(UiStrings.TripOverLimitLabel);
     }
 
     // === Mobile surface mirrors ===
