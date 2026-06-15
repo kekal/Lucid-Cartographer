@@ -30,11 +30,17 @@ public class TripViewIntegrationTests : IntegrationTestBase
 
         await toggle.ClickAsync();
 
-        // Toggling on seeds the order and shows badges in the list, and announces.
-        await Page.WaitForSelectorAsync("[aria-label='Stop 1']", new() { Timeout = 10000 });
+        // Story 1.1 takeover: toggling on replaces the PoiTable with the TripStopList
+        // in the same wide region — the plain table is gone and the stop-list panel
+        // carries the numbered ("Stop X of N") badges for the seeded order.
+        var panel = Page.Locator(StopPanelSelector);
+        await panel.WaitForAsync(new() { Timeout = 10000 });
         Assert.Equal("true", await Page.Locator(ToggleSelector).GetAttributeAsync("aria-pressed"));
-        Assert.True(await Page.Locator("[aria-label='Stop 2']").IsVisibleAsync());
-        Assert.True(await Page.Locator("[aria-label='Stop 3']").IsVisibleAsync());
+        await panel.Locator($"[aria-label='{Fmt(UiStrings.TripStopBadgeAria, 1, 3)}']").WaitForAsync(new() { Timeout = 10000 });
+        Assert.True(await panel.Locator($"[aria-label='{Fmt(UiStrings.TripStopBadgeAria, 2, 3)}']").IsVisibleAsync());
+        Assert.True(await panel.Locator($"[aria-label='{Fmt(UiStrings.TripStopBadgeAria, 3, 3)}']").IsVisibleAsync());
+        // The plain PoiTable is no longer rendered in the takeover region.
+        Assert.Equal(0, await Page.Locator("td:has-text('Wawel Castle')").CountAsync());
     }
 
     [Fact]
@@ -46,41 +52,51 @@ public class TripViewIntegrationTests : IntegrationTestBase
 
         var toggle = Page.Locator(ToggleSelector);
         await toggle.ClickAsync();
-        await Page.WaitForSelectorAsync("[aria-label='Stop 1']", new() { Timeout = 10000 });
+        // Story 1.1 takeover: the stop-list panel (with its numbered badge) takes over
+        // the region when Trip View is on.
+        await Page.WaitForSelectorAsync(StopPanelSelector, new() { Timeout = 10000 });
+        await Page.WaitForSelectorAsync($"[aria-label='{Fmt(UiStrings.TripStopBadgeAria, 1, 3)}']", new() { Timeout = 10000 });
 
         await Page.Locator(ToggleSelector).ClickAsync();
 
-        // Badges gone; the plain collection (all 3 POIs) is intact.
-        await Page.WaitForSelectorAsync("[aria-label='Stop 1']", new() { State = WaitForSelectorState.Detached, Timeout = 10000 });
+        // Panel gone; the plain PoiTable (all 3 POIs) is restored intact.
+        await Page.WaitForSelectorAsync(StopPanelSelector, new() { State = WaitForSelectorState.Detached, Timeout = 10000 });
         Assert.Equal("false", await Page.Locator(ToggleSelector).GetAttributeAsync("aria-pressed"));
+        await Page.WaitForSelectorAsync("td:has-text('Wawel Castle')", new() { Timeout = 10000 });
         Assert.True(await Page.Locator("td:has-text('Wawel Castle')").IsVisibleAsync());
-        Assert.True(await Page.Locator("td:has-text('Wrocław Market Square')").IsVisibleAsync());
+        // Presence (not visibility): the restored PoiTable is taller than before, so a
+        // later row can sit below the fold. CountAsync proves no data loss without
+        // depending on viewport scroll position.
+        Assert.True(await Page.Locator("td:has-text('Wrocław Market Square')").CountAsync() > 0);
     }
 
     // Built from UiStrings so the selector tracks the localized aria-label.
     private static string StopPanelSelector => $"section[aria-label=\"{UiStrings.TripStopListAria}\"]";
 
     [Fact]
-    public async Task TripView_ShowsStopListPanel_BesideMap_AndClearsOnToggleOff()
+    public async Task TripView_TakesOverResultsRegion_AndClearsOnToggleOff()
     {
         await SeedAsync();
         await NavigateAndWaitAsync("/");
         await Page.WaitForSelectorAsync("td:has-text('Wawel Castle')", new() { Timeout = 10000 });
 
-        // No trip panel before Trip View is on.
+        // No trip panel before Trip View is on — the plain PoiTable owns the region.
         Assert.Equal(0, await Page.Locator(StopPanelSelector).CountAsync());
 
         await Page.Locator(ToggleSelector).ClickAsync();
 
-        // The desktop stop-list panel renders beside the map with ordered rows.
+        // Story 1.1: the stop-list panel takes over the wide results region with
+        // ordered rows, replacing the PoiTable (no plain table rows remain).
         var panel = Page.Locator(StopPanelSelector);
         await panel.WaitForAsync(new() { Timeout = 10000 });
         Assert.True(await panel.Locator("li").CountAsync() >= 3);
         Assert.True(await panel.GetByText("Wawel Castle").First.IsVisibleAsync());
+        Assert.Equal(0, await Page.Locator("td:has-text('Wawel Castle')").CountAsync());
 
-        // Toggling off removes the panel (no orphaned trip UI).
+        // Toggling off removes the panel and restores the PoiTable.
         await Page.Locator(ToggleSelector).ClickAsync();
         await panel.WaitForAsync(new() { State = WaitForSelectorState.Detached, Timeout = 10000 });
+        await Page.WaitForSelectorAsync("td:has-text('Wawel Castle')", new() { Timeout = 10000 });
     }
 
     [Fact]
@@ -431,14 +447,16 @@ public class TripViewIntegrationTests : IntegrationTestBase
         await Page.WaitForSelectorAsync("td:has-text('Wawel Castle')", new() { Timeout = 10000 });
 
         await Page.Locator(ToggleSelector).ClickAsync();
-        await Page.WaitForSelectorAsync("[aria-label='Stop 1']", new() { Timeout = 10000 });
+        // Story 1.1 takeover: the stop-list panel (numbered "Stop X of N" badges)
+        // owns the region when Trip View is on.
+        await Page.WaitForSelectorAsync($"[aria-label='{Fmt(UiStrings.TripStopBadgeAria, 1, 3)}']", new() { Timeout = 10000 });
 
         // Leave the Map page and come back (SPA navigation re-mounts MapPage).
         await ClickDataSourcesTabAsync();
         await ClickMapTabAsync();
 
-        // Reopening restores Trip View on + the Stop Order badges.
-        await Page.WaitForSelectorAsync("[aria-label='Stop 1']", new() { Timeout = 10000 });
+        // Reopening restores Trip View on + the stop-list panel with its badges.
+        await Page.WaitForSelectorAsync($"[aria-label='{Fmt(UiStrings.TripStopBadgeAria, 1, 3)}']", new() { Timeout = 10000 });
         Assert.Equal("true", await Page.Locator(ToggleSelector).GetAttributeAsync("aria-pressed"));
     }
 }

@@ -1,0 +1,65 @@
+# generated: 2026-06-15
+# last_updated: 2026-06-15
+# project: maps_editor
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: {project-root}/_bmad-output/implementation-artifacts
+#
+# Feature: Trip View — Layout Realignment & Honest Schedule (brownfield delta on
+# the shipped Trip Planning slice; prior feature archived under
+# _bmad-output/archive/trip-planning/). Epics 1-4, 19 stories.
+#
+# STATUS DEFINITIONS:
+#   Epic:  backlog | in-progress | done
+#   Story: backlog | ready-for-dev | in-progress | review | done
+#   Retro: optional | done
+#
+# Manual cycle (no tmux — Windows incompatible): main agent orchestrates
+# create-story -> dev (subagent) -> independent build/test verify ->
+# fresh-context adversarial review -> fixes -> commit per story; retrospective
+# at epic end. Always run the Trip integration filter after DI/VM-ctor/schema
+# changes:  dotnet test ... --filter "FullyQualifiedName~Integration&FullyQualifiedName~Trip"
+
+generated: 2026-06-15
+last_updated: 2026-06-15
+project: maps_editor
+project_key: NOKEY
+tracking_system: file-system
+story_location: "{project-root}/_bmad-output/implementation-artifacts"
+
+development_status:
+  # Epic 1: Readable Trip View takeover (desktop)
+  epic-1: in-progress
+  1-1-switch-the-desktop-list-region-into-the-trip: done
+  1-2-wide-trip-scoped-table-with-trip-only-columns: backlog
+  1-3-inter-row-leg-connector: backlog
+  1-4-canonical-stop-order-shared-across-both-views: backlog
+  epic-1-retrospective: optional
+
+  # Epic 2: Trustworthy & legible trip times
+  epic-2: backlog
+  2-1-reconciled-travel-time-arithmetic: backlog
+  2-2-minute-unit-reads-min: backlog
+  2-3-self-explaining-fidelity-badges: backlog
+  2-4-mock-default-estimate-note-and-osrm-recommendation: backlog
+  2-5-discoverable-icon-button-tooltips: backlog
+  epic-2-retrospective: optional
+
+  # Epic 3: Honest per-leg travel modes
+  epic-3: backlog
+  3-1-add-the-per-leg-travel-mode-column-migration: backlog
+  3-2-per-leg-mode-projection-and-ground-only-auto-compute: backlog
+  3-3-reset-newly-appeared-legs-on-reorder: backlog
+  3-4-per-leg-mode-pill-on-the-connector: backlog
+  3-5-per-leg-manual-time-edit-and-reset: backlog
+  3-6-mcp-per-leg-travel-mode: backlog
+  epic-3-retrospective: optional
+
+  # Epic 4: Multi-day schedule & honest finish
+  epic-4: backlog
+  4-1-date-time-start-picker: backlog
+  4-2-date-aware-multi-day-arrivals: backlog
+  4-3-time-limit-as-duration-or-finish-by-deadline: backlog
+  4-4-dwell-hhmm-picker: backlog
+  4-5-finish-designation-and-roundtrip-readout: backlog
+  epic-4-retrospective: optional

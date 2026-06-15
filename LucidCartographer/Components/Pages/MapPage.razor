@@ -319,39 +319,39 @@ else
             <div @ref="_splitterHandle"
                  class="flex-shrink-0 h-1.5 bg-surface-container-high hover:bg-primary/30 cursor-row-resize select-none transition-colors"></div>
 
-            @* Bottom Table *@
+            @* Bottom filtered-results region (Story 1.1). Trip View ON takes over
+               this wide region with the TripStopList (replacing — not beside —
+               the PoiTable); OFF restores the plain PoiTable exactly as before.
+               The map + splitter handle above stay intact in both states. *@
             <div @ref="_tableContainer"
                  style="height: @(Vm.TableHeight)px; min-height: 80px; max-height: 70%;"
                  class="flex-shrink-0 bg-white shadow-inner overflow-hidden flex flex-col">
-                <PoiTable Pois="Vm.FilteredPois"
-                         SelectedPoiId="Vm.SelectedPoiId"
-                         StopOrders="@(TripVm.IsTripViewEnabled ? TripVm.StopOrders : null)"
-                         CollectionName="@Vm.SelectedCollectionName"
-                         PoiCollectionNames="Vm.PoiCollectionNames"
-                         PoiCollectionMemberships="Vm.PoiCollectionMemberships"
-                         PoiCollectionIds="Vm.PoiCollectionIds"
-                         Collections="Vm.CollectionStates"
-                         OnPoiSelected="Vm.HandlePoiSelectedAsync"
-                         OnFocusClicked="Vm.HandleFocusPoiAsync"
-                         OnDeleteClicked="Vm.HandleDeletePoiAsync"
-                         OnSetMembershipsClicked="Vm.HandleSetMembershipsAsync"
-                         OnCopyClicked="Vm.HandleCopyPoiAsync"
-                         OnCopyToNewClicked="Vm.HandleCopyToNewCollectionAsync"
-                         OnBatchDeleteClicked="Vm.HandleBatchDeleteAsync"
-                         OnBatchSetMembershipsClicked="Vm.HandleBatchSetMembershipsAsync"
-                         OnBatchCopyClicked="Vm.HandleBatchCopyAsync"
-                         OnBatchCopyToNewClicked="Vm.HandleBatchCopyToNewCollectionAsync" />
+                @if (TripVm.IsTripViewEnabled)
+                {
+                    <TripStopList Vm="TripVm" />
+                }
+                else
+                {
+                    <PoiTable Pois="Vm.FilteredPois"
+                             SelectedPoiId="Vm.SelectedPoiId"
+                             CollectionName="@Vm.SelectedCollectionName"
+                             PoiCollectionNames="Vm.PoiCollectionNames"
+                             PoiCollectionMemberships="Vm.PoiCollectionMemberships"
+                             PoiCollectionIds="Vm.PoiCollectionIds"
+                             Collections="Vm.CollectionStates"
+                             OnPoiSelected="Vm.HandlePoiSelectedAsync"
+                             OnFocusClicked="Vm.HandleFocusPoiAsync"
+                             OnDeleteClicked="Vm.HandleDeletePoiAsync"
+                             OnSetMembershipsClicked="Vm.HandleSetMembershipsAsync"
+                             OnCopyClicked="Vm.HandleCopyPoiAsync"
+                             OnCopyToNewClicked="Vm.HandleCopyToNewCollectionAsync"
+                             OnBatchDeleteClicked="Vm.HandleBatchDeleteAsync"
+                             OnBatchSetMembershipsClicked="Vm.HandleBatchSetMembershipsAsync"
+                             OnBatchCopyClicked="Vm.HandleBatchCopyAsync"
+                             OnBatchCopyToNewClicked="Vm.HandleBatchCopyToNewCollectionAsync" />
+                }
             </div>
         </div>
-
-        @* Trip View stop-list panel — shown beside the map (additively) when Trip
-           View is on. The map + PoiTable stay intact; this is a thin extra column. *@
-        @if (TripVm.IsTripViewEnabled)
-        {
-            <div class="w-64 flex-shrink-0">
-                <TripStopList Vm="TripVm" />
-            </div>
-        }
 
         @* Right Detail Pane — parent owns the null check *@
         @if (Vm.SelectedPoi != null)
