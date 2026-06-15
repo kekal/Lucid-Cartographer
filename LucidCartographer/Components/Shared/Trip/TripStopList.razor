@@ -377,41 +377,24 @@
                     </li>
                 }
 
-                @* INTERIM PROTO-CONNECTOR (Story 1.2, FR-3): per-leg travel time +
-                   distance + FidelityBadge (+ manual minutes under Any/Air) relocated
-                   OUT of the stop row into a simple single-line element BETWEEN
-                   consecutive rows. Story 1.3 replaces this with the real LegConnector.
-                   Rendered as a <div> (NOT an <li>) so the row-count assertions
-                   (one <li> per stop) stay intact. Keyed off the row's DEPARTING leg —
-                   the same LegFrom the row used to show; preserves "—"/computing/manual
-                   behavior. *@
+                @* Story 1.3 (FR-3, AC1/AC2): the inter-row LegConnector renders the
+                   per-leg travel time/distance/fidelity (+ Any/Air manual entry +
+                   Manual-leg reset) on the shared edge between consecutive rows.
+                   Keyed off the row's DEPARTING leg (LegFrom) — so the CLOSING leg
+                   (FromPoiId == last stop) naturally renders AFTER the last row and,
+                   since the finish/return footer sits OUTSIDE this <ul>, BEFORE that
+                   footer (AC2). Wrapped in a plain <li> with NO data-poi-id so the list
+                   nesting is valid (no bare <div> child of <ul> — the Story-1.2 wart) and
+                   the row-count assertions that filter on li[data-poi-id] stay intact.
+                   NOT aria-hidden: the connector carries meaningful time/distance/fidelity
+                   and focusable controls (reset, manual input) that must stay in the
+                   accessibility tree (NFR7); its glyphs are individually aria-hidden. *@
                 var connectorLeg = LegFrom(row.PoiId);
                 @if (connectorLeg is not null)
                 {
-                    <div class="trip-leg-connector flex items-center gap-2 px-2 py-1 text-xs border-b border-surface-container"
-                         aria-hidden="false">
-                        <span class="text-on-surface-variant" aria-hidden="true">↓</span>
-                        <span class="@(connectorLeg.DurationSeconds is null ? "italic text-on-surface-variant" : "text-on-surface")"
-                              aria-label="@(connectorLeg.DurationSeconds is null ? UiStrings.TripLegComputingAria : string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegTravelTimeAria, TravelTimeFormatting.Duration(connectorLeg.DurationSeconds)))">
-                            @TravelTimeFormatting.Duration(connectorLeg.DurationSeconds)
-                        </span>
-                        <span class="text-on-surface-variant"
-                              aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegDistanceAria, TravelTimeFormatting.Distance(connectorLeg.DistanceMeters))">
-                            @TravelTimeFormatting.Distance(connectorLeg.DistanceMeters)
-                        </span>
-                        <FidelityBadge Fidelity="@connectorLeg.Fidelity" />
-                        @* TRIP-MANUAL-01 (AC5): manual minutes input — only under
-                           Any/Air. Entering a value upserts a Manual leg. *@
-                        @if (Vm.TravelMode == LucidCartographer.Data.Entities.TravelMode.AnyAir)
-                        {
-                            <input type="number" min="0" max="@TripViewModel.MaxManualLegMinutes" inputmode="numeric"
-                                   class="w-12 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
-                                   placeholder="@UiStrings.TripManualMinutesPlaceholder"
-                                   aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripManualMinutesAria, NameFor(connectorLeg.FromPoiId))"
-                                   value="@ManualMinutes(connectorLeg)"
-                                   @onchange="e => OnManualMinutesChangedAsync(connectorLeg, e.Value)" />
-                        }
-                    </div>
+                    <li>
+                        <LegConnector Leg="connectorLeg" Vm="Vm" />
+                    </li>
                 }
             }
         </ul>
@@ -459,11 +442,6 @@
     // next, or the roundtrip closing leg from the last stop back to the Start).
     private TripLeg? LegFrom(int poiId) =>
         Vm.OrderedLegs.FirstOrDefault(l => l.FromPoiId == poiId);
-
-    // Story 1.2: the POI name for a stop id (used by the interim leg connector's
-    // manual-minutes input aria-label, which keys off the departing stop).
-    private string NameFor(int poiId) =>
-        Vm.OrderedStops.FirstOrDefault(s => s.PoiId == poiId)?.Name ?? string.Empty;
 
     // Story 1.2 (FR-2): the enrichment-state icon for the Name column. Mirrors
     // PoiTable.razor:100-107 exactly — error/red when manual URL is needed,
@@ -556,30 +534,10 @@
         }
     }
 
-    // TRIP-MANUAL-01: the current manual minutes for an Any/Air leg (seconds÷60),
-    // or empty when the leg has no Manual row yet. Only a Manual fidelity row
-    // pre-fills the input — a Placeholder/computing leg shows an empty field.
-    private static string ManualMinutes(TripLeg leg) =>
-        leg.Fidelity == LucidCartographer.Data.Entities.Fidelity.Manual && leg.DurationSeconds is { } s
-            ? (s / 60).ToString(System.Globalization.CultureInfo.CurrentCulture)
-            : string.Empty;
-
-    // TRIP-MANUAL-01: parse the entered minutes and persist via the VM. An empty
-    // value clears the manual entry (reverts to the Placeholder).
-    private async Task OnManualMinutesChangedAsync(TripLeg leg, object? raw)
-    {
-        var text = raw?.ToString();
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            await Vm.ClearManualLegTimeAsync(leg.FromPoiId, leg.ToPoiId);
-            return;
-        }
-
-        if (int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.CurrentCulture, out var minutes) && minutes >= 0)
-        {
-            await Vm.SetManualLegTimeAsync(leg.FromPoiId, leg.ToPoiId, minutes);
-        }
-    }
+    // Story 1.3: the per-leg manual-minutes entry + reset now live in the
+    // LegConnector component (which raises the same Vm.Set/ClearManualLegTimeAsync
+    // commands); the interim ManualMinutes/OnManualMinutesChanged helpers moved
+    // there with it.
 
     // TRIP-DWELL-01: the current dwell minutes for a row, or empty when unset.
     private static string DwellMinutes(TripStopRow row) =>

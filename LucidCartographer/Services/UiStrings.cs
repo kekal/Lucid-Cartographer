@@ -226,6 +226,11 @@ public static class UiStrings
     // origin stop, giving the input a per-leg accessible name.
     public const string TripManualMinutesPlaceholder = "min";
     public const string TripManualMinutesAria = "Manual travel time in minutes for the leg departing {0}";
+    // Story 1.3 (NFR7): the inter-row leg connector's reset (↺) affordance — a real,
+    // focusable button that reverts a Manual leg override back to the computed time.
+    // Rendered only on a Manual leg; hidden at rest, revealed on hover/focus. {0} =
+    // the leg's origin stop name, giving the button a per-leg accessible name.
+    public const string TripLegResetManualAria = "Reset manual travel time for the leg departing {0}";
 
     // TRIP-TIMELINE-01 (Story 2.6): the honest itinerary timeline. Per-stop arrival =
     // a relative cumulative offset (always) + a wall-clock time (only with a TripStartTime),

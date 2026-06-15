@@ -64,7 +64,7 @@ public class TripStopListTests : BunitTestContext
 
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
 
-        var rows = cut.FindAll("li");
+        var rows = cut.FindAll("li[data-poi-id]");
         rows.Should().HaveCount(3);
         rows[0].TextContent.Should().Contain("P1");
         rows[2].TextContent.Should().Contain("P3");
@@ -315,7 +315,7 @@ public class TripStopListTests : BunitTestContext
         var expected = string.Format(CultureInfo.CurrentCulture, UiStrings.TripStopMovedAnnouncement, "P1", 2, 3);
         cut.WaitForAssertion(() =>
         {
-            var rows = cut.FindAll("li");
+            var rows = cut.FindAll("li[data-poi-id]");
             rows[0].TextContent.Should().Contain("P2");
             rows[1].TextContent.Should().Contain("P1", "the stop moved exactly one position");
             // The aria-live region carries the announcement.
@@ -335,7 +335,7 @@ public class TripStopListTests : BunitTestContext
 
         cut.WaitForAssertion(() =>
         {
-            var rows = cut.FindAll("li");
+            var rows = cut.FindAll("li[data-poi-id]");
             rows[1].TextContent.Should().Contain("P3");
             rows[2].TextContent.Should().Contain("P2");
         });
@@ -353,7 +353,7 @@ public class TripStopListTests : BunitTestContext
 
         cut.WaitForAssertion(() =>
         {
-            var rows = cut.FindAll("li");
+            var rows = cut.FindAll("li[data-poi-id]");
             rows[0].TextContent.Should().Contain("P2");
             rows[1].TextContent.Should().Contain("P3");
             rows[2].TextContent.Should().Contain("P1");
@@ -369,7 +369,7 @@ public class TripStopListTests : BunitTestContext
         cut.Find("li[data-poi-id='2']").DragStart();
         cut.Find("li[data-poi-id='2']").Drop();
 
-        var rows = cut.FindAll("li");
+        var rows = cut.FindAll("li[data-poi-id]");
         rows[0].TextContent.Should().Contain("P1");
         rows[1].TextContent.Should().Contain("P2");
         rows[2].TextContent.Should().Contain("P3");
@@ -464,7 +464,7 @@ public class TripStopListTests : BunitTestContext
         var expected = string.Format(CultureInfo.CurrentCulture, UiStrings.TripStartSetAnnouncement, "P2");
         cut.WaitForAssertion(() =>
         {
-            var rows = cut.FindAll("li");
+            var rows = cut.FindAll("li[data-poi-id]");
             rows[0].TextContent.Should().Contain("P2", "the Start anchors the list at stop 1");
             // Distinct Start badge aria + glyph on the Start row.
             var badge = cut.Find($"[aria-label=\"{startBadgeAria}\"]");
@@ -494,7 +494,7 @@ public class TripStopListTests : BunitTestContext
         var expected = string.Format(CultureInfo.CurrentCulture, UiStrings.TripOpenPathAnnounce, "P1");
         cut.WaitForAssertion(() =>
         {
-            var rows = cut.FindAll("li");
+            var rows = cut.FindAll("li[data-poi-id]");
             rows[2].TextContent.Should().Contain("P1", "the Finish is pinned to stop N");
             cut.Find($"[aria-label=\"{finishBadgeAria}\"]").TextContent.Trim().Should().Be("3");
             rows[2].QuerySelectorAll(".material-symbols-outlined")
@@ -620,7 +620,7 @@ public class TripStopListTests : BunitTestContext
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
 
         // The row is present â€” never dropped (AC1).
-        var rows = cut.FindAll("li");
+        var rows = cut.FindAll("li[data-poi-id]");
         rows.Should().HaveCount(3, "the unplaceable POI stays in the list");
 
         var row = cut.Find("li[data-poi-id='99']");
@@ -1118,10 +1118,17 @@ public class TripStopListTests : BunitTestContext
 
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
 
-        // The leg time + distance render in a connector div, not in a stop <li>.
+        // Story 1.3: the leg time + distance render in the LegConnector, on the
+        // shared edge between rows — inside an aria-hidden <li> WITHOUT a
+        // data-poi-id (valid list nesting), never inside a STOP row.
         var connector = cut.Find("div.trip-leg-connector");
         connector.TextContent.Should().Contain("1h 20m").And.Contain("12 km");
-        connector.Closest("li").Should().BeNull("the per-leg info must sit between rows, not inside a stop row");
+        var connectorLi = connector.Closest("li");
+        connectorLi.Should().NotBeNull("the connector is wrapped in an <li> for valid <ul> nesting");
+        connectorLi!.HasAttribute("data-poi-id").Should().BeFalse("the connector <li> is not a stop row");
+        // NOT aria-hidden: the connector carries meaningful info + focusable controls
+        // that must stay in the accessibility tree (NFR7).
+        connectorLi.HasAttribute("aria-hidden").Should().BeFalse("the connector content is exposed to AT");
 
         // No stop row contains the per-leg distance or the fidelity badge. (The leg
         // TIME is not asserted here because the Arrival column — which legitimately
@@ -1217,5 +1224,101 @@ public class TripStopListTests : BunitTestContext
         templates.Should().OnlyContain(s => s.Contains("display:grid"));
         var first = templates[0];
         templates.Should().AllBe(first, "all rows share one column template ⇒ aligned columns");
+    }
+
+    // === Story 1.3: the inter-row LegConnector placement + valid list nesting ===
+
+    /// <summary>
+    /// Seeds <paramref name="placeable"/> stops plus the full directional set of
+    /// AnyAir route segments between consecutive stops AND the roundtrip closing
+    /// pair, so every leg (including the closing leg) carries a real Estimated
+    /// duration/distance the connector can render.
+    /// </summary>
+    private static async Task<TripViewModel> RoutedRoundtripVmAsync(int placeable)
+    {
+        var factory = SeedFactory(placeable);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            void Seg(int from, int to) => db.RouteSegments.Add(new RouteSegment
+            {
+                FromPoiId = from, ToPoiId = to, TravelMode = TravelMode.AnyAir,
+                DurationSeconds = 4800, DistanceMeters = 12000,
+                Fidelity = Fidelity.Estimated, Source = "Mock", ComputedAt = DateTime.UtcNow,
+            });
+            for (var i = 1; i < placeable; i++) { Seg(i, i + 1); Seg(i + 1, i); }
+            // Roundtrip closing leg: last → first (and the reverse, for safety).
+            Seg(placeable, 1); Seg(1, placeable);
+            await db.SaveChangesAsync();
+        }
+        var writeLock = new SqliteWriteLock();
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
+        var vm = new TripViewModel(ordering, factory, writeLock, new TravelTimeTrigger(), new TravelTimeProgressService(), TestDbHelper.CreateInvalidationService(factory), NullLogger<TripViewModel>.Instance);
+        await vm.LoadAsync(CollectionId, placeable);
+        await vm.ToggleAsync();
+        return vm;
+    }
+
+    [Fact]
+    public async Task TripStopList_Connector_RendersBetweenConsecutiveRows_AsLiWithoutPoiId()
+    {
+        await using var vm = await RoutedRoundtripVmAsync(placeable: 3);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        // A 3-stop roundtrip has 3 legs ⇒ 3 connectors, each in its own <li>
+        // WITHOUT a data-poi-id (so li[data-poi-id] still counts exactly the 3 stop
+        // rows — valid <ul> nesting, no bare <div> child). The connector <li> is NOT
+        // aria-hidden — its content/controls stay in the accessibility tree (NFR7).
+        cut.FindAll("li[data-poi-id]").Should().HaveCount(3, "only stop rows carry data-poi-id");
+        var connectorLis = cut.FindAll(".trip-stop-list > li:not([data-poi-id])");
+        connectorLis.Should().HaveCount(3, "one connector per leg, each wrapped in its own <li>");
+        cut.FindAll("div.trip-leg-connector").Should().HaveCount(3);
+
+        // Each connector sits AFTER its origin row in document order: the first
+        // connector follows stop row 1 (between rows 1 and 2).
+        var allLis = cut.FindAll(".trip-stop-list > li");
+        allLis[0].HasAttribute("data-poi-id").Should().BeTrue("row 1 first");
+        allLis[1].HasAttribute("data-poi-id").Should().BeFalse("then the 1→2 connector");
+    }
+
+    [Fact]
+    public async Task TripStopList_ClosingConnector_RendersAfterLastRow_AndBeforeFinishFooter()
+    {
+        // A roundtrip closing leg (FromPoiId == last stop) renders after the last
+        // stop row; the finish/return footer sits OUTSIDE the <ul>, so the closing
+        // connector is before it (AC2).
+        await using var vm = await RoutedRoundtripVmAsync(placeable: 3);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        var listChildren = cut.FindAll(".trip-stop-list > li");
+        // Last child of the list is the closing connector (after the last stop row).
+        var last = listChildren[^1];
+        last.HasAttribute("data-poi-id").Should().BeFalse("the closing connector is the last list child");
+        last.QuerySelector("div.trip-leg-connector").Should().NotBeNull("the last list child is the closing connector");
+        // The stop row immediately before it is the last placeable stop (P3).
+        listChildren[^2].GetAttribute("data-poi-id").Should().Be("3");
+
+        // The finish/return footer is rendered OUTSIDE the <ul> (after it), so the
+        // closing connector (the last <ul> child) precedes it.
+        cut.Markup.Should().Contain(UiStrings.TripTimelineFinishLabel, "the return-to-start footer renders for a roundtrip");
+        cut.FindAll("ul.trip-stop-list .trip-leg-connector")
+            .Should().HaveCount(3, "all 3 connectors (incl. the closing one) live inside the <ul>, before the footer");
+    }
+
+    [Fact]
+    public async Task TripStopList_OpenPath_HasNoClosingConnector_AfterFinishRow()
+    {
+        // A distinct Finish opens the path (N−1 legs, no closing leg) ⇒ N−1
+        // connectors; the last stop row (the Finish) has NO departing connector.
+        await using var vm = await EnabledVmAsync(placeable: 3, finishPoiId: 3);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        vm.OrderedLegs.Should().HaveCount(2, "an open path has N−1 legs");
+        cut.FindAll(".trip-stop-list > li:not([data-poi-id])").Should().HaveCount(2, "no closing connector on an open path");
+        // The last list child is the Finish stop row, not a connector.
+        var listChildren = cut.FindAll(".trip-stop-list > li");
+        listChildren[^1].GetAttribute("data-poi-id").Should().Be("3", "the Finish row is last — no trailing connector");
     }
 }

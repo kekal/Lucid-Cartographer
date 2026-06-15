@@ -1,0 +1,115 @@
+@using LucidCartographer.Services.Trip
+
+@* Story 1.3 (FR-3, UX-DR2/DR11): the inter-row leg connector. A small,
+   PRESENTATIONAL component (NFR1) that renders ONE compact line on the shared
+   edge between the two stops a leg connects — the ↓ glyph, the travel time, the
+   distance, and the provenance FidelityBadge — plus a reset (↺) affordance that
+   appears only on a Manual leg (hover/focus-revealed) and the Any/Air manual-
+   minutes input. It raises VM COMMANDS only (Set/ClearManualLegTimeAsync); it
+   never touches services/DB and never mutates its own state. Inset (left pad)
+   approximates the name column (UX-DR2 [ASSUMPTION]); token-styled
+   surface-container / text-xs, neutral — never an error tone (UX-DR11). *@
+
+<div class="trip-leg-connector group flex items-center gap-2 pl-10 pr-2 py-1 text-xs bg-surface-container border-b border-surface-container">
+    @* Decorative downward glyph — the connector's "between these stops" cue. *@
+    <span class="text-on-surface-variant" aria-hidden="true">↓</span>
+
+    @* Travel time. Uncomputed (null DurationSeconds) ⇒ "—", styled neutral/muted
+       (NOT an error colour, UX-DR11) and announced as "computing"; a known time
+       reads on-surface with its travel-time accessible name. *@
+    <span class="@(Leg.DurationSeconds is null ? "italic text-on-surface-variant" : "text-on-surface")"
+          aria-label="@(Leg.DurationSeconds is null
+              ? UiStrings.TripLegComputingAria
+              : string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegTravelTimeAria, TravelTimeFormatting.Duration(Leg.DurationSeconds)))">
+        @TravelTimeFormatting.Duration(Leg.DurationSeconds)
+    </span>
+
+    @* "·" separator, decorative — the distance follows. *@
+    <span class="text-on-surface-variant" aria-hidden="true">·</span>
+
+    <span class="text-on-surface-variant"
+          aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegDistanceAria, TravelTimeFormatting.Distance(Leg.DistanceMeters))">
+        @TravelTimeFormatting.Distance(Leg.DistanceMeters)
+    </span>
+
+    <FidelityBadge Fidelity="@Leg.Fidelity" />
+
+    @* TRIP-MANUAL-01 (Story 2.2, AC5): manual minutes input — only under Any/Air.
+       Entering a value upserts a Manual leg; clearing reverts to the Placeholder.
+       stopPropagation so editing never selects/reorders an adjacent row. *@
+    @if (Vm.TravelMode == LucidCartographer.Data.Entities.TravelMode.AnyAir)
+    {
+        <input type="number" min="0" max="@TripViewModel.MaxManualLegMinutes" inputmode="numeric"
+               class="w-12 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
+               placeholder="@UiStrings.TripManualMinutesPlaceholder"
+               aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripManualMinutesAria, FromName)"
+               value="@ManualMinutes(Leg)"
+               @onchange="OnManualMinutesChangedAsync"
+               @onclick:stopPropagation
+               @onkeydown:stopPropagation />
+    }
+
+    @* Reset (↺): a real, focusable button — rendered ONLY for a Manual leg (an
+       existing override to revert). Hidden at rest, revealed on hover/focus
+       (the connector is a `group`; opacity-0 → group-hover / focus-within /
+       focus). Story 3.5 generalises reset to any leg; here it ships only the
+       manual-leg reset that already works. *@
+    @if (Leg.Fidelity == LucidCartographer.Data.Entities.Fidelity.Manual)
+    {
+        <button type="button"
+                class="ml-auto inline-flex items-center justify-center w-6 h-6 rounded text-on-surface-variant hover:text-primary hover:bg-surface-container-high opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 transition-opacity"
+                aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegResetManualAria, FromName)"
+                @onclick="OnResetAsync"
+                @onclick:stopPropagation
+                @onkeydown:stopPropagation>
+            <span aria-hidden="true">↺</span>
+        </button>
+    }
+</div>
+
+@code {
+    /// <summary>The leg this connector renders (from→to, with cached duration/distance/fidelity).</summary>
+    [Parameter, EditorRequired] public TripLeg Leg { get; set; } = null!;
+
+    /// <summary>
+    /// The owning Trip view-model. The connector raises VM COMMANDS only
+    /// (<see cref="TripViewModel.SetManualLegTimeAsync"/> /
+    /// <see cref="TripViewModel.ClearManualLegTimeAsync"/>) and reads
+    /// <see cref="TripViewModel.TravelMode"/> + the stop names — it never touches
+    /// services/DB and never mutates its own state (NFR1).
+    /// </summary>
+    [Parameter, EditorRequired] public TripViewModel Vm { get; set; } = null!;
+
+    // The leg-origin stop's POI name, used for the manual-input + reset
+    // accessible names (the leg is keyed off its departing stop).
+    private string FromName =>
+        Vm.OrderedStops.FirstOrDefault(s => s.PoiId == Leg.FromPoiId)?.Name ?? string.Empty;
+
+    // TRIP-MANUAL-01: the current manual minutes for an Any/Air leg (seconds÷60),
+    // or empty when the leg has no Manual row yet — only a Manual fidelity row
+    // pre-fills the input (a Placeholder/computing leg shows an empty field).
+    private static string ManualMinutes(TripLeg leg) =>
+        leg.Fidelity == LucidCartographer.Data.Entities.Fidelity.Manual && leg.DurationSeconds is { } s
+            ? (s / 60).ToString(System.Globalization.CultureInfo.CurrentCulture)
+            : string.Empty;
+
+    // TRIP-MANUAL-01: parse the entered minutes and raise the VM command. An empty
+    // value clears the manual entry (reverts to the Placeholder).
+    private async Task OnManualMinutesChangedAsync(ChangeEventArgs e)
+    {
+        var text = e.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            await Vm.ClearManualLegTimeAsync(Leg.FromPoiId, Leg.ToPoiId);
+            return;
+        }
+
+        if (int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.CurrentCulture, out var minutes) && minutes >= 0)
+        {
+            await Vm.SetManualLegTimeAsync(Leg.FromPoiId, Leg.ToPoiId, minutes);
+        }
+    }
+
+    // Reset (↺): revert this Manual leg's override — raises the VM clear command.
+    private Task OnResetAsync() => Vm.ClearManualLegTimeAsync(Leg.FromPoiId, Leg.ToPoiId);
+}
