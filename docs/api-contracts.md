@@ -53,6 +53,14 @@ On failure: **401** with `WWW-Authenticate: Bearer resource_metadata="…/.well-
 - `set_poi_google_maps_url(poiId, url)` — manual override, then re-enrich
 - `get_enrichment_status()` → `{ remaining, in_progress }`
 
+### Trip tools (`TripTools`)
+Trip Planning over `/mcp` (FR-16). Durations in **seconds**, distances in **meters**. Every write delegates to `ITripOrderingService` (the single 1-based `OrderIndex` writer), so an MCP-assigned order persists identically to a manual drag and stays drag-editable. See [trip-planning.md](./trip-planning.md).
+- `get_trip(collectionId)` → ordered placeable Stops (1-based, Start/Finish flags, dwell minutes) + cached directional Legs under the collection's TravelMode
+- `assign_stop_order(collectionId, orderedPoiIds[])` — full reorder; input must be exactly the collection's placeable Stop set (each once) or errors; pinned Start/Finish stay first/last
+- `set_trip_start(collectionId, poiId)` / `set_trip_finish(collectionId, poiId)` — pin Start (Order 1) / Finish (Order N); rejects designating a stop as both
+- `clear_trip_start(collectionId)` / `clear_trip_finish(collectionId)` — clear pin (clearing Finish restores roundtrip)
+- `set_dwell_time(collectionId, poiId, minutes?)` — set/clear dwell (omit/null clears; out-of-range ignored)
+
 ## Configuration Keys (selected)
 
-`Auth:BypassLocalAddresses`, `Auth:TrustedProxies`, `Auth:TrustedNetworks`, `Auth:InitialAdminPassword`; `Database:Path`; `Mcp:ApiKey`, `Mcp:AllowLocalNetworkBypass`; `OAuth:Issuer`; `Browser:ProfilePath`, `Browser:Headless`, `Browser:RemoteView:*`; `Enrichment:Concurrency|MaxConcurrentPages|BatchSize|IdlePollSeconds|MaxRetries|BackoffBaseSeconds`; `Deduplication:*`. Env vars: `DB_PATH`, `MCP_API_KEY`, `OAuth__Issuer`, `CHROME_PROFILE_PATH`, `SCRAPE_DIAG_LOG`, `ASPNETCORE_ENVIRONMENT`, `DISPLAY`.
+`Auth:BypassLocalAddresses`, `Auth:TrustedProxies`, `Auth:TrustedNetworks`, `Auth:InitialAdminPassword`; `Database:Path`; `Mcp:ApiKey`, `Mcp:AllowLocalNetworkBypass`; `OAuth:Issuer`; `Browser:ProfilePath`, `Browser:Headless`, `Browser:RemoteView:*`; `Enrichment:Concurrency|MaxConcurrentPages|BatchSize|IdlePollSeconds|MaxRetries|BackoffBaseSeconds`; `Deduplication:*`; `TravelTime:Provider` (`Mock` default / `Osrm`), `TravelTime:IdlePollSeconds`, `TravelTime:Osrm:{DriveBaseUrl,WalkBaseUrl,CycleBaseUrl,RequestTimeoutSeconds,GeometryPrecision}` (see [osrm.md](./osrm.md)). Env vars: `DB_PATH`, `MCP_API_KEY`, `OAuth__Issuer`, `CHROME_PROFILE_PATH`, `SCRAPE_DIAG_LOG`, `ASPNETCORE_ENVIRONMENT`, `DISPLAY`, `TravelTime__Provider`, `TravelTime__Osrm__*`.

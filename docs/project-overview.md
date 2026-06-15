@@ -12,7 +12,8 @@ Core capabilities:
 - **Automatic enrichment** — a background service resolves each POI against Google Maps (address, website, phone, rating, photo, coordinates) via headless Playwright/Chromium.
 - **Set operations** — union / intersect / subtract / dedup across collections with a configurable spatial tolerance.
 - **Export** — KML (flat or grouped by category), GPX, and push to a Google Maps saved list.
-- **MCP server** — an `/mcp` endpoint exposing POI/collection tools to AI clients (Claude Code, Claude.ai connectors).
+- **MCP server** — an `/mcp` endpoint exposing POI/collection and trip tools to AI clients (Claude Code, Claude.ai connectors).
+- **Trip Planning** — an additive Trip View over a collection: ordered Stops with map legs, per-leg travel times with honest Fidelity badging, dwell + itinerary timeline, Start/Finish/roundtrip, TSP-Sort, and MCP-assisted ordering. Travel times come from a pluggable `ITravelTimeProvider` (haversine **Mock** default; optional self-hosted **OSRM** for Measured road routing). See [trip-planning.md](./trip-planning.md).
 
 ## Repository Structure
 
@@ -33,7 +34,8 @@ Core capabilities:
 | Browser automation | Microsoft.Playwright | 1.49.0 | Enrichment, scraping, Google list export |
 | Geo | NetTopologySuite (GeoJSON/GPX), SharpKml, Geolocation, Fastenshtein | — | Parsing, distance, name similarity |
 | Auth | Cookie sessions + OpenIddict | 7.5.0 | OAuth 2.1 frontdoor for remote MCP |
-| AI integration | ModelContextProtocol.AspNetCore | 1.3.0 | `/mcp` endpoint |
+| AI integration | ModelContextProtocol.AspNetCore | 1.3.0 | `/mcp` endpoint (POI + trip tools) |
+| Trip routing | OSRM (optional sidecar) | `osrm-backend` v6.0.0 (pinned) | Opt-in Measured road routing; default is the in-process haversine Mock |
 | Tests | xUnit, FluentAssertions, Moq, bUnit, Playwright | — | Unit + component + integration |
 
 ## Architecture (at a glance)
@@ -41,7 +43,7 @@ Core capabilities:
 ```
 Components (.razor)  →  ViewModels (*ViewModel.cs)  →  Services (vertical slices)  →  Data (EF Core / SQLite)
  thin view hosts        Transient, StateChanged        Import/Enrichment/Operations    AppDbContext via factory
-                        event, IAsyncDisposable        /Auth/Export/Mcp/Browser
+                        event, IAsyncDisposable        /Auth/Export/Mcp/Browser/Trip
 ```
 
 `Program.cs` is a composition root only — DI in `Configuration/*Extensions.cs`, endpoints in `Endpoints/*Endpoints.cs`, one-shot startup in `Services/StartupCleanupService.cs`.
@@ -49,6 +51,7 @@ Components (.razor)  →  ViewModels (*ViewModel.cs)  →  Services (vertical sl
 ## Documentation Map
 
 - [Architecture](./architecture.md) — layers, patterns, cross-cutting concerns
+- [Trip Planning](./trip-planning.md) — the as-built Trip Planning vertical slice
 - [Data Models](./data-models.md) — entities, schema, migrations, enrichment state machine
 - [API & Endpoint Contracts](./api-contracts.md) — minimal-API endpoints + MCP tools
 - [Component Inventory](./component-inventory.md) — pages, ViewModels, shared components

@@ -1,11 +1,11 @@
 ---
 project_name: 'maps_editor'
 user_name: 'Yurik'
-date: '2026-06-10'
-sections_completed: ['technology_stack', 'language_rules', 'framework_rules', 'testing_rules', 'code_quality_rules', 'workflow_rules', 'critical_rules']
-existing_patterns_found: 11
+date: '2026-06-14'
+sections_completed: ['technology_stack', 'language_rules', 'framework_rules', 'testing_rules', 'code_quality_rules', 'workflow_rules', 'critical_rules', 'trip_planning_rules']
+existing_patterns_found: 14
 status: 'complete'
-rule_count: 18
+rule_count: 24
 optimized_for_llm: true
 ---
 
@@ -35,7 +35,8 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - ViewModels: one per heavy page, `sealed`, **primary-constructor DI**, registered **`Transient`** (in `Configuration/ViewModelExtensions.cs`), expose `event Action? StateChanged` + a private `Notify()`, state with `private set`. Own a `CancellationTokenSource` and implement `IAsyncDisposable` where needed.
 - The component `@code` block is a ~12-line bridge only: subscribe `Vm.StateChanged += OnVmChanged` in `OnInitializedAsync`, `OnVmChanged() => InvokeAsync(StateHasChanged)`, unsubscribe + dispose the VM in `DisposeAsync`.
 - `Program.cs` is a **composition root only**. DI registrations live in `Configuration/*Extensions.cs`; minimal-API endpoints in `Endpoints/*Endpoints.cs`; one-shot startup work in `Services/StartupCleanupService.cs`.
-- Services are vertical slices (`Import/`, `Enrichment/`, `Operations/`, `Auth/`, `Export/`), **interface-first**.
+- Services are vertical slices (`Import/`, `Enrichment/`, `Operations/`, `Auth/`, `Export/`, `Trip/`), **interface-first**.
+- **DI seam may need two overloads.** A slice whose VM-facing services must also work in the integration host registers a **parameterless** overload (VM-facing, no self-firing loop / no resilience-pipeline / no `IConfiguration` dependency — what `IntegrationTestBase` composes by hand) **plus** an `IConfiguration` overload that calls the parameterless one then adds the production-only pieces (config-selected provider, hosted services, `Polly` pipelines). Pattern: `AddTripServices()` vs `AddTripServices(IConfiguration)` in `Configuration/TripServicesExtensions.cs`. The parameterless overload is the **recurring integration-host regression point** — see Workflow Rules.
 
 ### UI Conventions
 - **No hardcoded UI text** — all strings go through `UiStrings` (`@UiStrings.*`).
@@ -46,10 +47,19 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Three layers: **Unit** (pure logic — importers, exporters, orchestrators, ViewModels), **Component** (bUnit), **Integration** (`IntegrationTestBase`: real `WebApplication` + Playwright + a temp SQLite db per test, points `WebRootPath` at the app's `wwwroot`).
 - `InternalsVisibleTo("LucidCartographer.Tests")` is set — test internals directly rather than widening visibility.
 - Mobile vs desktop paths have dedicated bases/tests (`MobileTestBase`, `Mobile*Tests`) — cover both when touching responsive UI.
+- **After any Trip DI / VM-constructor / hosted-service change, run the Trip integration filter** — the integration host composes services by hand via the parameterless `AddTripServices()` overload, so a VM ctor that gains a production-only dependency boots in `Program.cs` but breaks the A3 host. Filter: `dotnet test … --filter "FullyQualifiedName~Integration&FullyQualifiedName~Trip"`.
+
+### Trip Planning Slice (`Services/Trip/`, `Components/Shared/Trip/`)
+- **Canonical units are fixed at the edges, never converted mid-layer:** travel time in **seconds** (`RouteSegment.DurationSeconds`, provider results), distance in **meters** (`DistanceMeters`), dwell & time-budget in **minutes** (`PoiCollectionItem.DwellMinutes`, `PoiCollection.TimeBudgetMinutes`). Convert only at UI/provider boundaries.
+- **The `RouteSegment` Leg cache key `(FromPoiId, ToPoiId, TravelMode)` is DIRECTIONAL** ([TRIP-CACHE-01]): A→B and B→A are distinct rows, never collapsed/mirrored (one-way streets make Drive legs genuinely asymmetric).
+- **`TravelMode` and `Fidelity` are string constants** (`Data/Entities/TravelMode.cs`, `Fidelity.cs`), persisted as strings and constrained by EF **check constraints** built from each type's `.All` list via `EnumCheckSql` ([TRIP-SCHEMA-01]) — add a value to `.All` and the DB constraint follows automatically. Don't introduce int-backed enums for these.
+- **One ordering write-path:** `TripOrderingService.SetOrderAsync` is the **sole writer** of `PoiCollectionItem.OrderIndex`, committing under the shared process-wide `SqliteWriteLock` (same gate as enrichment/dedup). Registered `Scoped`. Never write `OrderIndex` elsewhere.
+- **Provider seam + haversine fallback:** travel times come through `ITravelTimeProvider` (haversine `MockTravelTimeProvider` is the default — OSRM is opt-in via `TravelTime:Provider=Osrm`, never default). The off-circuit `TravelTimeComputationBackgroundService` runs providers through the Polly `"travel-time"` pipeline and, on any provider failure, **degrades to the haversine Estimated value stamped `Source=EstimatedFallback`** ([TRIP-DEGRADE-01]) — one bad leg never fails the pass. A provider declares its own `Attribution` HTML; when an OSM-derived provider (OSRM) is active its OSM/ODbL attribution **must** surface on the map (NFR8) — haversine declares null (not OSM-derived).
+- **Validate the never-invalidated cache row at write time.** A Leg is computed iff no cache row exists for its key; the upsert still defends with an explicit guard that **never downgrades a `Manual` or `Measured` row** ([TRIP-MANUAL-01]/[TRIP-DEGRADE-01]) and `RouteSegmentInvalidationService` never deletes `Manual` rows. Keep these guards even when the current code path "can't" reach them.
 
 ### Conventions Agents Miss
 - **DB path resolution order:** `DB_PATH` env var → `Database:Path` config → `data/cartographer.db` under `ContentRootPath`.
-- **Design-decision comment codes** in source — search the codebase before changing flagged code: `ARCH-CRIT-*`, `ARCH-HIGH-*`, `ARCH-LOW-*`, `HIGH-*`, `MED-*`, `IE-*`.
+- **Design-decision comment codes** in source — search the codebase before changing flagged code: `ARCH-CRIT-*`, `ARCH-HIGH-*`, `ARCH-LOW-*`, `HIGH-*`, `MED-*`, `IE-*`, and the Trip slice's `TRIP-*` codes (e.g. `TRIP-CACHE-01`, `TRIP-SCHEMA-01`, `TRIP-TRAVELTIME-01`, `TRIP-OSRM-01`, `TRIP-DEGRADE-01`).
 - **Auth:** PBKDF2-SHA256 @ 600,000 iterations; admin bootstrap prints a one-time password to the log. `Auth:BypassLocalAddresses` requires `Auth:TrustedProxies` behind a reverse proxy, or auth is silently bypassed for all requests.
 - `BlazorDisableThrowNavigationException=true` is intentional — don't "fix" navigation exceptions.
 
@@ -67,4 +77,4 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Update when the technology stack or core patterns change.
 - Review periodically and remove rules that become obvious over time.
 
-Last Updated: 2026-06-10
+Last Updated: 2026-06-14

@@ -40,13 +40,14 @@ ForwardedHeaders (**first** — rewrites `X-Forwarded-Proto`) → exception hand
 - **Auth/** — `PasswordHasher` (PBKDF2-SHA256, 600k iterations, iteration count embedded in hash), `SessionStore` (hashed opaque tokens, 30-day lifetime, fixed-time comparison).
 - **Export/** — `IFileExporter` impls (GPX, KML with HTML balloons / category folders), `GoogleMapsListExporter` (UI automation to push a saved list), `ExportBackgroundService` (single-consumer `Channel` queue so a long headful run never blocks imports).
 - **Browser/** — `BrowserSessionManager` (single long-lived persistent-profile Chromium, lazy init behind a `SemaphoreSlim`, per-page CDP mobile emulation), `GoogleBrowserLock` (single-flight), `GoogleSignIn`/`GoogleConsent` helpers.
-- **Mcp/** — read/write/enrichment tool types exposed at `/mcp`.
+- **Trip/** — the **Trip Planning** slice (additive lens over a `PoiCollection`). `ITravelTimeProvider` (Mock haversine default / optional OSRM) is the single travel-data gateway; `RouteSegment` is the directional per-pair Leg/Distance-Matrix cache; `TravelTimeComputationBackgroundService` mirrors enrichment (poll/`TravelTimeTrigger`, per-worker DbContext, `SqliteWriteLock`, Polly `travel-time` pipeline); `TripOrderingService` is the single 1-based `OrderIndex` writer (drag/keyboard/TSP/MCP all funnel through it); `TspSolver` (pure NN+2-opt) and `DistanceMatrixService` (on-demand N×N over the shared cache) do assisted ordering; `ItineraryTimeline` (pure) computes the lowest-fidelity-wins timeline. Decisions tagged `TRIP-*`. See [trip-planning.md](./trip-planning.md).
+- **Mcp/** — read/write/enrichment tool types plus `TripTools` (read trip, assign Stop Order, set Start/Finish/dwell) exposed at `/mcp`.
 
 ## Cross-Cutting Concerns
 
-- **Concurrency control:** `SqliteWriteLock` (singleton) serializes all `SaveChangesAsync` between enrichment and dedup (SQLite single-writer); `GoogleBrowserLock` serializes browser ops (one Chromium profile/process); `Interlocked` disposed-flags and circuit guards protect JS interop during prerender/teardown.
+- **Concurrency control:** `SqliteWriteLock` (singleton) serializes all `SaveChangesAsync` between enrichment, dedup, and trip-time/order writes (SQLite single-writer); `GoogleBrowserLock` serializes browser ops (one Chromium profile/process); `Interlocked` disposed-flags and circuit guards protect JS interop during prerender/teardown.
 - **Event-driven background work:** `EnrichmentTrigger` and `DedupTrigger` wake workers; Coravel + Channel queues decouple UI from long jobs.
-- **Resilience:** Polly v8 named pipelines — `scraper` (concurrency 1 + retry + 10-min timeout), `enrichment` (retry + 2-min timeout).
+- **Resilience:** Polly v8 named pipelines — `scraper` (concurrency 1 + retry + 10-min timeout), `enrichment` (retry + 2-min timeout), `travel-time` (wraps provider calls in the trip compute service).
 - **Responsive UI:** `ViewportService` (scoped, one per circuit, ~768px breakpoint, cookie-seeded during SSR to avoid flash) drives a desktop/mobile component split on every page.
 - **JS interop:** `leafletInterop.js` (map layers, markers, bounds, splitters, geolocation, downloads), plus `viewport.js`, `theme.js`, `history.js`, `reconnect.js`.
 
@@ -60,4 +61,4 @@ Three layers — **unit** (importers, exporters, orchestrators, matchers, ViewMo
 
 ## Design Decision Codes
 
-Comments reference codes — search the code for context: `ARCH-CRIT-*` (migrations, antiforgery, CSP), `ARCH-HIGH-*` (DI lifetimes, HTTPS defense-in-depth, header/compression ordering, scraper single-flight), `ARCH-LOW-*` (unobserved-task logging, Docker health), `HIGH-*` (concurrency/resource control), `MED-*` (compression, OS-independent paths, health, Docker perms), `IE-*` (import/enrichment), `OPS-R*` (set-operation rules), `REVIEW-*` (data-layer review fixes).
+Comments reference codes — search the code for context: `ARCH-CRIT-*` (migrations, antiforgery, CSP), `ARCH-HIGH-*` (DI lifetimes, HTTPS defense-in-depth, header/compression ordering, scraper single-flight), `ARCH-LOW-*` (unobserved-task logging, Docker health), `HIGH-*` (concurrency/resource control), `MED-*` (compression, OS-independent paths, health, Docker perms), `IE-*` (import/enrichment), `OPS-R*` (set-operation rules), `REVIEW-*` (data-layer review fixes), `TRIP-*` (Trip Planning: `TRIP-CACHE-*`, `TRIP-ORDER-*`, `TRIP-OSRM-*`, `TRIP-TSP-*`, `TRIP-TIMELINE-*`, `TRIP-MCP-*`, etc.).

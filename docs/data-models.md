@@ -34,8 +34,16 @@ Navigations: `PoiImage? Image` (1:1, not auto-loaded), `List<PoiCollectionItem>`
 ### PoiCollection
 `Id`, `Name` (≤500), `Description`, `Color` (≤7 hex, default `#005bbf`), `IconName`, `IsVisible` (default true), `CreatedDate`, `SourceType`, `SourceFileName`, `Version` (concurrency token). `PoiCount` is `[NotMapped]` — computed at read time. Index on `Name`.
 
+**Trip Planning fields** (`AddTripPlanning` migration): `TravelMode` (string ≤20, default `AnyAir`, check-constrained), `StartPoiId`/`FinishPoiId` (nullable FK to Poi, `SetNull`, indexed), `TripStartTime` (`DateTime?`), `TimeBudgetMinutes` (int?, soft budget), `TripViewEnabled` (bool, per-collection Trip View persistence). Null `FinishPoiId` ⇒ roundtrip. See [trip-planning.md](./trip-planning.md).
+
 ### PoiCollectionItem (join)
-Composite PK `(PoiId, PoiCollectionId)`; two cascade FKs. Many-to-many between Poi and PoiCollection.
+Composite PK `(PoiId, PoiCollectionId)`; two cascade FKs. Many-to-many between Poi and PoiCollection. **Trip fields:** `OrderIndex` (int, 1-based Stop Order; 0 = "not a Stop", e.g. unplaceable) and `DwellMinutes` (int?, per-membership dwell so the same POI carries different dwell across trips).
+
+### RouteSegment (trip leg / distance-matrix cache)
+Composite PK `(FromPoiId, ToPoiId, TravelMode)` — **directional** (`TRIP-CACHE-01`: A→B and B→A are distinct rows). Columns: `DurationSeconds` (int, canonical **seconds**), `DistanceMeters` (double, canonical **meters**), `GeometryPolyline` (string?, null = no road geometry), `Fidelity` (string ≤20, check-constrained), `Source` (≤100), `ComputedAt` (UTC), `Version` (`[ConcurrencyCheck]`). Cascade FKs to `Pois`; indexes on `FromPoiId` and `ToPoiId`. Cache rows are derived/disposable — invalidated on coord/mode/provider/assumed-speed change; never the source of truth for trip intent.
+
+### String-persisted trip enums
+`Data/Entities/TravelMode.cs` (`AnyAir`/`Drive`/`Walk`/`Cycle`) and `Data/Entities/Fidelity.cs` (`Measured`/`Estimated`/`Placeholder`/`Manual`) are static string-constant classes (the `PoiCategory` precedent, `TRIP-SCHEMA-01`), each enforced by an EF check constraint built from the class's `All` list (`CK_PoiCollection_TravelMode`, `CK_RouteSegment_TravelMode`, `CK_RouteSegment_Fidelity`) so the SQL can never drift from the C# set.
 
 ### Tag / PoiTag
 `Tag`: `Id`, `Name` (≤200, unique). `PoiTag`: composite PK `(PoiId, TagId)`, two cascade FKs.
@@ -57,9 +65,12 @@ User (standalone)            Session (standalone)        OpenIddict* (OAuth, pkg
 Poi 1───1 PoiImage
 Poi *──* PoiCollection   (via PoiCollectionItem, composite PK, cascade)
 Poi *──* Tag             (via PoiTag, composite PK, cascade)
+
+PoiCollection ──> Poi    (StartPoiId / FinishPoiId, nullable, SetNull)
+RouteSegment  ──> Poi    (FromPoiId / ToPoiId, cascade)  — directional leg cache
 ```
 
-All FKs use `DeleteBehavior.Cascade` — deleting a POI removes its image, collection links, and tag links.
+Most FKs use `DeleteBehavior.Cascade` — deleting a POI removes its image, collection links, tag links, and any `RouteSegment` rows touching it. The exception: a collection's `StartPoiId`/`FinishPoiId` use `SetNull` (deleting the pinned POI just clears the pin).
 
 ## Migrations (in order)
 
@@ -76,6 +87,7 @@ All FKs use `DeleteBehavior.Cascade` — deleting a POI removes its image, colle
 | AddOAuthFrontdoor | OpenIddict tables |
 | RemovePoiStatusAndVisitedDate | Drop legacy `Status`, `VisitedDate` |
 | AddPoiEnrichmentRequested | `EnrichmentRequested` column |
+| AddTripPlanning | Trip fields on PoiCollection/PoiCollectionItem + new `RouteSegments` table + enum check constraints; backfills `OrderIndex` (1..N per collection over placeable members) and `TravelMode` (`AnyAir`) |
 
 > Schema changes require a new `dotnet ef migrations add`; migrations are applied at startup via `MigrateAsync` (ARCH-CRIT-01), never `EnsureCreated`. Never hand-edit an applied migration; SQLite has limited `ALTER` support.
 

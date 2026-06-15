@@ -15,7 +15,8 @@ maps_editor/
 │   │   ├── Layout/                #   MainLayout, LoginLayout
 │   │   ├── Pages/                 #   <Page>.razor + <Page>ViewModel.cs (markup + state)
 │   │   ├── Shared/                #   Reusable: LeafletMap, PoiTable, CollectionSidebar,
-│   │   │                          #   PoiDetailPane, Mobile* screens, dialogs, ViewportObserver
+│   │   │   │                      #   PoiDetailPane, Mobile* screens, dialogs, ViewportObserver
+│   │   │   └── Trip/              #   Trip View UI + TripViewModel (toggle, stop list, badges, mode selector)
 │   │   ├── App.razor, Routes.razor, _Imports.razor
 │   │
 │   ├── Configuration/             # IServiceCollection / IApplicationBuilder extensions (DI lives here)
@@ -38,14 +39,18 @@ maps_editor/
 │   │   ├── Enrichment/            #   PoiEnrichmentBackgroundService, PoiDetailEnricher, EnrichmentStateMachine
 │   │   ├── Operations/            #   SetOperationService, PoiMatcher, PoiDeduplication(+BackgroundService)
 │   │   ├── Export/                #   IFileExporter (GPX/KML), GoogleMapsListExporter, ExportBackgroundService
-│   │   ├── Mcp/                   #   PoiReadTools, PoiWriteTools, EnrichmentTools, prompts/resources
+│   │   ├── Mcp/                   #   PoiReadTools, PoiWriteTools, EnrichmentTools, TripTools, prompts/resources
+│   │   ├── Trip/                  #   Trip Planning: ITravelTimeProvider (Mock/OSRM), RouteSegment cache +
+│   │   │                          #   invalidation, TravelTimeComputationBackgroundService, TripOrderingService,
+│   │   │                          #   TspSolver, DistanceMatrixService, ItineraryTimeline (see trip-planning.md)
 │   │   ├── StartupCleanupService.cs   # ENTRY: one-shot startup (migrate, seed admin, vacuum)
 │   │   ├── PoiService.cs, LeafletMapService.cs, ViewportService.cs, UiStrings.cs
 │   │   └── SqliteWriteLock.cs, GeoUtils.cs, PoiUrlHelper.cs, ...   # shared helpers
 │   │
 │   ├── Data/                      # Persistence
 │   │   ├── AppDbContext.cs        #   Fluent API + check constraints + indexes + .UseOpenIddict()
-│   │   └── Entities/              #   Poi, PoiImage, PoiCollection, PoiCollectionItem, Tag, PoiTag, Session, User
+│   │   └── Entities/              #   Poi, PoiImage, PoiCollection, PoiCollectionItem, Tag, PoiTag, Session, User,
+│   │   │                          #   RouteSegment (trip leg cache), TravelMode + Fidelity (string enums)
 │   │
 │   ├── Migrations/                # EF Core migrations (applied at startup)
 │   └── wwwroot/                   # css/ (Tailwind input + compiled), js/ (leafletInterop, viewport, theme, ...)

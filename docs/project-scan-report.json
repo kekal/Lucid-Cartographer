@@ -1,30 +1,32 @@
 {
   "workflow_version": "1.2.0",
-  "timestamps": { "started": "2026-06-11T11:21:02+0200", "last_updated": "2026-06-11T11:30:00+0200", "completed": "2026-06-11T11:30:00+0200" },
-  "mode": "initial_scan",
+  "timestamps": { "started": "2026-06-14T00:00:00+0200", "last_updated": "2026-06-14T00:00:00+0200", "completed": "2026-06-14T00:00:00+0200" },
+  "mode": "full_rescan",
   "scan_level": "deep",
   "project_root": "C:/backup/maps_editor",
   "project_knowledge": "C:/backup/maps_editor/docs",
+  "autonomous": true,
   "completed_steps": [
-    { "step": "step_1", "status": "completed", "timestamp": "2026-06-11T11:21:02+0200", "summary": "Classified as monolith, 1 part, web (Blazor Server / .NET 8)" },
-    { "step": "step_2-4", "status": "completed", "timestamp": "2026-06-11T11:28:00+0200", "summary": "Deep-scanned Services, Data+Migrations, Components, Endpoints/Configuration via parallel explorers" },
-    { "step": "step_5-9", "status": "completed", "timestamp": "2026-06-11T11:29:30+0200", "summary": "Wrote project-overview, architecture, data-models, api-contracts, component-inventory, source-tree-analysis, development-guide, deployment-guide" },
-    { "step": "step_10", "status": "completed", "timestamp": "2026-06-11T11:30:00+0200", "summary": "Master index.md generated; no incomplete markers" },
-    { "step": "step_12", "status": "completed", "timestamp": "2026-06-11T11:30:00+0200", "summary": "Workflow complete" }
+    { "step": "step_0.6", "status": "completed", "timestamp": "2026-06-14T00:00:00+0200", "summary": "Found existing docs (2026-06-11) + completed state file >24h old; autonomously chose full_rescan, deep, to capture the as-built Trip Planning feature (Epics 1-4)" },
+    { "step": "step_1-4", "status": "completed", "timestamp": "2026-06-14T00:00:00+0200", "summary": "Re-classified as monolith/web (unchanged); deep-read the Trip slice (Services/Trip, Components/Shared/Trip, Services/Mcp/TripTools, Data/Entities RouteSegment/Fidelity/TravelMode, TripServicesExtensions, AddTripPlanning migration) and ground-truthed against planning-artifacts/architecture.md + epics.md" },
+    { "step": "step_5-9", "status": "completed", "timestamp": "2026-06-14T00:00:00+0200", "summary": "Added trip-planning.md (as-built reference for the emphasis slice); updated architecture, data-models, api-contracts, component-inventory, source-tree-analysis, project-overview, development-guide, deployment-guide with the Trip Planning additions; recorded as-built deviations from plan" },
+    { "step": "step_10", "status": "completed", "timestamp": "2026-06-14T00:00:00+0200", "summary": "index.md refreshed: linked trip-planning.md + osrm.md, updated date/tech stack; no incomplete markers" },
+    { "step": "step_12", "status": "completed", "timestamp": "2026-06-14T00:00:00+0200", "summary": "Workflow complete" }
   ],
   "current_step": "completed",
   "findings": {
     "project_classification": "monolith; web; Blazor Server .NET 8 + EF Core SQLite",
-    "technology_stack": "Blazor Server, EF Core 8 + SQLite, Tailwind 3.4.17, Coravel, Polly, Playwright, OpenIddict, MCP",
-    "data": "8 app entities + OpenIddict; 11 migrations",
-    "endpoints": "auth, oauth (connect/*), poi-image, novnc proxy, health, /mcp",
+    "feature_added": "Trip Planning (Epics 1-4, all 17 FRs): Trip View lens, RouteSegment directional leg cache, ITravelTimeProvider (Mock default / optional OSRM), off-circuit TravelTimeComputationBackgroundService, TspSolver NN+2-opt, ItineraryTimeline, MCP TripTools",
+    "data": "9 app entities (+RouteSegment) + OpenIddict; 12 migrations (added AddTripPlanning)",
+    "endpoints": "auth, oauth (connect/*), poi-image, novnc proxy, health, /mcp (+ trip tools)",
     "ci_cd": "none (manual build/deploy)"
   },
   "project_types": [ { "part_id": "app", "project_type_id": "web", "display_name": "Blazor Server web app" } ],
   "outputs_generated": [
-    "project-scan-report.json", "index.md", "project-overview.md", "architecture.md",
+    "project-scan-report.json", "index.md", "trip-planning.md", "project-overview.md", "architecture.md",
     "data-models.md", "api-contracts.md", "component-inventory.md", "source-tree-analysis.md",
     "development-guide.md", "deployment-guide.md"
   ],
+  "preserved_artifacts": [ "osrm.md (hand-written OSRM operator guide; cross-linked, not regenerated)" ],
   "resume_instructions": "Workflow complete"
 }

@@ -30,6 +30,16 @@ docker-compose up
 | `MCP_API_KEY` | _(set)_ | required for `/mcp` when LAN bypass is off |
 | `OAuth__Issuer` | public https URL | enables the OAuth 2.1 frontdoor for Claude.ai connectors |
 
+## Optional: OSRM Measured routing
+
+Trip Planning ships on the in-process haversine **Mock** provider (`TravelTime:Provider`
+unset/`Mock`) — no routing infrastructure. To enable **Measured** road routing, run the
+optional OSRM sidecars (gated behind the `osrm` compose profile, started only with
+`docker compose --profile osrm up -d`), prepare per-profile OSM extracts (car/foot/bike),
+and set `TravelTime__Provider=Osrm` + `TravelTime__Osrm__{Drive,Walk,Cycle}BaseUrl`.
+OSRM is self-hosted (no egress, NFR7) and carries OSM/ODbL attribution (NFR8). Full
+operator guide: **[osrm.md](./osrm.md)**.
+
 ## Authentication Hardening (read before exposing)
 
 - **LAN bypass:** `Auth:BypassLocalAddresses` accepts unauthenticated RFC1918/loopback requests. Behind a reverse proxy you **must** also list the proxy IP in `Auth:TrustedProxies` (and/or CIDRs in `Auth:TrustedNetworks`) so `ForwardedHeaders` substitutes the real client IP — otherwise every proxied request looks "local" and bypasses auth.

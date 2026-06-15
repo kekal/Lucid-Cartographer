@@ -16,7 +16,7 @@ _Blazor UI layer under `Components/`. Pattern: pages inject a ViewModel, subscri
 
 All interactive pages use `@rendermode InteractiveServer`.
 
-## ViewModels (`Components/Pages/*ViewModel.cs`)
+## ViewModels (`Components/Pages/*ViewModel.cs`, plus `Components/Shared/Trip/TripViewModel.cs`)
 
 Each is `sealed`, uses primary-constructor DI, exposes `event Action? StateChanged` + `Notify()`, registered `Transient`.
 
@@ -24,6 +24,7 @@ Each is `sealed`, uses primary-constructor DI, exposes `event Action? StateChang
 - **DataSourcesPageViewModel** — upload/import state, scrape + "Fetch My Lists", saved-list selection, add-POI, color/rename dialogs, export state, enrichment maintenance. Deps: import/export queues + status services, `IPoiService`, `IGoogleMapsListScraper`, exporters, `IJSRuntime`, `EnrichmentTrigger`. Subscribes to Rx import/export status streams.
 - **OperationsPageViewModel** — source A/B selection, tolerance (debounced 500ms re-run), active op, result/discard state, commit dialog, whole-DB dedup. Deps: `IPoiService`, `ISetOperationService`, `IPoiDeduplicationService`, exporters, `IJSRuntime`.
 - **GoogleSessionPageViewModel** — remote-view URL, signed-in status, busy flags. Deps: `IBrowserSession`, `IOptions<BrowserOptions>`, `ILogger`.
+- **TripViewModel** (`Components/Shared/Trip/`) — Trip View on/off, Stop Order projection, travel-time/timeline state, Start/Finish, OSM routing attribution. Delegates all order mutation to `ITripOrderingService`, subscribes to `TravelTimeProgressService` (background-compute progress → re-read + `Notify`), signals `TravelTimeTrigger`. Deps: `ITripOrderingService`, `IDbContextFactory<AppDbContext>`, `SqliteWriteLock`, `TravelTimeTrigger`, `TravelTimeProgressService`, `IRouteSegmentInvalidationService`, optional `ITravelTimeProvider`.
 
 ## Shared Components (`Components/Shared/`)
 
@@ -34,6 +35,8 @@ Each is `sealed`, uses primary-constructor DI, exposes `event Action? StateChang
 **Data & management:** `CollectionSidebar` (desktop collection list with visibility toggles), `PoiTable` (desktop virtualized table with select-all + batch move/copy/delete), `FileUploadPanel` (drag-drop import + collection name/color), `ScraperPanel` (shared-list URL, fetch lists, saved-list picker, profile reset), `EnrichmentStatus` (Rx-driven counter island in the static header).
 
 **Mobile screens:** `MobileSourcesScreen`, `MobileOperationsScreen`, `MobileMoreScreen`.
+
+**Trip Planning (`Components/Shared/Trip/`):** `TripToggle` / `MobileTripToggle` (Trip View switch in the filtered-results region, `aria-pressed`, ≥2-placeable gate), `TripStopList` / `MobileTripPanel` (stop rows: order badge · name · dwell field · running timeline value · keyboard move up/down), `TravelModeSelector` (Any-Air/Drive/Walk/Cycle segmented control), `StopOrderBadge`, `FidelityBadge` (Measured/Estimated/Manual pill; "—" for unmeasured). State lives in `TripViewModel`; read-model types in `TripProjections.cs`. Both desktop and mobile render paths per UX-DR12. See [trip-planning.md](./trip-planning.md).
 
 ## Layout (`Components/Layout/`)
 

@@ -89,7 +89,7 @@ story_location: "{project-root}/_bmad-output/implementation-artifacts"
 
 development_status:
   # Epic 1: Trip View — turn a collection into an ordered, mapped loop
-  epic-1: in-progress
+  epic-1: done
   1-1-trip-schema-foundation-ef-core-migration: done
   1-2-toggle-trip-view-and-seed-stop-order: done
   1-3-render-ordered-stops-connecting-legs-and-the-stop-panel: done
