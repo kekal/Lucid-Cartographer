@@ -1321,4 +1321,53 @@ public class TripStopListTests : BunitTestContext
         var listChildren = cut.FindAll(".trip-stop-list > li");
         listChildren[^1].GetAttribute("data-poi-id").Should().Be("3", "the Finish row is last — no trailing connector");
     }
+
+    // Story 2.5 (FR-17/18, UX-DR10): the icon-only trip controls named in the AC
+    // (move up/down, Set/Unset Start ○, Set/Unset Finish ⚑, TSP-Sort, Recompute)
+    // expose a native `title` at parity with their `aria-label` — sighted hover
+    // parity with AT. (The Focus/Open actions intentionally use a short title vs a
+    // descriptive aria-label, mirroring PoiTable, so they are not in this set.)
+    [Fact]
+    public async Task IconControls_HaveTitle_AtParityWithAriaLabel()
+    {
+        await using var vm = await EnabledVmAsync(placeable: 3);
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        var name = vm.OrderedStops.First(s => s.PoiId == 2).Name; // an interior row (move both ways)
+        var ic = System.Globalization.CultureInfo.CurrentCulture;
+        var expected = new[]
+        {
+            UiStrings.TripSortTspAria,
+            UiStrings.TripRecomputeAria,
+            string.Format(ic, UiStrings.TripMoveStopUp, name),
+            string.Format(ic, UiStrings.TripMoveStopDown, name),
+            string.Format(ic, UiStrings.TripSetAsStart, name),
+            string.Format(ic, UiStrings.TripSetAsFinish, name),
+        };
+
+        foreach (var aria in expected)
+        {
+            var btn = cut.Find($"button[aria-label=\"{aria}\"]");
+            btn.GetAttribute("title").Should().Be(aria,
+                "the control's tooltip is at parity with its aria-label (FR-18)");
+        }
+    }
+
+    // Story 2.5 (FR-18): the Start tooltip reflects the control's state — "Set as
+    // start" when unpinned, "Unset … as start" when this row is the Start.
+    [Fact]
+    public async Task StartControl_Title_ReflectsState()
+    {
+        await using var vm = await EnabledVmAsync(placeable: 3, startPoiId: 1);
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        var poi1Name = vm.OrderedStops.First(s => s.PoiId == 1).Name;
+        var poi2Name = vm.OrderedStops.First(s => s.PoiId == 2).Name;
+
+        // Row 1 is the Start ⇒ its Start control reads "Unset …"; a non-start row reads "Set as …".
+        var setStart = string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripSetAsStart, poi2Name);
+        var unsetStart = string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripUnsetStart, poi1Name);
+        cut.FindAll("button[title]").Select(b => b.GetAttribute("title"))
+            .Should().Contain(unsetStart).And.Contain(setStart);
+    }
 }

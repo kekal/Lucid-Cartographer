@@ -50,6 +50,7 @@
             <button type="button"
                     class="text-xs text-primary hover:underline disabled:opacity-50 disabled:no-underline"
                     aria-label="@UiStrings.TripSortTspAria"
+                    title="@UiStrings.TripSortTspAria"
                     disabled="@Vm.IsAnyLegComputing"
                     @onclick="Vm.SortTravelingSalesmanAsync">
                 @UiStrings.TripSortTspLabel
@@ -57,6 +58,7 @@
             <button type="button"
                     class="text-xs text-primary hover:underline disabled:opacity-50 disabled:no-underline"
                     aria-label="@UiStrings.TripRecomputeAria"
+                    title="@UiStrings.TripRecomputeAria"
                     disabled="@Vm.IsAnyLegComputing"
                     @onclick="Vm.RecomputeTravelTimesAsync">
                 @UiStrings.TripRecomputeLabel
@@ -268,6 +270,7 @@
                                 <button type="button"
                                         class="inline-flex items-center justify-center w-5 h-5 rounded text-on-surface-variant enabled:hover:bg-surface-container-high disabled:opacity-40"
                                         aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopUp, row.Name)"
+                                        title="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopUp, row.Name)"
                                         disabled="@(!Vm.CanMoveUp(stop))"
                                         @onclick="() => Vm.MoveStopUpAsync(row.PoiId)"
                                         @onclick:stopPropagation
@@ -277,6 +280,7 @@
                                 <button type="button"
                                         class="inline-flex items-center justify-center w-5 h-5 rounded text-on-surface-variant enabled:hover:bg-surface-container-high disabled:opacity-40"
                                         aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopDown, row.Name)"
+                                        title="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopDown, row.Name)"
                                         disabled="@(!Vm.CanMoveDown(stop))"
                                         @onclick="() => Vm.MoveStopDownAsync(row.PoiId)"
                                         @onclick:stopPropagation
@@ -358,6 +362,7 @@
                             <button type="button"
                                     class="inline-flex items-center justify-center w-6 h-6 rounded enabled:hover:bg-surface-container-high disabled:opacity-40 @(role == TripStopRole.Start ? "text-primary" : "text-on-surface-variant")"
                                     aria-label="@StartControlAria(role, row.Name)"
+                                    title="@StartControlAria(role, row.Name)"
                                     aria-pressed="@(role == TripStopRole.Start ? "true" : "false")"
                                     disabled="@(!Vm.CanSetStart(row.PoiId))"
                                     @onclick="() => OnStartClickAsync(row.PoiId, role)"
@@ -368,6 +373,7 @@
                             <button type="button"
                                     class="inline-flex items-center justify-center w-6 h-6 rounded enabled:hover:bg-surface-container-high disabled:opacity-40 @(role == TripStopRole.Finish ? "text-primary" : "text-on-surface-variant")"
                                     aria-label="@FinishControlAria(role, row.Name)"
+                                    title="@FinishControlAria(role, row.Name)"
                                     aria-pressed="@(role == TripStopRole.Finish ? "true" : "false")"
                                     disabled="@(!Vm.CanSetFinish(row.PoiId))"
                                     @onclick="() => OnFinishClickAsync(row.PoiId, role)"
