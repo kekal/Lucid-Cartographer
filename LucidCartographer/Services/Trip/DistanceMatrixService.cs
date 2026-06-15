@@ -1,39 +1,41 @@
 using LucidCartographer.Data;
-using LucidCartographer.Data.Entities;
+using LucidCartographer.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace LucidCartographer.Services.Trip;
 
 /// <summary>
-/// TRIP-MATRIX-01 (Story 3.1, D11): default <see cref="IDistanceMatrixService"/>.
-/// Builds the N×N matrix from the shared <see cref="RouteSegment"/> cache, reusing
-/// every cached pair under the collection's persisted <see cref="TravelMode"/>
-/// directionally ([TRIP-CACHE-01]: A→B and B→A are distinct cells). Any pair with
-/// no cached row is filled with <see cref="EstimatedTravelTime"/>'s haversine
-/// straight-line value — the same code path the provider-down fallback uses — so
-/// the matrix is always complete.
+/// TRIP-MATRIX-01 (Story 3.1, D11) / RD3 (Story 3.3): default
+/// <see cref="IDistanceMatrixService"/>. Builds the N×N cost matrix from a single
+/// MODE-INVARIANT basis — the straight-line / haversine distance between every
+/// ordered pair of placeable Stops ([TRIP-CACHE-01]: A→B and B→A are distinct
+/// cells, though haversine distance is symmetric). The matrix deliberately does
+/// NOT read the collection's persisted <see cref="Data.Entities.TravelMode"/> nor
+/// any per-leg <c>OutgoingTravelMode</c>: TSP-Sort must order Stops before per-leg
+/// modes exist (the chicken-and-egg of Story 3.3), and under <c>Mock</c> the
+/// optimal order is identical regardless of mode (time = distance × a monotone
+/// speed scalar), so haversine distance yields the same ordering as any mode would.
 ///
-/// SCOPE: read-only input to TSP-Sort. The matrix NEVER writes the estimated fill
-/// values back to the cache — the background compute service owns cache writes for
-/// the actual displayed legs (a warm cache where computed, an estimate where not).
+/// SCOPE: read-only input to TSP-Sort. The matrix never writes back to the cache —
+/// the background compute service owns cache writes for the actual displayed legs.
+/// Because the basis is computed straight-line distance (never a cached duration),
+/// <see cref="DistanceMatrix.FromCache"/> is always all-false: there are no cached
+/// rows feeding the cost matrix any more.
 /// </summary>
 public sealed class DistanceMatrixService(
     IDbContextFactory<AppDbContext> factory,
     IOptions<TravelTimeOptions> options) : IDistanceMatrixService
 {
+    // Retained for ctor-shape compatibility (no new ctor dependency, NFR10). The
+    // mode-invariant haversine basis no longer needs any per-mode speed scalar.
     private readonly TravelTimeOptions _options = options.Value;
 
     /// <inheritdoc />
     public async Task<DistanceMatrix?> BuildAsync(int collectionId, CancellationToken ct = default)
     {
+        _ = _options;
         await using var db = await factory.CreateDbContextAsync(ct);
-
-        var travelMode = await db.PoiCollections
-            .AsNoTracking()
-            .Where(c => c.Id == collectionId)
-            .Select(c => c.TravelMode)
-            .FirstOrDefaultAsync(ct) ?? TravelMode.AnyAir;
 
         // The routing candidate set: placeable, ordered Stops only ([TRIP-PLACE-03]),
         // in current Stop Order. Coordinates are non-null by the placeability filter.
@@ -54,25 +56,17 @@ public sealed class DistanceMatrixService(
             return null;
         }
 
-        var poiIds = stops.Select(s => s.PoiId).ToHashSet();
-
-        // Cached durations among these Stops under this mode, keyed directionally.
-        var cached = await db.RouteSegments
-            .AsNoTracking()
-            .Where(r => r.TravelMode == travelMode
-                        && poiIds.Contains(r.FromPoiId)
-                        && poiIds.Contains(r.ToPoiId))
-            .Select(r => new { r.FromPoiId, r.ToPoiId, r.DurationSeconds })
-            .ToListAsync(ct);
-        var cache = cached.ToDictionary(r => (r.FromPoiId, r.ToPoiId), r => r.DurationSeconds);
-
+        // RD3: the cost matrix is the mode-invariant haversine straight-line
+        // distance for every pair. No TravelMode is read, no RouteSegment cache is
+        // filtered, no per-leg OutgoingTravelMode is consulted — so the matrix (and
+        // therefore the TSP order) is identical regardless of any mode.
         var n = stops.Count;
         var matrix = new double[n][];
         var fromCache = new bool[n][];
         for (var i = 0; i < n; i++)
         {
             matrix[i] = new double[n];
-            fromCache[i] = new bool[n];
+            fromCache[i] = new bool[n]; // always false: distances are computed, not cached
             for (var j = 0; j < n; j++)
             {
                 if (i == j)
@@ -80,19 +74,9 @@ public sealed class DistanceMatrixService(
                     continue; // diagonal stays 0 — never routed
                 }
 
-                if (cache.TryGetValue((stops[i].PoiId, stops[j].PoiId), out var seconds))
-                {
-                    matrix[i][j] = seconds;
-                    fromCache[i][j] = true;
-                }
-                else
-                {
-                    // No cached row for this pair: fill with the shared haversine
-                    // estimate (NOT written back to the cache).
-                    var from = new TravelEndpoint(stops[i].PoiId, stops[i].Latitude, stops[i].Longitude);
-                    var to = new TravelEndpoint(stops[j].PoiId, stops[j].Latitude, stops[j].Longitude);
-                    matrix[i][j] = EstimatedTravelTime.Compute(from, to, travelMode, _options).DurationSeconds;
-                }
+                matrix[i][j] = GeoUtils.HaversineDistance(
+                    stops[i].Latitude, stops[i].Longitude,
+                    stops[j].Latitude, stops[j].Longitude);
             }
         }
 

@@ -311,7 +311,10 @@ public sealed class TripOrderingService(
             desired[row.PoiId] = 0;
         }
 
-        await SetOrderAsync(collectionId, desired, ct);
+        // The pin reconcile above may flip the trip shape (e.g. a removed Finish ⇒
+        // roundtrip), appearing/vanishing a closing leg — pass the prior Finish so
+        // SetOrderAsync resets the affected leg's mode (Story 3.3 H1).
+        await SetOrderAsync(collectionId, desired, ct, previousShape: (true, finishPoiId));
     }
 
     public async Task ReorderStopAsync(int collectionId, int poiId, int targetOrderIndex, CancellationToken ct = default)
@@ -438,7 +441,7 @@ public sealed class TripOrderingService(
         // simply no longer first/last in the rebuilt sequence and renumbers into
         // an interior slot — no gap, no duplicate.
         await WritePinsAsync(collectionId, newStart, newFinish, ct);
-        await RenumberWithPinsAsync(collectionId, rows, newStart, newFinish, ct);
+        await RenumberWithPinsAsync(collectionId, rows, newStart, newFinish, ct, previousShape: (true, finishPoiId));
     }
 
     private async Task ClearPinAsync(int collectionId, bool pinIsStart, CancellationToken ct)
@@ -458,7 +461,7 @@ public sealed class TripOrderingService(
         // through the same path anyway (idempotent: SetOrderAsync writes nothing
         // when the desired order equals the stored one).
         var rows = await ReadAsync(collectionId, ct);
-        await RenumberWithPinsAsync(collectionId, rows, newStart, newFinish, ct);
+        await RenumberWithPinsAsync(collectionId, rows, newStart, newFinish, ct, previousShape: (true, finishPoiId));
     }
 
     /// <summary>
@@ -469,7 +472,8 @@ public sealed class TripOrderingService(
     /// mirrors ReorderStopAsync).
     /// </summary>
     private async Task RenumberWithPinsAsync(
-        int collectionId, List<ItemRow> rows, int? startPoiId, int? finishPoiId, CancellationToken ct)
+        int collectionId, List<ItemRow> rows, int? startPoiId, int? finishPoiId, CancellationToken ct,
+        (bool Provided, int? Finish) previousShape = default)
     {
         var stops = rows.Where(r => r.Placeable && r.Order > 0)
             .OrderBy(r => r.Order)
@@ -477,7 +481,8 @@ public sealed class TripOrderingService(
             .ThenBy(r => r.PoiId)
             .ToList();
 
-        await SetOrderAsync(collectionId, Renumber(ArrangeWithPins(stops, startPoiId, finishPoiId)), ct);
+        await SetOrderAsync(
+            collectionId, Renumber(ArrangeWithPins(stops, startPoiId, finishPoiId)), ct, previousShape);
     }
 
     /// <summary>
@@ -563,13 +568,29 @@ public sealed class TripOrderingService(
     }
 
     /// <summary>
-    /// The ONE method that writes <see cref="PoiCollectionItem.OrderIndex"/>.
-    /// Applies the desired <c>PoiId → OrderIndex</c> entries to the matching
-    /// tracked rows (items not in the map are left unchanged) and commits under
-    /// the shared write gate. No <c>ConfigureAwait(false)</c> — Blazor Server's
-    /// circuit needs the sync context.
+    /// The ONE method that writes <see cref="PoiCollectionItem.OrderIndex"/> and
+    /// (Story 3.3, AC1/AC3) the ONLY place <see cref="PoiCollectionItem.OutgoingTravelMode"/>
+    /// is mutated. Applies the desired <c>PoiId → OrderIndex</c> entries to the
+    /// matching tracked rows (items not in the map keep their current OrderIndex),
+    /// then nulls <c>OutgoingTravelMode</c> for exactly the placeable Stops whose
+    /// SUCCESSOR changed between the OLD and NEW order — so an unchanged leg keeps
+    /// its mode and its <c>(From,To,Mode)</c> cache row (TRIP-CACHE-01 / NFR3) while
+    /// a newly-appeared leg resets to null (≡ AnyAir, TRIP-LEGMODE-01). Both the
+    /// OrderIndex change and the mode reset commit atomically in the SAME
+    /// SaveChanges under the shared write gate. No <c>ConfigureAwait(false)</c> —
+    /// Blazor Server's circuit needs the sync context.
     /// </summary>
-    private async Task SetOrderAsync(int collectionId, IReadOnlyDictionary<int, int> desired, CancellationToken ct)
+    // <paramref name="previousShape"/> carries the Finish pin as it was BEFORE this
+    // operation, supplied ONLY by the pin-flip / reconcile paths (which write the new
+    // pin before calling here). When Provided, the OLD successor map is computed under
+    // that prior trip shape and the NEW map under the current (already-written) Finish,
+    // so a roundtrip↔open-path flip correctly resets the appearing/vanishing closing
+    // leg's mode (Story 3.3 H1). The Provided flag is needed because a prior Finish of
+    // null (a roundtrip) is a real, distinct shape — not "not supplied". Other callers
+    // leave it default ⇒ old shape == current shape (a plain reorder, no flip).
+    private async Task SetOrderAsync(
+        int collectionId, IReadOnlyDictionary<int, int> desired, CancellationToken ct,
+        (bool Provided, int? Finish) previousShape = default)
     {
         if (desired.Count == 0)
         {
@@ -579,15 +600,97 @@ public sealed class TripOrderingService(
         await using var db = await factory.CreateDbContextAsync(ct);
         var items = await db.PoiCollectionItems
             .Where(ci => ci.PoiCollectionId == collectionId)
+            .Include(ci => ci.Poi)
             .ToListAsync(ct);
+
+        // The trip shape (roundtrip vs open path) decides the LAST stop's successor;
+        // read the pins exactly as BuildLegs does. A distinct Finish that is a real
+        // placeable Stop other than the first ⇒ open path (no closing leg); anything
+        // else ⇒ roundtrip (closing leg last→first).
+        var (startPoiId, finishPoiId) = await ReadPinsAsync(collectionId, ct);
+
+        // Map each item to its OLD and NEW OrderIndex. Items absent from `desired`
+        // keep their current OrderIndex (e.g. AppendStopAsync passes one entry).
+        bool IsPlaceable(PoiCollectionItem ci) =>
+            StopPlaceability.IsPlaceable(ci.Poi.Latitude, ci.Poi.Longitude);
+
+        int NewOrderOf(PoiCollectionItem ci) =>
+            desired.TryGetValue(ci.PoiId, out var o) ? o : ci.OrderIndex;
+
+        // Successor PoiId for each placeable Stop under a given order selector. The
+        // ordered placeable sequence is the Stops with OrderIndex > 0 sorted by that
+        // index; each Stop's successor is the next one in that sequence. The last
+        // Stop's successor is the first Stop on a roundtrip, or none on an open path.
+        Dictionary<int, int?> SuccessorMap(Func<PoiCollectionItem, int> orderOf, int? finishForShape)
+        {
+            var sequence = items
+                .Where(ci => IsPlaceable(ci) && orderOf(ci) > 0)
+                .OrderBy(orderOf)
+                .ThenBy(ci => ci.PoiId)
+                .ToList();
+
+            var map = new Dictionary<int, int?>(sequence.Count);
+            for (var k = 0; k < sequence.Count; k++)
+            {
+                map[sequence[k].PoiId] = k + 1 < sequence.Count ? sequence[k + 1].PoiId : null;
+            }
+
+            if (sequence.Count > 0)
+            {
+                var first = sequence[0];
+                var last = sequence[^1];
+                // Mirror BuildLegs: open path only when a distinct Finish resolves to
+                // a real placeable Stop other than the first; otherwise roundtrip.
+                var finishIsDistinctStop = finishForShape is { } fid
+                    && fid != first.PoiId
+                    && sequence.Any(s => s.PoiId == fid);
+                map[last.PoiId] = finishIsDistinctStop ? null : first.PoiId;
+            }
+
+            return map;
+        }
+        _ = startPoiId; // Start pin does not affect successor computation (only Finish does).
+
+        // The OLD map uses the prior trip shape (previousFinishPoiId when supplied by a
+        // pin-flip path; else the current Finish ⇒ no shape change); the NEW map always
+        // uses the current Finish. This makes a roundtrip↔open-path flip reset the
+        // closing leg's mode even when the OrderIndex itself didn't change (H1).
+        var oldFinishForShape = previousShape.Provided ? previousShape.Finish : finishPoiId;
+        var oldSucc = SuccessorMap(ci => ci.OrderIndex, oldFinishForShape);
+        var newSucc = SuccessorMap(NewOrderOf, finishPoiId);
+
+        // Snapshot the OLD OrderIndex before any mutation so the per-item reset rule
+        // can tell a stop that ALREADY had a leg (old OrderIndex > 0) from one that
+        // is entering the sequence for the first time (old OrderIndex 0 — a seed or
+        // append). A stop with no old leg has no stale leg to reset, so its mode is
+        // left as-is (an appended stop's mode is null by default anyway, so this is a
+        // no-op for the genuine "newly appeared" case while sparing a seed that
+        // pre-carried modes).
+        var oldOrders = items.ToDictionary(ci => ci.PoiId, ci => ci.OrderIndex);
 
         var changed = false;
         foreach (var item in items)
         {
-            if (desired.TryGetValue(item.PoiId, out var order) && item.OrderIndex != order)
+            var newOrder = NewOrderOf(item);
+            if (item.OrderIndex != newOrder)
             {
-                item.OrderIndex = order;
+                item.OrderIndex = newOrder;
                 changed = true;
+            }
+
+            // Reset the leg mode ONLY for placeable Stops that ALREADY had a leg
+            // (old OrderIndex > 0) and whose successor changed (differs, or it lost
+            // its successor by becoming the open-path last stop). Unplaceable items
+            // (no leg) and stops newly entering the sequence are skipped.
+            if (IsPlaceable(item) && newOrder > 0 && oldOrders.GetValueOrDefault(item.PoiId) > 0)
+            {
+                var oldS = oldSucc.GetValueOrDefault(item.PoiId);
+                var newS = newSucc.GetValueOrDefault(item.PoiId);
+                if (oldS != newS && item.OutgoingTravelMode is not null)
+                {
+                    item.OutgoingTravelMode = null;
+                    changed = true;
+                }
             }
         }
 

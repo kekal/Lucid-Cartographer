@@ -822,6 +822,238 @@ public class TripOrderingServiceTests
     // must NOT touch OrderIndex. This anchors "no other code path writes OrderIndex"
     // for the canonical-order-shared-across-views story. ===
 
+    // === Story 3.3: successor-changed leg-mode reset in the sole writer ===
+
+    private static async Task SetModesAsync(
+        IDbContextFactory<AppDbContext> factory, params (int PoiId, string? Mode)[] modes)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        foreach (var (poiId, mode) in modes)
+        {
+            var item = await db.PoiCollectionItems.FirstAsync(
+                ci => ci.PoiId == poiId && ci.PoiCollectionId == CollectionId);
+            item.OutgoingTravelMode = mode;
+        }
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task<Dictionary<int, string?>> ReadModesAsync(IDbContextFactory<AppDbContext> factory)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        return await db.PoiCollectionItems
+            .Where(ci => ci.PoiCollectionId == CollectionId)
+            .ToDictionaryAsync(ci => ci.PoiId, ci => ci.OutgoingTravelMode);
+    }
+
+    [Fact]
+    public async Task Reorder_PreservesMode_ForStopWhoseSuccessorIsUnchanged()
+    {
+        // Roundtrip 1->2->3->4->(1). Move stop 2 to slot 4: new order 1,3,4,2->(1).
+        // New successors: 1→3 (changed from 2), 3→4 (UNCHANGED), 4→2 (changed from 1),
+        // 2→1 (closing, changed from 3). So stop 3's mode survives; 1, 4, 2 reset.
+        var (factory, service) = await SeededFourAsync();
+        await SetModesAsync(factory,
+            (1, TravelMode.Drive), (2, TravelMode.Walk), (3, TravelMode.Cycle), (4, TravelMode.Drive));
+
+        await service.ReorderStopAsync(CollectionId, 2, 4);
+
+        var order = await ReadOrderAsync(factory);
+        order[1].Should().Be(1);
+        order[3].Should().Be(2);
+        order[4].Should().Be(3);
+        order[2].Should().Be(4);
+
+        var modes = await ReadModesAsync(factory);
+        modes[3].Should().Be(TravelMode.Cycle, "stop 3's successor (4) is unchanged ⇒ mode preserved");
+        modes[1].Should().BeNull("stop 1's successor changed 2→3");
+        modes[4].Should().BeNull("stop 4's successor changed 1→2");
+        modes[2].Should().BeNull("stop 2's closing successor changed 3→1");
+    }
+
+    [Fact]
+    public async Task Reorder_RotationOfRoundtrip_PreservesAllModes_NoSuccessorChanged()
+    {
+        // A pure rotation of a roundtrip cycle changes NO stop's successor:
+        // 1->2->3->4->(1) rotated to 2->3->4->1->(2) keeps every (from→to) pair.
+        // Every mode must therefore survive (the leg set is identical).
+        var (factory, service) = await SeededFourAsync();
+        await SetModesAsync(factory,
+            (1, TravelMode.Drive), (2, TravelMode.Walk), (3, TravelMode.Cycle), (4, TravelMode.Drive));
+
+        await service.ReorderStopAsync(CollectionId, 1, 4); // order becomes 2,3,4,1
+
+        var modes = await ReadModesAsync(factory);
+        modes[1].Should().Be(TravelMode.Drive, "1→2 leg unchanged");
+        modes[2].Should().Be(TravelMode.Walk, "2→3 leg unchanged");
+        modes[3].Should().Be(TravelMode.Cycle, "3→4 leg unchanged");
+        modes[4].Should().Be(TravelMode.Drive, "4→1 closing leg unchanged on the rotated roundtrip");
+    }
+
+    [Fact]
+    public async Task Reorder_NullsMode_ForStopWhoseSuccessorChanged()
+    {
+        // Roundtrip 1->2->3->4. Swap 2 and 3 (move 2 to slot 3): 1->3->2->4->(1).
+        // Stop 1's successor changed 2->3 (reset); stop 3 now precedes 2 (reset);
+        // stop 2 now precedes 4 (reset); stop 4 still closes back to 1 (UNCHANGED).
+        var (factory, service) = await SeededFourAsync();
+        await SetModesAsync(factory,
+            (1, TravelMode.Drive), (2, TravelMode.Walk), (3, TravelMode.Cycle), (4, TravelMode.Drive));
+
+        await service.ReorderStopAsync(CollectionId, 2, 3);
+
+        var order = await ReadOrderAsync(factory);
+        order[1].Should().Be(1);
+        order[3].Should().Be(2);
+        order[2].Should().Be(3);
+        order[4].Should().Be(4);
+
+        var modes = await ReadModesAsync(factory);
+        modes[1].Should().BeNull("stop 1's successor changed 2→3");
+        modes[3].Should().BeNull("stop 3's successor changed 4→2");
+        modes[2].Should().BeNull("stop 2's successor changed 3→4");
+        modes[4].Should().Be(TravelMode.Drive, "stop 4 still closes back to 1 (roundtrip) ⇒ unchanged ⇒ preserved");
+    }
+
+    [Fact]
+    public async Task Append_NullsMode_ForNewlyAppearedLeg_AndForNewPredecessor()
+    {
+        // Roundtrip over {1,2}. Mode on both. Append stop 3 at the end:
+        // 1->2->3->(1). Stop 2's successor changed (1 → 3) ⇒ reset. Stop 3 is brand
+        // new (no old successor; now closes back to 1) ⇒ null. Stop 1's successor
+        // (2) is unchanged ⇒ preserved.
+        var factory = await SeedAsync(
+            (1, new DateTime(2025, 1, 1), true),
+            (2, new DateTime(2025, 1, 2), true));
+        var service = CreateService(factory);
+        await service.SeedOrderAsync(CollectionId);
+        await SetModesAsync(factory, (1, TravelMode.Drive), (2, TravelMode.Walk));
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.Pois.Add(new Poi { Id = 3, Name = "P3", Latitude = 52, Longitude = 22, AddedDate = new DateTime(2025, 1, 3) });
+            db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = 3, PoiCollectionId = CollectionId });
+            await db.SaveChangesAsync();
+        }
+
+        await service.AppendStopAsync(CollectionId, 3);
+
+        var modes = await ReadModesAsync(factory);
+        modes[1].Should().Be(TravelMode.Drive, "stop 1's successor (2) is unchanged");
+        modes[2].Should().BeNull("stop 2's successor changed from 1 (closing) to 3 (appended)");
+        modes[3].Should().BeNull("a newly-appeared leg defaults to null (≡ AnyAir)");
+    }
+
+    [Fact]
+    public async Task Reorder_OpenPath_LastStopHasNoSuccessor_AndIsNotResetSpuriously()
+    {
+        // Open path with a distinct pinned Finish=4: legs are 1->2->3->4, NO closing
+        // leg. Stop 4 has NO successor (last on an open path). Move stop 1 to slot 3
+        // (within the movable window): 2->3->1->4. Stop 4 STILL has no successor and
+        // its mode must NOT be reset spuriously; stop 3's successor was 4 then 1 ⇒
+        // reset, etc.
+        var (factory, service) = await SeededFourAsync();
+        await service.SetFinishAsync(CollectionId, 4); // open path, Finish at N=4
+        await SetModesAsync(factory,
+            (1, TravelMode.Drive), (2, TravelMode.Walk), (3, TravelMode.Cycle), (4, TravelMode.Drive));
+
+        // Sanity: stop 4 carries a mode even though it has no successor (no leg).
+        await service.ReorderStopAsync(CollectionId, 1, 3); // 2,3,1 interior, 4 stays last
+
+        var order = await ReadOrderAsync(factory);
+        order[4].Should().Be(4, "the pinned Finish stays at Order N on the open path");
+
+        var modes = await ReadModesAsync(factory);
+        modes[4].Should().Be(TravelMode.Drive,
+            "the open-path last stop has no successor (no leg) ⇒ never reset spuriously");
+    }
+
+    [Fact]
+    public async Task Reorder_CommitsOrderIndexAndModeReset_Atomically()
+    {
+        // A single reorder must persist BOTH the new OrderIndex AND the mode reset
+        // in one commit (one SaveChanges), observable via a fresh read.
+        var (factory0, _) = await SeededFourAsync();
+        await SetModesAsync(factory0,
+            (1, TravelMode.Drive), (2, TravelMode.Walk), (3, TravelMode.Cycle), (4, TravelMode.Drive));
+
+        var counting = new CountingDbContextFactory(factory0);
+        var service = CreateService(counting);
+
+        await service.ReorderStopAsync(CollectionId, 2, 3); // 1,3,2,4
+
+        counting.SaveCount.Should().Be(1, "OrderIndex change and mode reset commit in ONE SaveChanges");
+
+        var order = await ReadOrderAsync(factory0);
+        order[2].Should().Be(3);
+        order[3].Should().Be(2);
+        var modes = await ReadModesAsync(factory0);
+        modes[1].Should().BeNull("the mode reset landed in the same commit as the order change");
+    }
+
+    [Fact]
+    public async Task Reorder_NoOp_DoesNotResetAnyMode()
+    {
+        // A clamped-onto-own-position reorder writes nothing — and therefore must
+        // not null any mode (the early-return is preserved when nothing changed).
+        var (factory0, _) = await SeededFourAsync();
+        await SetModesAsync(factory0,
+            (1, TravelMode.Drive), (2, TravelMode.Walk), (3, TravelMode.Cycle), (4, TravelMode.Drive));
+
+        var counting = new CountingDbContextFactory(factory0);
+        var service = CreateService(counting);
+
+        await service.ReorderStopAsync(CollectionId, 2, 2); // no-op
+
+        counting.SaveCount.Should().Be(0, "a no-op reorder writes nothing");
+        var modes = await ReadModesAsync(factory0);
+        modes[1].Should().Be(TravelMode.Drive);
+        modes[2].Should().Be(TravelMode.Walk);
+        modes[3].Should().Be(TravelMode.Cycle);
+        modes[4].Should().Be(TravelMode.Drive);
+    }
+
+    [Fact]
+    public async Task ClearFinish_ResurrectsClosingLeg_ResetsNewLastStopMode()
+    {
+        // H1 (AC1): flipping open path → roundtrip via ClearFinish appears a brand-new
+        // closing leg (last→first) WITHOUT any OrderIndex change. The new closing-leg
+        // From-stop must be reset to "Any" (null) — a stale mode must not show on a
+        // newly-appeared leg (UX-DR11). Stops whose successor didn't flip keep theirs.
+        var (factory, service) = await SeededFourAsync();
+        await service.SetFinishAsync(CollectionId, 4); // open path 1→2→3→4 (4 = Finish, no closing leg)
+        await SetModesAsync(factory,
+            (1, TravelMode.Drive), (2, TravelMode.Walk), (3, TravelMode.Cycle), (4, TravelMode.Drive));
+
+        await service.ClearFinishAsync(CollectionId); // → roundtrip: closing leg 4→1 appears
+
+        (await CurrentFinishAsync(factory)).Should().BeNull("Finish was cleared ⇒ roundtrip");
+        var modes = await ReadModesAsync(factory);
+        modes[4].Should().BeNull("stop 4 gained the new closing leg 4→1 ⇒ reset to Any (H1)");
+        modes[1].Should().Be(TravelMode.Drive, "1's successor (2) is unchanged across the flip");
+        modes[2].Should().Be(TravelMode.Walk, "2's successor (3) is unchanged");
+        modes[3].Should().Be(TravelMode.Cycle, "3's successor (4) is unchanged");
+    }
+
+    [Fact]
+    public async Task SetFinish_VanishesClosingLeg_ResetsExLastStopMode()
+    {
+        // The inverse flip: roundtrip → open path via SetFinish on the last stop removes
+        // the closing leg (last→first). The ex-last stop's outgoing leg vanishes; its
+        // mode is reset so a later ClearFinish can't resurface a stale value.
+        var (factory, service) = await SeededFourAsync(); // roundtrip 1→2→3→4→(1)
+        await SetModesAsync(factory,
+            (1, TravelMode.Drive), (2, TravelMode.Walk), (3, TravelMode.Cycle), (4, TravelMode.Drive));
+
+        await service.SetFinishAsync(CollectionId, 4); // 4 already last ⇒ open path, closing leg 4→1 vanishes
+
+        (await CurrentFinishAsync(factory)).Should().Be(4);
+        var modes = await ReadModesAsync(factory);
+        modes[4].Should().BeNull("stop 4 lost its closing leg (now the open-path Finish) ⇒ reset");
+        modes[1].Should().Be(TravelMode.Drive, "interior successors unchanged across the flip");
+        modes[2].Should().Be(TravelMode.Walk);
+        modes[3].Should().Be(TravelMode.Cycle);
+    }
+
     [Fact]
     public async Task SetDwellMinutes_DoesNotMutateOrderIndex_SoleWriterInvariant()
     {

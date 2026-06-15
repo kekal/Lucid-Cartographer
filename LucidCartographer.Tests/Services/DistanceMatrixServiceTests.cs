@@ -8,10 +8,11 @@ using Microsoft.Extensions.Options;
 namespace LucidCartographer.Tests;
 
 /// <summary>
-/// TRIP-MATRIX-01 (Story 3.1, D11): the on-demand Distance Matrix reuses cached
-/// directional pairs from the shared RouteSegment cache, fills missing pairs with
-/// the haversine estimate, never writes back to the cache, and returns null below
-/// the two-stop minimum.
+/// TRIP-MATRIX-01 (Story 3.1, D11) / RD3 (Story 3.3): the on-demand Distance
+/// Matrix is now MODE-INVARIANT — it builds the cost matrix from the haversine
+/// straight-line distance for every pair, ignoring the collection's TravelMode,
+/// the RouteSegment cache, and any per-leg OutgoingTravelMode; it never writes
+/// back to the cache and returns null below the two-stop minimum.
 /// </summary>
 public class DistanceMatrixServiceTests
 {
@@ -35,13 +36,19 @@ public class DistanceMatrixServiceTests
     private static DistanceMatrixService Service(IDbContextFactory<AppDbContext> factory) =>
         new(factory, Options.Create(new TravelTimeOptions()));
 
+    // RD3: the matrix is mode-invariant. A cached RouteSegment row (any mode) must
+    // NOT be reused for the cost matrix any more — every cell is the haversine
+    // straight-line distance. This re-expresses the former
+    // "Build_ReusesCachedPair_Directionally" test, whose premise (cache filter by
+    // PoiCollection.TravelMode) was removed by Story 3.3.
     [Fact]
-    public async Task Build_ReusesCachedPair_Directionally()
+    public async Task Build_IgnoresCachedRouteSegments_UsesHaversineDistance()
     {
         var factory = Seed();
         await using (var db = await factory.CreateDbContextAsync())
         {
-            // Only the 1->2 direction is cached, with a deliberately distinctive value.
+            // A cached 1->2 row with a deliberately distinctive duration the matrix
+            // would have reused under the old cache-filtering behavior.
             db.RouteSegments.Add(new RouteSegment
             {
                 FromPoiId = 1, ToPoiId = 2, TravelMode = TravelMode.Drive,
@@ -56,23 +63,24 @@ public class DistanceMatrixServiceTests
         matrix.Should().NotBeNull();
         matrix!.Stops.Should().HaveCount(3);
         // Stop indices follow OrderIndex: index 0=Poi1, 1=Poi2, 2=Poi3.
-        matrix.DurationSeconds[0][1].Should().Be(12345, "the 1->2 cached value is reused");
-        matrix.FromCache[0][1].Should().BeTrue();
-        // The reverse direction was NOT cached ⇒ filled by estimate, not 12345.
-        matrix.FromCache[1][0].Should().BeFalse();
-        matrix.DurationSeconds[1][0].Should().NotBe(12345);
+        matrix.DurationSeconds[0][1].Should().NotBe(12345,
+            "the matrix is mode-invariant — it no longer reuses cached durations");
+        matrix.FromCache.SelectMany(row => row).Should().AllBeEquivalentTo(false,
+            "no cell is fed from the cache; all are computed haversine distances");
+        // Haversine is symmetric: A->B and B->A distances are equal.
+        matrix.DurationSeconds[0][1].Should().BeApproximately(matrix.DurationSeconds[1][0], 1e-6);
         matrix.DurationSeconds[0][0].Should().Be(0, "the diagonal is never routed");
     }
 
     [Fact]
-    public async Task Build_FillsMissingPairs_WithHaversineEstimate_AndDoesNotWriteCache()
+    public async Task Build_FillsEveryPair_WithHaversineDistance_AndDoesNotWriteCache()
     {
         var factory = Seed();
 
         var matrix = await Service(factory).BuildAsync(CollectionId);
 
         matrix.Should().NotBeNull();
-        // Every off-diagonal cell is populated (positive) even with an empty cache.
+        // Every off-diagonal cell is the (positive) haversine distance; nothing cached.
         for (var i = 0; i < 3; i++)
         {
             for (var j = 0; j < 3; j++)
@@ -85,9 +93,48 @@ public class DistanceMatrixServiceTests
             }
         }
 
-        // The matrix is input-only: no estimated rows leaked into the cache.
+        // The matrix is input-only: no rows leaked into the cache.
         await using var verify = await factory.CreateDbContextAsync();
         (await verify.RouteSegments.CountAsync()).Should().Be(0, "the matrix never writes the cache");
+    }
+
+    // RD3 (Story 3.3, AC2): building the matrix for collections that differ ONLY in
+    // their persisted TravelMode (and per-leg OutgoingTravelMode) yields the SAME
+    // cost matrix — the matrix ignores all modes.
+    [Theory]
+    [InlineData(TravelMode.AnyAir)]
+    [InlineData(TravelMode.Drive)]
+    [InlineData(TravelMode.Walk)]
+    [InlineData(TravelMode.Cycle)]
+    public async Task Build_IsModeInvariant_AcrossTripAndPerLegModes(string mode)
+    {
+        var factory = Seed(mode);
+        // Stamp a per-leg mode on each Stop too — it must not influence the matrix.
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            foreach (var ci in db.PoiCollectionItems)
+            {
+                ci.OutgoingTravelMode = mode;
+            }
+            await db.SaveChangesAsync();
+        }
+
+        var matrix = await Service(factory).BuildAsync(CollectionId);
+
+        // Reference: a plain Drive collection with no per-leg modes set.
+        var reference = await Service(Seed(TravelMode.Drive)).BuildAsync(CollectionId);
+
+        matrix.Should().NotBeNull();
+        reference.Should().NotBeNull();
+        for (var i = 0; i < 3; i++)
+        {
+            for (var j = 0; j < 3; j++)
+            {
+                matrix!.DurationSeconds[i][j].Should().BeApproximately(
+                    reference!.DurationSeconds[i][j], 1e-6,
+                    "the cost matrix is identical regardless of trip/per-leg travel mode");
+            }
+        }
     }
 
     [Fact]
