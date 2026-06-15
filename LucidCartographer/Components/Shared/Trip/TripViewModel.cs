@@ -91,6 +91,54 @@ public sealed class TripViewModel(
     public IReadOnlyDictionary<int, int> StopOrders { get; private set; } = NoStops;
 
     /// <summary>
+    /// Story 1.4 (FR-4): the SINGLE canonical Stop Order for the active collection
+    /// as <c>PoiId → OrderIndex</c>, cached from the persisted entity order
+    /// (<see cref="ITripOrderingService.GetStopOrderAsync"/>). Unlike
+    /// <see cref="StopOrders"/> this is populated REGARDLESS of
+    /// <see cref="IsTripViewEnabled"/> — the order lives on the entity whether or
+    /// not Trip View is toggled on — so the plain Filtered Results list can render
+    /// in the same sequence as the Trip list (no divergence). Empty when no single
+    /// collection is in scope (<see cref="ActiveCollectionId"/> is null ⇒ AC3
+    /// multi-collection) or the collection has no explicit order (AC3 never-ordered).
+    /// Cached (refreshed only in the async load/refresh/reorder paths, not per
+    /// render) because the plain list's source (<c>MapPageViewModel.FilteredPois</c>)
+    /// recomputes on every viewport move; the per-render apply
+    /// (<see cref="ApplyCanonicalOrder"/>) is a cheap pure sort against this cache.
+    /// </summary>
+    public IReadOnlyDictionary<int, int> CanonicalStopOrder { get; private set; } = NoStops;
+
+    /// <summary>
+    /// Story 1.4 (FR-4 / AC2/AC3, NFR1): pure, in-memory ordering of the plain
+    /// Filtered Results list by the cached <see cref="CanonicalStopOrder"/>. The map
+    /// page's OFF-state branch calls this so the plain list never disagrees with the
+    /// Trip list about sequence. No DB access — it sorts the already-built
+    /// <c>FilteredPois</c> against the cached order map.
+    ///
+    /// When <see cref="CanonicalStopOrder"/> is empty (no single in-scope collection,
+    /// or a never-ordered collection) the input is returned UNCHANGED so the plain
+    /// list keeps its normal default sort (AC3). Otherwise POIs that ARE in the order
+    /// map come first, ascending by their OrderIndex; POIs NOT in the map (unplaceable
+    /// / unordered) are kept stably AFTER them, preserving their incoming relative
+    /// order — a single stable <c>OrderBy</c> keyed so non-members sort last.
+    /// </summary>
+    public IReadOnlyList<Poi> ApplyCanonicalOrder(IReadOnlyList<Poi> pois)
+    {
+        ArgumentNullException.ThrowIfNull(pois);
+
+        if (CanonicalStopOrder.Count == 0)
+        {
+            return pois;
+        }
+
+        // LINQ OrderBy is a documented STABLE sort, so members that share no key
+        // collisions keep their order by OrderIndex, and every non-member (keyed
+        // int.MaxValue ⇒ sorts last) preserves its incoming relative position.
+        return pois
+            .OrderBy(p => CanonicalStopOrder.TryGetValue(p.Id, out var order) ? order : int.MaxValue)
+            .ToList();
+    }
+
+    /// <summary>
     /// Ordered, placeable-only stop projection (1-based, ascending) for the
     /// stop-list panel and numbered markers; empty when Trip View is off.
     /// </summary>
@@ -477,6 +525,9 @@ public sealed class TripViewModel(
         {
             IsTripViewEnabled = false;
             ClearProjections();
+            // Story 1.4 (AC3): no single collection in scope (e.g. multi-collection)
+            // ⇒ no forced order on the plain list.
+            CanonicalStopOrder = NoStops;
             Notify();
             return;
         }
@@ -484,6 +535,12 @@ public sealed class TripViewModel(
         try
         {
             IsTripViewEnabled = await ReadTripViewEnabledAsync(collectionId.Value);
+            // Story 1.4 (FR-4): the canonical order lives on the entity regardless
+            // of the Trip View toggle, so cache it here for BOTH branches — when
+            // Trip View is ON, RefreshProjectionsAsync refreshes it again (cheap,
+            // idempotent); when OFF, this is the only populate point so the plain
+            // list still renders in the persisted Stop Order (AC2).
+            await RefreshCanonicalStopOrderAsync();
             if (IsTripViewEnabled)
             {
                 // Reopening a Trip-enabled collection: heal any Stop Order drift
@@ -641,6 +698,11 @@ public sealed class TripViewModel(
 
         if (ActiveCollectionId is not { } collectionId || !IsTripViewEnabled)
         {
+            // FR-4: while Trip View is OFF, no reorder/reconcile runs, so surviving
+            // members' OrderIndex values don't change — CanonicalStopOrder stays valid
+            // (a removed POI's stale map entry simply won't appear in FilteredPois, and
+            // an added POI gets OrderIndex 0 ⇒ sorts after as a non-member). If a future
+            // change ever reconciles order while OFF, refresh the canonical cache here.
             Notify();
             return;
         }
@@ -672,6 +734,27 @@ public sealed class TripViewModel(
     }
 
     // --- Stop Order projections (badges + legs + panel rows) ---
+
+    /// <summary>
+    /// Story 1.4 (FR-4): refreshes the cached <see cref="CanonicalStopOrder"/> from
+    /// the persisted entity order, INDEPENDENT of <see cref="IsTripViewEnabled"/>.
+    /// Empty when no single collection is in scope (<see cref="ActiveCollectionId"/>
+    /// is null) or the collection has no explicit order. Called from every async
+    /// load/refresh/reorder path so the plain list's cached order tracks the entity.
+    /// </summary>
+    private async Task RefreshCanonicalStopOrderAsync()
+    {
+        if (ActiveCollectionId is not { } collectionId)
+        {
+            CanonicalStopOrder = NoStops;
+            return;
+        }
+
+        var order = await ordering.GetStopOrderAsync(collectionId, _cts.Token);
+        // GetStopOrderAsync returns only placeable, ordered items; an empty map
+        // (never-ordered collection) leaves the plain list in its default sort (AC3).
+        CanonicalStopOrder = order.Count == 0 ? NoStops : order;
+    }
 
     private void ClearProjections()
     {
@@ -716,6 +799,11 @@ public sealed class TripViewModel(
         // TRIP-TRAVELTIME-01: subscribe once (lazily) to the background compute
         // progress so freshly-cached legs re-read without polling the circuit.
         EnsureProgressSubscription();
+
+        // Story 1.4 (FR-4): refresh the shared canonical order cache on every
+        // reorder/toggle/membership/designation refresh so the plain list (read via
+        // ApplyCanonicalOrder) tracks the same sequence as the Trip list.
+        await RefreshCanonicalStopOrderAsync();
 
         var (startPoiId, finishPoiId) = await ReadStartFinishAsync(collectionId);
         // TRIP-STARTFINISH-01: surface the pins so the UI can derive per-stop

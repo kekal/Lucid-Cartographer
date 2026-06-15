@@ -815,4 +815,27 @@ public class TripOrderingServiceTests
         stops.Should().ContainKey(1).WhoseValue.Should().Be(1);
         stops.Should().NotContainKey(2, "unordered (0) items are excluded");
     }
+
+    // === Story 1.4 (AC1): sole-writer invariant — only the ordering service's
+    // SetOrderAsync-routed methods mutate OrderIndex. A sibling write on the same
+    // membership (SetDwellMinutesAsync, which saves under the shared write lock)
+    // must NOT touch OrderIndex. This anchors "no other code path writes OrderIndex"
+    // for the canonical-order-shared-across-views story. ===
+
+    [Fact]
+    public async Task SetDwellMinutes_DoesNotMutateOrderIndex_SoleWriterInvariant()
+    {
+        var (factory, service) = await SeededFourAsync(); // 1→1, 2→2, 3→3, 4→4
+        var before = await ReadOrderAsync(factory);
+
+        // A non-ordering mutation through the ordering service: dwell only.
+        await service.SetDwellMinutesAsync(CollectionId, poiId: 2, minutes: 30);
+
+        var after = await ReadOrderAsync(factory);
+        after.Should().Equal(before, "writing dwell must never change any OrderIndex (AC1 sole-writer)");
+
+        await using var db = await factory.CreateDbContextAsync();
+        (await db.PoiCollectionItems.FirstAsync(ci => ci.PoiId == 2 && ci.PoiCollectionId == CollectionId))
+            .DwellMinutes.Should().Be(30, "the dwell write itself still landed");
+    }
 }

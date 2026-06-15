@@ -335,7 +335,11 @@ else
                 }
                 else
                 {
-                    <PoiTable Pois="Vm.FilteredPois"
+                    @* Story 1.4 (FR-4 / AC2/AC3): the plain Filtered Results list
+                       renders in the SINGLE canonical Stop Order via a pure VM sort
+                       (ordering logic stays in the VM, NFR1). Unchanged default sort
+                       when the collection has no order / multi-collection scope. *@
+                    <PoiTable Pois="TripVm.ApplyCanonicalOrder(Vm.FilteredPois)"
                              SelectedPoiId="Vm.SelectedPoiId"
                              CollectionName="@Vm.SelectedCollectionName"
                              PoiCollectionNames="Vm.PoiCollectionNames"

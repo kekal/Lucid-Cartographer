@@ -33,7 +33,7 @@ development_status:
   1-1-switch-the-desktop-list-region-into-the-trip: done
   1-2-wide-trip-scoped-table-with-trip-only-columns: done
   1-3-inter-row-leg-connector: done
-  1-4-canonical-stop-order-shared-across-both-views: backlog
+  1-4-canonical-stop-order-shared-across-both-views: done
   epic-1-retrospective: optional
 
   # Epic 2: Trustworthy & legible trip times
