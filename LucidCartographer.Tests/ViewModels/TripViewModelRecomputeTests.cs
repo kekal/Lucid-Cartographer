@@ -58,8 +58,12 @@ public class TripViewModelRecomputeTests
         });
         db.Pois.Add(new Poi { Id = 1, Name = "P1", Latitude = 50.0, Longitude = 20.0, AddedDate = new DateTime(2025, 1, 1) });
         db.Pois.Add(new Poi { Id = 2, Name = "P2", Latitude = 51.0, Longitude = 21.0, AddedDate = new DateTime(2025, 1, 2) });
-        db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = 1, PoiCollectionId = CollectionId, OrderIndex = 1 });
-        db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = 2, PoiCollectionId = CollectionId, OrderIndex = 2 });
+        // Story 3.2 (TRIP-LEGMODE-01): legs are per-leg-mode driven now. The Drive trip's
+        // legs auto-compute and resolve their cache only because each From-stop carries
+        // OutgoingTravelMode = mode (Drive) — the collection-wide TravelMode no longer
+        // drives legs. (With null/AnyAir the legs would never enqueue and stay "—".)
+        db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = 1, PoiCollectionId = CollectionId, OrderIndex = 1, OutgoingTravelMode = mode });
+        db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = 2, PoiCollectionId = CollectionId, OrderIndex = 2, OutgoingTravelMode = mode });
         db.SaveChanges();
         return factory;
     }

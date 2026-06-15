@@ -101,23 +101,38 @@ public class TripViewModelTravelModeTests
         (await ReadModeAsync(factory)).Should().Be(TravelMode.AnyAir);
     }
 
+    // Story 3.2 (TRIP-LEGMODE-01): the trip-wide selector NO LONGER drives leg lookup —
+    // legs resolve their cache row by their OWN per-leg mode (the From-stop's
+    // OutgoingTravelMode). The old premise (setting PoiCollection.TravelMode = Drive makes
+    // the legs pick Drive rows) is invalid under the per-leg model; re-expressed here as:
+    // when each From-stop carries OutgoingTravelMode = Drive, the legs resolve the Drive
+    // cache rows. (Setting the trip-wide mode is exercised separately above; here we set
+    // per-leg modes directly since 3.4 owns the per-leg pill UI.)
     [Fact]
-    public async Task SetTravelMode_SwitchesLegsToNewModeRows()
+    public async Task DriveLegs_ResolveDriveCacheRows_ByPerLegMode()
     {
         var (vm, _, factory) = await EnabledVmAsync(placeable: 2);
         await using var _v = vm;
-        // Seed Drive rows for both roundtrip legs only.
+        // Per-leg Drive mode on both From-stops + Drive cache rows for both roundtrip legs.
         await using (var db = await factory.CreateDbContextAsync())
         {
+            foreach (var item in db.PoiCollectionItems.Where(ci => ci.PoiCollectionId == CollectionId))
+            {
+                item.OutgoingTravelMode = TravelMode.Drive;
+            }
             db.RouteSegments.Add(new RouteSegment { FromPoiId = 1, ToPoiId = 2, TravelMode = TravelMode.Drive, DurationSeconds = 300, DistanceMeters = 5000, Fidelity = Fidelity.Estimated, Source = "Mock", ComputedAt = DateTime.UtcNow });
             db.RouteSegments.Add(new RouteSegment { FromPoiId = 2, ToPoiId = 1, TravelMode = TravelMode.Drive, DurationSeconds = 300, DistanceMeters = 5000, Fidelity = Fidelity.Estimated, Source = "Mock", ComputedAt = DateTime.UtcNow });
             await db.SaveChangesAsync();
         }
 
-        await vm.SetTravelModeAsync(TravelMode.Drive);
+        // Re-read projections so the per-leg modes + Drive rows are picked up. The
+        // trip-wide selector is now inert for leg lookup, but SetTravelModeAsync still
+        // triggers a projection refresh (its persistence side-effect is irrelevant here).
+        await vm.SetTravelModeAsync(TravelMode.Walk);
 
+        vm.OrderedLegs.Should().OnlyContain(l => l.Mode == TravelMode.Drive, "each leg's mode is its From-stop's OutgoingTravelMode, NOT the trip-wide selector");
         vm.OrderedLegs.Should().OnlyContain(l => l.Fidelity == Fidelity.Estimated);
-        vm.TotalTravelTimeSeconds.Should().Be(600, "the Drive cache rows now back the legs");
+        vm.TotalTravelTimeSeconds.Should().Be(600, "the Drive cache rows back the per-leg-Drive legs");
     }
 
     [Fact]

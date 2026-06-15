@@ -43,7 +43,11 @@ public class TripViewModelRecommendsOsrmTests
         for (var i = 1; i <= placeable; i++)
         {
             db.Pois.Add(new Poi { Id = i, Name = $"P{i}", Latitude = 50 + i, Longitude = 20 + i, AddedDate = new DateTime(2025, 1, i) });
-            db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = i, PoiCollectionId = CollectionId });
+            // Story 3.2 (TRIP-LEGMODE-01): legs resolve their cache row by their OWN per-leg
+            // mode now, not the collection's trip-wide TravelMode. Set each From-stop's
+            // OutgoingTravelMode to the same mode the segments are seeded under so the legs
+            // pick those rows (preserving each test's original "legs under <mode>" intent).
+            db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = i, PoiCollectionId = CollectionId, OutgoingTravelMode = travelMode });
         }
         db.SaveChanges();
         return factory;

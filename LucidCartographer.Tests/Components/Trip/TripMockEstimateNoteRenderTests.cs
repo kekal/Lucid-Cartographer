@@ -33,7 +33,9 @@ public class TripMockEstimateNoteRenderTests : BunitTestContext
         for (var i = 1; i <= 2; i++)
         {
             db.Pois.Add(new Poi { Id = i, Name = $"P{i}", Latitude = 50 + i, Longitude = 20 + i, AddedDate = new DateTime(2025, 1, i) });
-            db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = i, PoiCollectionId = CollectionId });
+            // Story 3.2 (TRIP-LEGMODE-01): per-leg Drive mode so the legs resolve the
+            // Drive cache rows (the trip-wide selector no longer drives leg lookup).
+            db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = i, PoiCollectionId = CollectionId, OutgoingTravelMode = TravelMode.Drive });
         }
         db.SaveChanges();
         return factory;

@@ -853,7 +853,10 @@ public sealed class TripViewModel(
         TravelMode = travelMode;
         TripStartTime = tripStartTime;
         TimeBudgetMinutes = budgetMinutes;
-        var cache = await ReadRouteSegmentsAsync(collectionId, travelMode);
+        // TRIP-LEGMODE-01 (Story 3.2): legs are now per-leg-mode driven — the cache is
+        // read across all modes and each leg selects its own (From, To, Mode) row. The
+        // trip-wide travelMode read above no longer drives leg lookup (removal is 3.4).
+        var cache = await ReadRouteSegmentsAsync(collectionId);
         OrderedLegs = BuildLegs(stops, finishPoiId, cache);
         RecomputeTotal();
         // TRIP-TIMELINE-01: recompute the honest timeline from the freshly-built stops/
@@ -915,6 +918,10 @@ public sealed class TripViewModel(
                 ci.Poi.AddedDate,
                 // TRIP-DWELL-01 (Story 2.5): carry the per-membership dwell minutes.
                 ci.DwellMinutes,
+                // TRIP-LEGMODE-01 (Story 3.2): per-leg outgoing travel mode (null ≡
+                // AnyAir) for the leg leaving this stop — BuildLegs sets each leg's Mode
+                // and its (From, To, Mode) cache key from it, NOT one trip-wide mode.
+                ci.OutgoingTravelMode,
                 // Story 1.2 (FR-2): the Name-column + Actions presentation fields,
                 // read from the already-loaded Poi (no extra round-trip, no new ctor
                 // dependency). Address backs the sub-line; the enrichment flags pick
@@ -939,7 +946,9 @@ public sealed class TripViewModel(
                 r.Latitude!.Value,
                 r.Longitude!.Value,
                 r.PoiId == startPoiId,
-                r.PoiId == finishPoiId))
+                r.PoiId == finishPoiId,
+                // TRIP-LEGMODE-01 (Story 3.2): carry the per-leg outgoing mode (null ≡ AnyAir).
+                r.OutgoingTravelMode))
             .ToList();
 
         // Story 1.2 (FR-2): per-PoiId presentation fields for the Name column +
@@ -1020,12 +1029,17 @@ public sealed class TripViewModel(
     }
 
     /// <summary>
-    /// TRIP-TRAVELTIME-01: reads the cached <see cref="RouteSegment"/> rows for
-    /// this collection's stops under <paramref name="travelMode"/>, keyed by the
-    /// directional (From, To) pair so <see cref="MakeLeg"/> can fold them in.
+    /// TRIP-TRAVELTIME-01 / TRIP-LEGMODE-01 (Story 3.2): reads the cached
+    /// <see cref="RouteSegment"/> rows for this collection's stops keyed by the FULL
+    /// directional <c>(From, To, Mode)</c> tuple (TRIP-CACHE-01), so legs that travel
+    /// under different per-leg modes select different cache rows. Each leg's mode comes
+    /// from its From-stop's <c>OutgoingTravelMode</c> (null ≡ AnyAir) — NOT one trip-wide
+    /// mode — so this reads every RouteSegment row for the collection's poi set across
+    /// ALL modes and lets <see cref="MakeLeg"/> select by the leg's own <c>(From,To,Mode)</c>
+    /// key. (An Any/Air leg has no ground cache row ⇒ null duration ⇒ "—".)
     /// </summary>
-    private async Task<IReadOnlyDictionary<(int From, int To), RouteSegment>> ReadRouteSegmentsAsync(
-        int collectionId, string travelMode)
+    private async Task<IReadOnlyDictionary<(int From, int To, string Mode), RouteSegment>> ReadRouteSegmentsAsync(
+        int collectionId)
     {
         await using var db = await factory.CreateDbContextAsync(_cts.Token);
 
@@ -1042,16 +1056,15 @@ public sealed class TripViewModel(
 
         var rows = await db.RouteSegments
             .AsNoTracking()
-            .Where(r => r.TravelMode == travelMode
-                        && poiIds.Contains(r.FromPoiId)
+            .Where(r => poiIds.Contains(r.FromPoiId)
                         && poiIds.Contains(r.ToPoiId))
             .ToListAsync(_cts.Token);
 
-        return rows.ToDictionary(r => (r.FromPoiId, r.ToPoiId));
+        return rows.ToDictionary(r => (r.FromPoiId, r.ToPoiId, r.TravelMode));
     }
 
-    private static readonly IReadOnlyDictionary<(int From, int To), RouteSegment> EmptyCache =
-        new ReadOnlyDictionary<(int, int), RouteSegment>(new Dictionary<(int, int), RouteSegment>());
+    private static readonly IReadOnlyDictionary<(int From, int To, string Mode), RouteSegment> EmptyCache =
+        new ReadOnlyDictionary<(int, int, string), RouteSegment>(new Dictionary<(int, int, string), RouteSegment>());
 
     /// <summary>
     /// TRIP-TRAVELTIME-01: idempotently subscribes to the background compute
@@ -1094,10 +1107,12 @@ public sealed class TripViewModel(
         {
             // TRIP-TIMELINE-01: re-read the timeline inputs alongside the mode so a leg
             // landing in the cache recomputes arrivals/total too (both refresh paths).
-            var (travelMode, tripStartTime, budgetMinutes) = await ReadTripSettingsAsync(collectionId);
+            // TRIP-TIMELINE-01: re-read the timeline inputs; the trip-wide mode is no
+            // longer used for leg lookup (per-leg modes drive legs, Story 3.2).
+            var (_, tripStartTime, budgetMinutes) = await ReadTripSettingsAsync(collectionId);
             TripStartTime = tripStartTime;
             TimeBudgetMinutes = budgetMinutes;
-            var cache = await ReadRouteSegmentsAsync(collectionId, travelMode);
+            var cache = await ReadRouteSegmentsAsync(collectionId);
             OrderedLegs = BuildLegs(OrderedStops, FinishPoiId, cache);
             RecomputeTotal();
             RecomputeTimeline();
@@ -1126,7 +1141,7 @@ public sealed class TripViewModel(
     private static IReadOnlyList<TripLeg> BuildLegs(
         IReadOnlyList<TripStop> stops,
         int? finishPoiId,
-        IReadOnlyDictionary<(int From, int To), RouteSegment> cache)
+        IReadOnlyDictionary<(int From, int To, string Mode), RouteSegment> cache)
     {
         if (stops.Count < 2)
         {
@@ -1167,9 +1182,14 @@ public sealed class TripViewModel(
     /// non-Measured for now.
     /// </summary>
     private static TripLeg MakeLeg(
-        TripStop from, TripStop to, IReadOnlyDictionary<(int From, int To), RouteSegment> cache)
+        TripStop from, TripStop to, IReadOnlyDictionary<(int From, int To, string Mode), RouteSegment> cache)
     {
-        cache.TryGetValue((from.PoiId, to.PoiId), out var seg);
+        // TRIP-LEGMODE-01 (Story 3.2): the leg's mode is the From-stop's own
+        // OutgoingTravelMode, null normalized to AnyAir (one single Any/Air state).
+        // The cache row is looked up by this leg's OWN (From, To, Mode) key — an
+        // Any/Air leg has no ground cache row ⇒ null fields ⇒ "—" (never auto-timed).
+        var legMode = from.OutgoingTravelMode ?? Data.Entities.TravelMode.AnyAir;
+        cache.TryGetValue((from.PoiId, to.PoiId, legMode), out var seg);
         var fidelity = seg?.Fidelity;
         // TRIP-TRAVELMODE-01 (Story 2.2, AC4): a Placeholder leg (Any/Air with no
         // Manual entry) carries an internal straight-line air estimate, but it must
@@ -1197,7 +1217,10 @@ public sealed class TripViewModel(
             // the map projection. Already null for non-Measured rows (only OSRM
             // writes it for a Measured leg); the JS side decodes the precision-5
             // encoded polyline and gates "solid road" on its presence (AC1/AC5).
-            GeometryPolyline: seg?.GeometryPolyline);
+            GeometryPolyline: seg?.GeometryPolyline,
+            // TRIP-LEGMODE-01 (Story 3.2, FR-19): carry the leg's own mode (normalized
+            // null ≡ AnyAir) into the projection.
+            Mode: legMode);
     }
 
     /// <summary>

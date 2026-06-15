@@ -120,9 +120,12 @@ public sealed class TravelTimeComputationBackgroundService(
     }
 
     /// <summary>
-    /// Reads every Trip-View-enabled collection's ordered, placeable stops and
-    /// returns the directional leg pairs that have no <see cref="RouteSegment"/>
-    /// cache row yet under the collection's persisted <see cref="TravelMode"/>.
+    /// TRIP-LEGMODE-01 (Story 3.2): reads every Trip-View-enabled collection's ordered,
+    /// placeable stops and returns the directional leg pairs that (a) travel under a
+    /// GROUND mode (Walk / Drive / Cycle) and (b) have no <see cref="RouteSegment"/> cache
+    /// row yet under their OWN <c>(From, To, Mode)</c> key. Each leg's mode is the
+    /// From-stop's <c>OutgoingTravelMode</c> (null ≡ AnyAir), NOT the collection's trip-wide
+    /// <c>TravelMode</c>. AnyAir/null legs are NEVER enqueued / never auto-estimated (FR-21).
     /// </summary>
     private async Task<List<PendingLeg>> LoadPendingLegsAsync(CancellationToken ct)
     {
@@ -131,7 +134,7 @@ public sealed class TravelTimeComputationBackgroundService(
         var collections = await db.PoiCollections
             .AsNoTracking()
             .Where(c => c.TripViewEnabled)
-            .Select(c => new { c.Id, c.TravelMode, c.StartPoiId, c.FinishPoiId })
+            .Select(c => new { c.Id, c.StartPoiId, c.FinishPoiId })
             .ToListAsync(ct);
 
         if (collections.Count == 0)
@@ -141,9 +144,8 @@ public sealed class TravelTimeComputationBackgroundService(
 
         // Existing cache keys so we never recompute a leg that already has a row
         // (invalidation is Story 2.4). Tuple set keyed (From, To, Mode). This
-        // already covers TRIP-MANUAL-01 (Story 2.2): a manually-entered Any/Air
-        // leg is just a RouteSegment row, so its key is "present" here and the leg
-        // is never re-queued — the user's manual time is preserved.
+        // already covers TRIP-MANUAL-01 (Story 2.2): a manually-entered leg is just a
+        // RouteSegment row, so its key is "present" here and the leg is never re-queued.
         var existing = await db.RouteSegments
             .AsNoTracking()
             .Select(r => new { r.FromPoiId, r.ToPoiId, r.TravelMode })
@@ -160,24 +162,35 @@ public sealed class TravelTimeComputationBackgroundService(
             var members = await db.PoiCollectionItems
                 .AsNoTracking()
                 .Where(ci => ci.PoiCollectionId == c.Id)
-                .Select(ci => new { ci.PoiId, ci.OrderIndex, ci.Poi.Latitude, ci.Poi.Longitude })
+                .Select(ci => new { ci.PoiId, ci.OrderIndex, ci.OutgoingTravelMode, ci.Poi.Latitude, ci.Poi.Longitude })
                 .ToListAsync(ct);
 
+            // TRIP-LEGMODE-01: carry each From-stop's outgoing mode (null ≡ AnyAir)
+            // alongside its endpoint so the per-leg mode drives enqueue + cache key.
             var stops = members
                 .Where(m => m.OrderIndex > 0 && StopPlaceability.IsPlaceable(m.Latitude, m.Longitude))
                 .OrderBy(m => m.OrderIndex)
-                .Select(m => new TravelEndpoint(m.PoiId, m.Latitude!.Value, m.Longitude!.Value))
+                .Select(m => new PendingStop(
+                    new TravelEndpoint(m.PoiId, m.Latitude!.Value, m.Longitude!.Value),
+                    m.OutgoingTravelMode ?? TravelMode.AnyAir))
                 .ToList();
 
-            foreach (var (from, to) in DirectionalPairs(stops, c.FinishPoiId))
+            foreach (var (from, to, mode) in DirectionalPairs(stops, c.FinishPoiId))
             {
-                var key = (from.PoiId, to.PoiId, c.TravelMode);
+                // FR-21 / TRIP-LEGMODE-01: only GROUND legs (Walk/Drive/Cycle) auto-compute;
+                // AnyAir (incl. null) legs are never enqueued / never auto-estimated.
+                if (!IsGroundMode(mode))
+                {
+                    continue;
+                }
+
+                var key = (from.PoiId, to.PoiId, mode);
                 if (have.Contains(key) || !seen.Add(key))
                 {
                     continue;
                 }
 
-                pending.Add(new PendingLeg(from, to, c.TravelMode));
+                pending.Add(new PendingLeg(from, to, mode));
             }
         }
 
@@ -185,12 +198,21 @@ public sealed class TravelTimeComputationBackgroundService(
     }
 
     /// <summary>
+    /// TRIP-LEGMODE-01 (FR-21): true for the ground modes that auto-compute
+    /// (Walk / Drive / Cycle). AnyAir (incl. null, already normalized to AnyAir) is
+    /// excluded — those legs are never auto-estimated.
+    /// </summary>
+    private static bool IsGroundMode(string mode) =>
+        mode is TravelMode.Walk or TravelMode.Drive or TravelMode.Cycle;
+
+    /// <summary>
     /// The directional leg pairs for an ordered stop list, mirroring
     /// <c>TripViewModel.BuildLegs</c>: consecutive k→k+1, plus the closing leg
-    /// from the last stop back to the first on a Roundtrip (no distinct Finish).
+    /// from the last stop back to the first on a Roundtrip (no distinct Finish). Each
+    /// pair carries the FROM-stop's per-leg mode (TRIP-LEGMODE-01).
     /// </summary>
-    private static IEnumerable<(TravelEndpoint From, TravelEndpoint To)> DirectionalPairs(
-        IReadOnlyList<TravelEndpoint> stops, int? finishPoiId)
+    private static IEnumerable<(TravelEndpoint From, TravelEndpoint To, string Mode)> DirectionalPairs(
+        IReadOnlyList<PendingStop> stops, int? finishPoiId)
     {
         if (stops.Count < 2)
         {
@@ -199,17 +221,22 @@ public sealed class TravelTimeComputationBackgroundService(
 
         for (var k = 0; k < stops.Count - 1; k++)
         {
-            yield return (stops[k], stops[k + 1]);
+            yield return (stops[k].Endpoint, stops[k + 1].Endpoint, stops[k].OutgoingTravelMode);
         }
 
         var finishIsDistinctStop = finishPoiId is { } fid
-            && fid != stops[0].PoiId
-            && stops.Any(s => s.PoiId == fid);
+            && fid != stops[0].Endpoint.PoiId
+            && stops.Any(s => s.Endpoint.PoiId == fid);
         if (!finishIsDistinctStop)
         {
-            yield return (stops[^1], stops[0]);
+            // The closing leg leaves the LAST stop ⇒ its From-stop is stops[^1],
+            // so the closing leg's mode is the last stop's OutgoingTravelMode.
+            yield return (stops[^1].Endpoint, stops[0].Endpoint, stops[^1].OutgoingTravelMode);
         }
     }
+
+    /// <summary>An ordered placeable stop plus its From-leg mode (null normalized to AnyAir).</summary>
+    private readonly record struct PendingStop(TravelEndpoint Endpoint, string OutgoingTravelMode);
 
     /// <summary>
     /// Upserts one computed leg into the cache under the write lock. Idempotent:

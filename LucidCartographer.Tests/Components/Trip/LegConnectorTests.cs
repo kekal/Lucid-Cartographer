@@ -38,7 +38,11 @@ public class LegConnectorTests : BunitTestContext
             for (var i = 1; i <= 2; i++)
             {
                 db.Pois.Add(new Poi { Id = i, Name = $"P{i}", Latitude = 50 + i, Longitude = 20 + i, AddedDate = new DateTime(2025, 1, i) });
-                db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = i, PoiCollectionId = CollectionId });
+                // Story 3.2 (TRIP-LEGMODE-01): set each From-stop's per-leg outgoing mode to
+                // the trip mode so the legs resolve their cache rows under that mode (the
+                // trip-wide selector no longer drives leg lookup). AnyAir legs (the manual
+                // path) still match AnyAir rows; Drive legs match the seeded Drive rows.
+                db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = i, PoiCollectionId = CollectionId, OutgoingTravelMode = mode });
             }
             if (seg is not null)
             {

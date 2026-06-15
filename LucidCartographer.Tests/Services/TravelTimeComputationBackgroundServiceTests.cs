@@ -71,8 +71,12 @@ public class TravelTimeComputationBackgroundServiceTests
         });
         db.Pois.Add(new Poi { Id = 1, Name = "P1", Latitude = 50.0, Longitude = 20.0, AddedDate = new DateTime(2025, 1, 1) });
         db.Pois.Add(new Poi { Id = 2, Name = "P2", Latitude = 51.0, Longitude = 21.0, AddedDate = new DateTime(2025, 1, 2) });
-        db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = 1, PoiCollectionId = CollectionId, OrderIndex = 1 });
-        db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = 2, PoiCollectionId = CollectionId, OrderIndex = 2 });
+        // Story 3.2 (TRIP-LEGMODE-01): legs are per-leg-mode driven now. A ground mode
+        // (Drive) on each From-stop's OutgoingTravelMode is what makes the roundtrip legs
+        // auto-compute — the collection-wide TravelMode no longer drives legs. Both stops
+        // get Drive so both directional legs (1→2 and the closing 2→1) are enqueued.
+        db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = 1, PoiCollectionId = CollectionId, OrderIndex = 1, OutgoingTravelMode = TravelMode.Drive });
+        db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = 2, PoiCollectionId = CollectionId, OrderIndex = 2, OutgoingTravelMode = TravelMode.Drive });
         db.SaveChanges();
         return factory;
     }
@@ -94,9 +98,12 @@ public class TravelTimeComputationBackgroundServiceTests
         rows.Should().Contain(r => r.FromPoiId == 2 && r.ToPoiId == 1);
 
         var leg = rows.First(r => r.FromPoiId == 1 && r.ToPoiId == 2);
-        leg.TravelMode.Should().Be(TravelMode.AnyAir);
-        // Story 2.2 (TRIP-TRAVELMODE-01): Any/Air legs from the Mock are Placeholder.
-        leg.Fidelity.Should().Be(Fidelity.Placeholder);
+        // Story 3.2 (TRIP-LEGMODE-01): the row is keyed by the leg's OWN mode (the
+        // From-stop's OutgoingTravelMode = Drive), not the collection's trip-wide mode.
+        leg.TravelMode.Should().Be(TravelMode.Drive);
+        // A ground (Drive) leg from the Mock is Estimated (Placeholder is the Any/Air case,
+        // which is now never auto-computed at all — covered by the AnyAir-not-enqueued test).
+        leg.Fidelity.Should().Be(Fidelity.Estimated);
         leg.Source.Should().Be("Mock");
         leg.GeometryPolyline.Should().BeNull();
         leg.DistanceMeters.Should().BeGreaterThan(0);
@@ -116,6 +123,108 @@ public class TravelTimeComputationBackgroundServiceTests
         await using var db = await factory.CreateDbContextAsync();
         var rows = await db.RouteSegments.ToListAsync();
         rows.Should().HaveCount(2, "a re-run must not duplicate cache rows for unchanged pairs");
+    }
+
+    // --- Story 3.2 (TRIP-LEGMODE-01, FR-21): ground-only auto-compute, per-leg mode ---
+
+    /// <summary>
+    /// A roundtrip where each From-stop carries a different per-leg outgoing mode so the
+    /// enqueue/skip decision can be checked per leg.
+    /// </summary>
+    private static IDbContextFactory<AppDbContext> SeedRoundtripWithModes(string? mode1to2, string? mode2to1)
+    {
+        var factory = TestDbHelper.CreateFactory();
+        using var db = factory.CreateDbContext();
+        db.PoiCollections.Add(new PoiCollection
+        {
+            Id = CollectionId, Name = "Trip", Color = "#005bbf",
+            TripViewEnabled = true, TravelMode = TravelMode.AnyAir,
+        });
+        db.Pois.Add(new Poi { Id = 1, Name = "P1", Latitude = 50.0, Longitude = 20.0, AddedDate = new DateTime(2025, 1, 1) });
+        db.Pois.Add(new Poi { Id = 2, Name = "P2", Latitude = 51.0, Longitude = 21.0, AddedDate = new DateTime(2025, 1, 2) });
+        // From-stop of leg 1→2 is P1; From-stop of the closing leg 2→1 is P2.
+        db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = 1, PoiCollectionId = CollectionId, OrderIndex = 1, OutgoingTravelMode = mode1to2 });
+        db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = 2, PoiCollectionId = CollectionId, OrderIndex = 2, OutgoingTravelMode = mode2to1 });
+        db.SaveChanges();
+        return factory;
+    }
+
+    [Theory]
+    [InlineData(TravelMode.Walk)]
+    [InlineData(TravelMode.Drive)]
+    [InlineData(TravelMode.Cycle)]
+    public async Task ProcessOnce_EnqueuesGroundModeLeg(string groundMode)
+    {
+        // Leg 1→2 is a ground mode (enqueued); the closing 2→1 is AnyAir (never enqueued)
+        // so exactly the one ground leg lands a row, keyed by its own (1,2,mode).
+        var factory = SeedRoundtripWithModes(mode1to2: groundMode, mode2to1: TravelMode.AnyAir);
+        var service = BuildService(factory, new SqliteWriteLock());
+
+        await service.ProcessOnceAsync(CancellationToken.None);
+
+        await using var db = await factory.CreateDbContextAsync();
+        var rows = await db.RouteSegments.ToListAsync();
+        rows.Should().ContainSingle("only the ground-mode leg auto-computes; the AnyAir leg never does");
+        var leg = rows.Single();
+        leg.FromPoiId.Should().Be(1);
+        leg.ToPoiId.Should().Be(2);
+        leg.TravelMode.Should().Be(groundMode, "the row is keyed by the leg's own per-leg mode");
+        leg.DurationSeconds.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task ProcessOnce_NeverEnqueuesAnyAirLeg()
+    {
+        // Both From-stops are AnyAir (one null, one explicit) ⇒ neither leg is ever
+        // auto-estimated; the compute pass produces no rows at all (FR-21).
+        var factory = SeedRoundtripWithModes(mode1to2: null, mode2to1: TravelMode.AnyAir);
+        var service = BuildService(factory, new SqliteWriteLock());
+
+        await service.ProcessOnceAsync(CancellationToken.None);
+
+        await using var db = await factory.CreateDbContextAsync();
+        (await db.RouteSegments.CountAsync()).Should().Be(0, "AnyAir/null legs are never auto-estimated");
+    }
+
+    [Fact]
+    public async Task ProcessOnce_MissingRowDetection_IsPerLegMode()
+    {
+        // A Drive 1→2 leg already has a cache row under (1,2,Drive); the closing 2→1
+        // leg is also Drive but has NO row. Missing-row detection is per the leg's own
+        // mode key, so only the uncached 2→1 Drive leg is enqueued (the 1→2 row is left
+        // intact). A stale (1,2,Walk) row must NOT satisfy the (1,2,Drive) leg.
+        var factory = SeedRoundtripWithModes(mode1to2: TravelMode.Drive, mode2to1: TravelMode.Drive);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.RouteSegments.Add(new RouteSegment
+            {
+                FromPoiId = 1, ToPoiId = 2, TravelMode = TravelMode.Drive,
+                DurationSeconds = 4242, DistanceMeters = 5000,
+                Fidelity = Fidelity.Estimated, Source = "Mock", ComputedAt = DateTime.UtcNow,
+            });
+            // A stale Walk row for the SAME pair must not mask the Drive leg's own key.
+            db.RouteSegments.Add(new RouteSegment
+            {
+                FromPoiId = 2, ToPoiId = 1, TravelMode = TravelMode.Walk,
+                DurationSeconds = 111, DistanceMeters = 222,
+                Fidelity = Fidelity.Estimated, Source = "Mock", ComputedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = BuildService(factory, new SqliteWriteLock());
+        await service.ProcessOnceAsync(CancellationToken.None);
+
+        await using var verify = await factory.CreateDbContextAsync();
+        // The existing (1,2,Drive) row is untouched (its leg was not pending).
+        var kept = await verify.RouteSegments.SingleAsync(r => r.FromPoiId == 1 && r.ToPoiId == 2 && r.TravelMode == TravelMode.Drive);
+        kept.DurationSeconds.Should().Be(4242, "an already-cached leg is not recomputed");
+        // The (2,1,Drive) leg had no row under its OWN mode key ⇒ it was computed now,
+        // distinct from the stale (2,1,Walk) row which does not satisfy a Drive leg.
+        (await verify.RouteSegments.AnyAsync(r => r.FromPoiId == 2 && r.ToPoiId == 1 && r.TravelMode == TravelMode.Drive))
+            .Should().BeTrue("the Drive 2→1 leg's missing row is detected per its own mode key");
+        (await verify.RouteSegments.SingleAsync(r => r.FromPoiId == 2 && r.ToPoiId == 1 && r.TravelMode == TravelMode.Walk))
+            .DurationSeconds.Should().Be(111, "the stale Walk row is left untouched");
     }
 
     [Fact]
@@ -142,12 +251,14 @@ public class TravelTimeComputationBackgroundServiceTests
     public async Task ProcessOnce_DoesNotOverwrite_ManualRow()
     {
         var factory = SeedTwoStopRoundtrip();
-        // Seed a Manual row for the 1→2 Any/Air leg the user entered (e.g. a flight).
+        // Story 3.2 (TRIP-LEGMODE-01): the 1→2 leg's own mode is Drive (its From-stop's
+        // OutgoingTravelMode). Seed the user's Manual row at that SAME (1,2,Drive) key so
+        // it is the row covering the actual leg — a compute pass must never overwrite it.
         await using (var db = await factory.CreateDbContextAsync())
         {
             db.RouteSegments.Add(new RouteSegment
             {
-                FromPoiId = 1, ToPoiId = 2, TravelMode = TravelMode.AnyAir,
+                FromPoiId = 1, ToPoiId = 2, TravelMode = TravelMode.Drive,
                 DurationSeconds = 5400, DistanceMeters = 123456,
                 Fidelity = Fidelity.Manual, Source = "Manual", ComputedAt = DateTime.UtcNow,
             });
@@ -182,7 +293,10 @@ public class TravelTimeComputationBackgroundServiceTests
         for (var i = 1; i <= stops; i++)
         {
             db.Pois.Add(new Poi { Id = i, Name = $"P{i}", Latitude = 50.0 + i, Longitude = 20.0 + i, AddedDate = new DateTime(2025, 1, i) });
-            db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = i, PoiCollectionId = CollectionId, OrderIndex = i });
+            // Story 3.2 (TRIP-LEGMODE-01): per-leg Drive mode on every From-stop so the
+            // open-path legs auto-compute (a ground mode). The collection's trip-wide
+            // TravelMode no longer drives legs.
+            db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = i, PoiCollectionId = CollectionId, OrderIndex = i, OutgoingTravelMode = TravelMode.Drive });
         }
         db.SaveChanges();
         return factory;

@@ -69,7 +69,14 @@ public sealed record TripLeg(
     // map draws a straight dashed + muted connector. Only a Measured leg carries it;
     // its presence (not IsMeasured alone) is what makes the line render solid/road-
     // shaped. Carried verbatim from RouteSegment.GeometryPolyline; decoded JS-side.
-    string? GeometryPolyline = null);
+    string? GeometryPolyline = null,
+    // TRIP-LEGMODE-01 (Story 3.2, FR-19): this leg's own travel mode — the From-stop's
+    // OutgoingTravelMode (one of TravelMode.All; a null OutgoingTravelMode is normalized
+    // to AnyAir here so there is one single "Any/Air" state, never a null sentinel). The
+    // leg's cache row is looked up by its own (From, To, Mode) key, NOT one trip-wide
+    // mode (TRIP-CACHE-01). An Any/Air leg has no ground cache row (never auto-computed,
+    // FR-21) ⇒ DurationSeconds null ⇒ "—". Ground modes (Walk/Drive/Cycle) auto-compute.
+    string Mode = Data.Entities.TravelMode.AnyAir);
 
 /// <summary>
 /// One ordered, placeable stop projected for the stop-list panel and the
@@ -85,7 +92,14 @@ public sealed record TripStop(
     double Lat,
     double Lon,
     bool IsStart,
-    bool IsFinish);
+    bool IsFinish,
+    // TRIP-LEGMODE-01 (Story 3.2): the membership's per-leg OutgoingTravelMode — the
+    // mode of the leg LEAVING this stop toward the next in Stop Order. One of
+    // TravelMode.All or null (null ≡ AnyAir). Read from PoiCollectionItem.OutgoingTravelMode
+    // in ReadStopsAndRowsAsync and consumed by BuildLegs to set each leg's Mode and pick
+    // its (From, To, Mode) cache key. Defaulted so existing TripStop constructions (tests
+    // that build stops by hand) keep compiling with a null (≡ AnyAir) outgoing mode.
+    string? OutgoingTravelMode = null);
 
 /// <summary>
 /// One stop-list row over the FULL trip membership — placeable stops and
