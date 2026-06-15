@@ -193,12 +193,49 @@ public class TripTimelineRenderTests : BunitTestContext
 
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
 
+        // Story 4.1 (FR-26, RD10): the desktop start is a native datetime-local that
+        // persists the FULL date+time the browser emits (ISO), not today + a time-of-day.
         var input = cut.Find($"input[aria-label=\"{UiStrings.TripStartTimeAria}\"]");
-        await input.ChangeAsync(new ChangeEventArgs { Value = "08:15" });
+        input.GetAttribute("type").Should().Be("datetime-local", "the desktop start is a date+time picker (FR-26)");
+
+        await input.ChangeAsync(new ChangeEventArgs { Value = "2026-06-04T09:30" });
 
         vm.TripStartTime.Should().NotBeNull("the start-time input drives the VM");
-        vm.TripStartTime!.Value.Hour.Should().Be(8);
-        vm.TripStartTime.Value.Minute.Should().Be(15);
+        vm.TripStartTime!.Value.Should().Be(new DateTime(2026, 6, 4, 9, 30, 0),
+            "the full date is preserved, not paired with today's date");
+    }
+
+    [Fact]
+    public async Task TripStopList_StartTimeInput_Cleared_NullsVm()
+    {
+        var factory = Seed();
+        await AddSegmentAsync(factory, 1, 2, 3600, Fidelity.Manual);
+        await AddSegmentAsync(factory, 2, 1, 3600, Fidelity.Manual);
+        await using var vm = await EnabledVmAsync(factory);
+        await vm.SetTripStartTimeAsync(new DateTime(2026, 6, 4, 9, 30, 0));
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        var input = cut.Find($"input[aria-label=\"{UiStrings.TripStartTimeAria}\"]");
+        await input.ChangeAsync(new ChangeEventArgs { Value = "" });
+
+        vm.TripStartTime.Should().BeNull("clearing the start input clears the VM start");
+    }
+
+    [Fact]
+    public async Task TripStopList_StartTimeInput_RendersIsoWireValue()
+    {
+        var factory = Seed();
+        await AddSegmentAsync(factory, 1, 2, 3600, Fidelity.Manual);
+        await AddSegmentAsync(factory, 2, 1, 3600, Fidelity.Manual);
+        await using var vm = await EnabledVmAsync(factory);
+        await vm.SetTripStartTimeAsync(new DateTime(2026, 6, 4, 9, 30, 0));
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        // The datetime-local value attribute is the ISO/invariant wire format.
+        var input = cut.Find($"input[aria-label=\"{UiStrings.TripStartTimeAria}\"]");
+        input.GetAttribute("value").Should().Be("2026-06-04T09:30");
     }
 
     [Fact]

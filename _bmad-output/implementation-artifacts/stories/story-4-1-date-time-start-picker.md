@@ -1,6 +1,26 @@
 # Story 4.1: Date + time start picker
 
-Status: ready-for-dev
+Status: done
+
+## Dev Agent Record
+
+Desktop start input changed `type="time"` → `type="datetime-local"`. `StartTimeValue()` formats
+`TripStartTime` as the ISO wire value `"yyyy-MM-ddTHH:mm"` (InvariantCulture — control wire format,
+not locale display); `OnStartTimeChangedAsync` parses with `InvariantCulture` and persists the FULL
+`DateTime` (the old `DateTime.Today.Add(...)` pairing is gone) or null on empty. VM/service/schema
+unchanged (`SetTripStartTimeAsync`/`TripStartTime` already `DateTime?`); MobileTripPanel untouched
+(deferred mirror); arrival display unchanged (date-awareness is Story 4.2). Width `w-20`→`w-auto` so
+the value isn't clipped.
+
+Review: orchestrator self-review (small markup+bridge change). Verified full-DateTime persistence
+(date preserved, not today), ISO round-trip, and no VM/schema change. 3 bUnit tests (set→full
+DateTime, clear→null, ISO value round-trip); existing start-input test faithfully updated. 886 fast
++ 20 Trip integration green; build clean.
+
+## File List
+
+- LucidCartographer/Components/Shared/Trip/TripStopList.razor (MOD — datetime-local start)
+- LucidCartographer.Tests/Components/Trip/TripTimelineRenderTests.cs (MOD — start-picker tests)
 
 ## Story
 

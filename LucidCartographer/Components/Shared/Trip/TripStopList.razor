@@ -78,8 +78,8 @@
         <div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 border-b border-surface-container-high flex-shrink-0 text-xs min-w-0">
             <label class="flex items-center gap-1 text-on-surface-variant min-w-0">
                 <span class="flex-shrink-0">@UiStrings.TripStartTimeLabel</span>
-                <input type="time"
-                       class="min-w-0 w-20 text-xs px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
+                <input type="datetime-local"
+                       class="min-w-0 w-auto text-xs px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
                        aria-label="@UiStrings.TripStartTimeAria"
                        value="@StartTimeValue()"
                        @onchange="OnStartTimeChangedAsync" />
@@ -515,11 +515,13 @@
     private static string ArrivalCompactText(ItineraryArrival a) =>
         TravelTimeFormatting.ArrivalCompact(a.OffsetSeconds, a.ArrivalWallClock, a.QualifyingFidelity, a.IsUnknown);
 
-    // TRIP-TIMELINE-01: the <input type="time"> value (HH:mm) for the active start
-    // time, or empty when unset.
+    // Story 4.1 (FR-26, RD10): the <input type="datetime-local"> value for the active
+    // start. The control's value attribute is ISO/invariant ("yyyy-MM-ddTHH:mm")
+    // regardless of locale — this is the wire format, NOT display formatting (4.2 owns
+    // locale-driven arrival display). Empty when no start is set.
     private string StartTimeValue() =>
         Vm.TripStartTime is { } t
-            ? t.ToString("HH:mm", System.Globalization.CultureInfo.CurrentCulture)
+            ? t.ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture)
             : string.Empty;
 
     // TRIP-TIMELINE-01: the budget-minutes input value, or empty when unset.
@@ -528,9 +530,10 @@
             ? m.ToString(System.Globalization.CultureInfo.CurrentCulture)
             : string.Empty;
 
-    // TRIP-TIMELINE-01: parse the entered HH:mm and persist via the VM. Empty clears
-    // the start time (⇒ relative offsets only). The time pairs with today's date —
-    // the wall-clock arrivals only ever use the time-of-day component for display.
+    // Story 4.1 (FR-26, RD10): parse the entered datetime-local value and persist the
+    // FULL date+time via the VM (no more DateTime.Today hard-pairing — a multi-day trip
+    // anchors to a real day). Empty clears the start (⇒ relative offsets only). The
+    // browser emits ISO "yyyy-MM-ddTHH:mm", so parse with InvariantCulture.
     private async Task OnStartTimeChangedAsync(ChangeEventArgs e)
     {
         var text = e.Value?.ToString();
@@ -540,9 +543,9 @@
             return;
         }
 
-        if (TimeOnly.TryParse(text, System.Globalization.CultureInfo.CurrentCulture, out var time))
+        if (DateTime.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt))
         {
-            await Vm.SetTripStartTimeAsync(DateTime.Today.Add(time.ToTimeSpan()));
+            await Vm.SetTripStartTimeAsync(dt);
         }
     }
 
