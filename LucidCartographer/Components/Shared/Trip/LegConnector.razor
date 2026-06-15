@@ -34,10 +34,16 @@
 
     <FidelityBadge Fidelity="@Leg.Fidelity" />
 
-    @* TRIP-MANUAL-01 (Story 2.2, AC5): manual minutes input — only under Any/Air.
-       Entering a value upserts a Manual leg; clearing reverts to the Placeholder.
+    @* Story 3.4 (TRIP-LEGMODE-01, FR-19): the per-leg mode pill. Replaces the
+       trip-wide TravelModeSelector — each leg sets its own Walk/Drive/Cycle/Any-Air.
+       Presentational: it raises Vm.SetLegModeAsync only (NFR1). *@
+    <LegModePill Leg="Leg" Vm="Vm" />
+
+    @* TRIP-MANUAL-01 (Story 2.2, AC5): manual minutes input — only on an Any/Air leg.
+       Gated on THIS leg's own mode (Leg.Mode), not the removed trip-wide mode (Story
+       3.4). Entering a value upserts a Manual leg; clearing reverts to the Placeholder.
        stopPropagation so editing never selects/reorders an adjacent row. *@
-    @if (Vm.TravelMode == LucidCartographer.Data.Entities.TravelMode.AnyAir)
+    @if (Leg.Mode == LucidCartographer.Data.Entities.TravelMode.AnyAir)
     {
         <input type="number" min="0" max="@TripViewModel.MaxManualLegMinutes" inputmode="numeric"
                class="w-12 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
@@ -74,8 +80,10 @@
     /// <summary>
     /// The owning Trip view-model. The connector raises VM COMMANDS only
     /// (<see cref="TripViewModel.SetManualLegTimeAsync"/> /
-    /// <see cref="TripViewModel.ClearManualLegTimeAsync"/>) and reads
-    /// <see cref="TripViewModel.TravelMode"/> + the stop names — it never touches
+    /// <see cref="TripViewModel.ClearManualLegTimeAsync"/> /
+    /// <see cref="TripViewModel.SetLegModeAsync"/> via the embedded
+    /// <c>LegModePill</c>) and reads the leg's own <see cref="TripLeg.Mode"/> +
+    /// the stop names — it never touches
     /// services/DB and never mutates its own state (NFR1).
     /// </summary>
     [Parameter, EditorRequired] public TripViewModel Vm { get; set; } = null!;

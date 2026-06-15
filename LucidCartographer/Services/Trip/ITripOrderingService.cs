@@ -162,6 +162,21 @@ public interface ITripOrderingService
     Task SetDwellMinutesAsync(int collectionId, int poiId, int? minutes, CancellationToken ct = default);
 
     /// <summary>
+    /// TRIP-LEGMODE-01 (Story 3.4, FR-19): sets ONE leg's travel mode by writing
+    /// <see cref="Data.Entities.PoiCollectionItem.OutgoingTravelMode"/> on the From-stop's
+    /// membership. <paramref name="mode"/> must be <c>null</c> (≡ AnyAir, the undefined /
+    /// manual-only state) or one of <see cref="Data.Entities.TravelMode.All"/>; any other
+    /// value throws <see cref="ArgumentException"/>. Written under the shared
+    /// <see cref="SqliteWriteLock"/> — this is the sole writer of a single leg's mode
+    /// (the order-reset path in <c>SetOrderAsync</c> is the only other place
+    /// <c>OutgoingTravelMode</c> is touched, TRIP-LEGMODE-01). Does NOT change the Stop
+    /// Order. No-op when the membership is absent or the mode is already the stored value.
+    /// The single per-leg-mode write shared by the UI (TripViewModel) and the MCP
+    /// <c>set_leg_travel_mode</c> tool (Story 3.6).
+    /// </summary>
+    Task SetOutgoingTravelModeAsync(int collectionId, int fromPoiId, string? mode, CancellationToken ct = default);
+
+    /// <summary>
     /// Reconciles the order after an arbitrary membership change: any placeable
     /// item that has no order yet (<c>OrderIndex == 0</c>) is appended after the
     /// existing Stops (by AddedDate, then PoiId), then the whole set is compacted

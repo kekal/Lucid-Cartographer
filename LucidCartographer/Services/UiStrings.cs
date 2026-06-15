@@ -241,6 +241,16 @@ public static class UiStrings
     public const string TripTravelModeWalk = "Walk";
     public const string TripTravelModeCycle = "Cycle";
 
+    // Trip View — per-leg mode pill (Story 3.4, TRIP-LEGMODE-01, FR-19/UX-DR3/DR11).
+    // The pill on each leg connector shows the leg's mode (reusing the mode names
+    // above) or, when undefined/Any-Air, a neutral "Any — set mode" outline pill (NOT
+    // an error tone). The pill opens a menu of the four modes; {0} = the leg's origin
+    // stop name for the per-leg accessible names + title.
+    public const string TripLegModeAnySetMode = "Any — set mode";
+    public const string TripLegModePillAria = "Travel mode for the leg departing {0}";
+    public const string TripLegModePillTitle = "Set the travel mode for the leg departing {0}";
+    public const string TripLegModeMenuAria = "Choose travel mode for the leg departing {0}";
+
     // Trip View — manual Any/Air leg time (Story 2.2, TRIP-MANUAL-01). The numeric
     // minutes input shown only on Any/Air legs; entering a value carries
     // Fidelity.Manual and overrides the placeholder. {0} = POI name of the leg's

@@ -250,6 +250,47 @@ public sealed class TripOrderingService(
             minutes, poiId, collectionId);
     }
 
+    public async Task SetOutgoingTravelModeAsync(int collectionId, int fromPoiId, string? mode, CancellationToken ct = default)
+    {
+        // TRIP-LEGMODE-01 (Story 3.4): the sole dedicated writer of a single leg's
+        // mode. Validate UP FRONT — null (≡ AnyAir) is allowed, otherwise the value
+        // must be one of TravelMode.All; an unknown mode is a hard error (the MCP
+        // tool in Story 3.6 surfaces it as a tool error, the UI never sends one).
+        if (mode is not null && !TravelMode.IsValid(mode))
+        {
+            throw new ArgumentException(
+                $"'{mode}' is not a valid travel mode; expected null or one of {string.Join(", ", TravelMode.All)}.",
+                nameof(mode));
+        }
+
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var membership = await db.PoiCollectionItems.FirstOrDefaultAsync(
+            ci => ci.PoiCollectionId == collectionId && ci.PoiId == fromPoiId, ct);
+        if (membership is null || membership.OutgoingTravelMode == mode)
+        {
+            // Absent membership or unchanged mode — no write, no order change.
+            return;
+        }
+
+        membership.OutgoingTravelMode = mode;
+
+        // A single dedicated write under the shared gate (NOT routed through
+        // SetOrderAsync — setting a mode never reorders, so the order-reset rule
+        // does not apply).
+        await writeLock.Gate.WaitAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        finally
+        {
+            writeLock.Gate.Release();
+        }
+
+        logger.LogDebug("TRIP-LEGMODE-01: outgoing travel mode {Mode} written for POI {PoiId} in collection {CollectionId}",
+            mode ?? "(null/AnyAir)", fromPoiId, collectionId);
+    }
+
     private static int? MatrixIndexOf(IReadOnlyList<PlaceableStop> stops, int? poiId)
     {
         if (poiId is not { } id)

@@ -714,16 +714,16 @@ public class TripStopListTests : BunitTestContext
         return vm;
     }
 
-    [Theory]
-    [InlineData(typeof(TripStopList))]
-    [InlineData(typeof(MobileTripPanel))]
-    public async Task Selector_RendersFourSegments_WithPersistedModeActive(Type surface)
+    // Story 3.4 (FR-23): the trip-wide TravelModeSelector is removed from the DESKTOP
+    // surface, so only MobileTripPanel still renders the radiogroup. (Desktop "user can
+    // set mode" intent is re-expressed by the per-leg LegModePill tests in
+    // LegModePillTests + Desktop_NoTravelModeSelector_PerLegPillPresent below.)
+    [Fact]
+    public async Task MobileSelector_RendersFourSegments_WithPersistedModeActive()
     {
         await using var vm = await EnabledVmWithModeAsync(placeable: 2, mode: TravelMode.Drive);
 
-        var cut = surface == typeof(TripStopList)
-            ? (IRenderedFragment)RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm))
-            : RenderComponent<MobileTripPanel>(p => p.Add(x => x.Vm, vm));
+        var cut = RenderComponent<MobileTripPanel>(p => p.Add(x => x.Vm, vm));
 
         var group = cut.Find("[role=radiogroup]");
         var radios = group.QuerySelectorAll("[role=radio]");
@@ -734,35 +734,36 @@ public class TripStopListTests : BunitTestContext
         cut.Find($"button[aria-label=\"{UiStrings.TripTravelModeAnyAir}\"]").GetAttribute("aria-checked").Should().Be("false");
     }
 
+    // Story 3.4 (FR-23): the DESKTOP TripStopList no longer renders the trip-wide
+    // selector (no role=radiogroup / no "Travel mode" radiogroup aria); the per-leg
+    // LegModePill takes its place on each connector.
     [Fact]
-    public async Task Selector_Switching_InvokesVm_AndPersists()
+    public async Task Desktop_NoTravelModeSelector_PerLegPillPresent()
     {
         await using var vm = await EnabledVmWithModeAsync(placeable: 2, mode: TravelMode.AnyAir);
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
 
-        cut.Find($"button[aria-label=\"{UiStrings.TripTravelModeWalk}\"]").Click();
-
-        cut.WaitForAssertion(() =>
-        {
-            vm.TravelMode.Should().Be(TravelMode.Walk);
-            cut.Find($"button[aria-label=\"{UiStrings.TripTravelModeWalk}\"]").GetAttribute("aria-checked").Should().Be("true");
-        });
+        cut.FindAll("[role=radiogroup]").Should().BeEmpty("the trip-wide selector is removed from desktop (FR-23)");
+        // The per-leg pill replaces it — a leg connector carries the mode pill.
+        var pillAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripLegModePillAria, "P1");
+        cut.FindAll($"button[aria-label=\"{pillAria}\"]").Should().NotBeEmpty("the per-leg mode pill replaces the trip-wide selector");
     }
 
     [Fact]
-    public async Task ManualInput_Present_UnderAnyAir_Absent_UnderDrive()
+    public async Task ManualInput_Present_OnAnyAirLeg_Absent_OnDriveLeg()
     {
+        // The manual minutes input now gates on the LEG's own mode (Story 3.4), not
+        // the removed trip-wide mode. An Any/Air leg (default) carries the input.
         await using var anyAir = await EnabledVmWithModeAsync(placeable: 2, mode: TravelMode.AnyAir);
         var cutAir = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, anyAir));
         var aria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripManualMinutesAria, "P1");
         cutAir.FindAll($"input[aria-label=\"{aria}\"]").Should().NotBeEmpty("Any/Air legs carry the manual minutes input");
 
-        await using var drive = await EnabledVmWithModeAsync(placeable: 2, mode: TravelMode.Drive);
-        var cutDrive = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, drive));
-        // The MANUAL input is hidden under non-Any/Air modes. (The Story 2.5 dwell
-        // input is a separate type=number always present, so scope to the manual
-        // input's own aria-label.)
-        cutDrive.FindAll($"input[aria-label=\"{aria}\"]").Should().BeEmpty("the manual input is hidden under non-Any/Air modes");
+        // Set the 1â†’2 leg's mode to Drive (per-leg). Its manual input must vanish while
+        // the OTHER (Any/Air) leg keeps it.
+        await anyAir.SetLegModeAsync(1, TravelMode.Drive);
+        cutAir.WaitForAssertion(() =>
+            cutAir.FindAll($"input[aria-label=\"{aria}\"]").Should().BeEmpty("the manual input is hidden once the leg's own mode is Drive"));
     }
 
     [Fact]

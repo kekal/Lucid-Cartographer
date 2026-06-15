@@ -1,0 +1,132 @@
+@using LucidCartographer.Data.Entities
+@using LucidCartographer.Services.Trip
+
+@* Story 3.4 (TRIP-LEGMODE-01, FR-19/21/23, UX-DR3/DR11): the per-leg travel-mode
+   pill on the connector. A PRESENTATIONAL component (NFR1) — it raises a single VM
+   command (Vm.SetLegModeAsync) and never touches services/DB or mutates its own
+   persisted state. A rounded-full text-xs pill:
+   - Set (Leg.Mode ∈ {Walk,Drive,Cycle}): primary/10 fill + primary text + the mode
+     glyph + label.
+   - Undefined / Any-Air (Leg.Mode == AnyAir; null is normalized to AnyAir upstream):
+     OUTLINE ONLY + a neutral help glyph + "Any — set mode" — NEVER an error colour
+     (UX-DR11).
+   Clicking opens a small menu of the four modes (Walk / Drive / Cycle / Any-Air) with
+   the ACTIVE one checked; choosing one calls Vm.SetLegModeAsync(Leg.FromPoiId, mode).
+   stopPropagation on the pill + menu so the connector never selects/reorders a row.
+   All copy via UiStrings (Trip*-prefixed); a title at parity for discoverability. *@
+
+<div class="relative inline-flex" @onclick:stopPropagation="true" @onkeydown:stopPropagation="true">
+    @{
+        var isSet = Leg.Mode is TravelMode.Walk or TravelMode.Drive or TravelMode.Cycle;
+        var pillClass = isSet
+            ? "bg-primary/10 text-primary"
+            : "border border-surface-container-high text-on-surface-variant";
+    }
+    <button type="button"
+            class="@($"inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium hover:bg-surface-container {pillClass}")"
+            aria-haspopup="true"
+            aria-expanded="@(_open ? "true" : "false")"
+            aria-label="@PillAria"
+            title="@PillTitle"
+            @onclick="Toggle"
+            @onclick:stopPropagation="true"
+            @onkeydown:stopPropagation="true">
+        <span class="material-symbols-outlined" style="font-size:14px" aria-hidden="true">@GlyphFor(Leg.Mode)</span>
+        <span>@LabelFor(Leg.Mode)</span>
+    </button>
+
+    @if (_open)
+    {
+        @* Small Material-style popover list of the four modes. role=menu + the active
+           mode flagged aria-checked; selecting raises the VM command and closes. *@
+        <div role="menu"
+             aria-label="@MenuAria"
+             class="absolute left-0 top-full z-10 mt-1 min-w-[8rem] rounded-md border border-surface-container-high bg-surface-container-low shadow-md py-1"
+             @onclick:stopPropagation="true"
+             @onkeydown:stopPropagation="true">
+            @foreach (var (mode, label) in Modes)
+            {
+                var active = Leg.Mode == mode;
+                <button type="button"
+                        role="menuitemradio"
+                        aria-checked="@(active ? "true" : "false")"
+                        aria-label="@label"
+                        class="@($"flex w-full items-center gap-2 px-2 py-1 text-xs text-left hover:bg-surface-container {(active ? "text-primary font-medium" : "text-on-surface")}")"
+                        @onclick="() => ChooseAsync(mode)"
+                        @onclick:stopPropagation="true"
+                        @onkeydown:stopPropagation="true">
+                    <span class="material-symbols-outlined" style="font-size:16px" aria-hidden="true">@GlyphFor(mode)</span>
+                    <span class="flex-1">@label</span>
+                    @if (active)
+                    {
+                        <span class="material-symbols-outlined text-primary" style="font-size:16px" aria-hidden="true">check</span>
+                    }
+                </button>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>The leg this pill controls (its mode is the From-stop's OutgoingTravelMode).</summary>
+    [Parameter, EditorRequired] public TripLeg Leg { get; set; } = null!;
+
+    /// <summary>
+    /// The owning Trip view-model. The pill raises the single VM command
+    /// <see cref="TripViewModel.SetLegModeAsync"/> only — it never touches services/DB
+    /// and never mutates its own state (NFR1).
+    /// </summary>
+    [Parameter, EditorRequired] public TripViewModel Vm { get; set; } = null!;
+
+    private bool _open;
+
+    // The four selectable modes with their UiStrings labels (Any-Air last; it is the
+    // "undefined / manual-only" choice). Mirrors TravelModeSelector's label conventions.
+    private static readonly (string Mode, string Label)[] Modes =
+    [
+        (TravelMode.Walk, UiStrings.TripTravelModeWalk),
+        (TravelMode.Drive, UiStrings.TripTravelModeDrive),
+        (TravelMode.Cycle, UiStrings.TripTravelModeCycle),
+        (TravelMode.AnyAir, UiStrings.TripTravelModeAnyAir),
+    ];
+
+    private string FromName =>
+        Vm.OrderedStops.FirstOrDefault(s => s.PoiId == Leg.FromPoiId)?.Name ?? string.Empty;
+
+    private string PillAria =>
+        string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegModePillAria, FromName);
+
+    private string PillTitle =>
+        string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegModePillTitle, FromName);
+
+    private string MenuAria =>
+        string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegModeMenuAria, FromName);
+
+    private void Toggle() => _open = !_open;
+
+    private async Task ChooseAsync(string mode)
+    {
+        _open = false;
+        await Vm.SetLegModeAsync(Leg.FromPoiId, mode);
+    }
+
+    // The mode glyph. Undefined/Any-Air uses a NEUTRAL help glyph (never an error
+    // icon, UX-DR11). Material Symbols, matching the project's icon convention.
+    private static string GlyphFor(string mode) => mode switch
+    {
+        TravelMode.Walk => "directions_walk",
+        TravelMode.Drive => "directions_car",
+        TravelMode.Cycle => "directions_bike",
+        _ => "help_outline",
+    };
+
+    // The pill label: the mode name when set, or the neutral "Any — set mode" prompt
+    // for the undefined/Any-Air state (UX-DR11).
+    private static string LabelFor(string mode) => mode switch
+    {
+        TravelMode.Walk => UiStrings.TripTravelModeWalk,
+        TravelMode.Drive => UiStrings.TripTravelModeDrive,
+        TravelMode.Cycle => UiStrings.TripTravelModeCycle,
+        _ => UiStrings.TripLegModeAnySetMode,
+    };
+}

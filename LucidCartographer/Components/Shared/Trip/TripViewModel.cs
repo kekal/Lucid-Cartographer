@@ -1384,6 +1384,54 @@ public sealed class TripViewModel(
         Notify();
     }
 
+    /// <summary>
+    /// TRIP-LEGMODE-01 (Story 3.4, FR-19/21): sets ONE leg's travel mode (the mode
+    /// of the leg departing <paramref name="fromPoiId"/>) by delegating to the sole
+    /// writer <see cref="ITripOrderingService.SetOutgoingTravelModeAsync"/>, then
+    /// refreshes the projections so the leg's <see cref="TripLeg.Mode"/> reflects it.
+    /// A ground mode (Walk/Drive/Cycle) signals the background compute trigger so the
+    /// leg's time computes (mirroring how <see cref="SetTravelModeAsync"/> triggers a
+    /// recompute); Any/Air leaves the leg manual-only — NO compute trigger (FR-21).
+    /// Setting a mode never changes Stop Order, so no order-reset rule applies. Guards:
+    /// active collection + Trip View on; an invalid mode throws from the service. Surfaces
+    /// via <see cref="StateChanged"/>. Presentational callers (the LegModePill) raise this
+    /// command only and never touch the service/DB (NFR1).
+    /// </summary>
+    public async Task SetLegModeAsync(int fromPoiId, string mode)
+    {
+        if (ActiveCollectionId is not { } collectionId || !IsTripViewEnabled)
+        {
+            return;
+        }
+
+        try
+        {
+            await ordering.SetOutgoingTravelModeAsync(collectionId, fromPoiId, mode, _cts.Token);
+            await RefreshProjectionsAsync(collectionId);
+
+            // FR-21: only a ground mode (Walk/Drive/Cycle) auto-computes — signal the
+            // background loop to fill the leg's (From, To, Mode) cache row. Any/Air is
+            // manual-only and never auto-computes, so it raises no trigger.
+            if (mode is Data.Entities.TravelMode.Walk
+                or Data.Entities.TravelMode.Drive
+                or Data.Entities.TravelMode.Cycle)
+            {
+                travelTimeTrigger.Signal();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to set leg mode {Mode} for POI {PoiId} in collection {CollectionId}", mode, fromPoiId, collectionId);
+            return;
+        }
+
+        Notify();
+    }
+
     private async Task PersistTravelModeAsync(int collectionId, string mode)
     {
         await using var db = await factory.CreateDbContextAsync(_cts.Token);

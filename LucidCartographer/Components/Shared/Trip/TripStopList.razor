@@ -23,10 +23,10 @@
         </span>
     </header>
 
-    @* TRIP-TRAVELMODE-01 (Story 2.2, AC1): per-trip travel-mode selector. *@
-    <div class="px-3 py-2 border-b border-surface-container-high flex-shrink-0">
-        <TravelModeSelector Vm="Vm" />
-    </div>
+    @* Story 3.4 (FR-23): the trip-wide TravelModeSelector is REMOVED from the desktop
+       surface — per-leg modes (the LegModePill on each connector) replace it, so the
+       trip-level selector is a dead duplicate. (Mobile keeps its selector for now —
+       the per-leg mirror is a deferred phase.) *@
 
     @* TRIP-TRAVELTIME-01 (AC5): trip total travel time, rendered once. A partial
        trip (any uncomputed leg) shows the em-dash — no false precision. *@

@@ -135,6 +135,123 @@ public class TripViewModelTravelModeTests
         vm.TotalTravelTimeSeconds.Should().Be(600, "the Drive cache rows back the per-leg-Drive legs");
     }
 
+    private static async Task<string?> ReadOutgoingModeAsync(IDbContextFactory<AppDbContext> factory, int poiId)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        return await db.PoiCollectionItems
+            .Where(ci => ci.PoiCollectionId == CollectionId && ci.PoiId == poiId)
+            .Select(ci => ci.OutgoingTravelMode)
+            .FirstAsync();
+    }
+
+    // === Story 3.4 (TRIP-LEGMODE-01, FR-19/21): per-leg mode pill ===
+
+    [Fact]
+    public async Task SetLegMode_GroundMode_WritesOutgoingMode_ProjectsLegMode_TriggersCompute()
+    {
+        var (vm, trigger, factory) = await EnabledVmAsync(placeable: 2);
+        await using var _ = vm;
+        // Drain the enable-time signal so we observe only the mode-change signal.
+        await trigger.WaitAsync(TimeSpan.Zero, CancellationToken.None);
+
+        await vm.SetLegModeAsync(fromPoiId: 1, TravelMode.Drive);
+
+        (await ReadOutgoingModeAsync(factory, 1)).Should().Be(TravelMode.Drive,
+            "the From-stop's OutgoingTravelMode is written");
+        var leg = vm.OrderedLegs.First(l => l.FromPoiId == 1);
+        leg.Mode.Should().Be(TravelMode.Drive, "the leg's projected Mode reflects the per-leg write");
+
+        var signalled = await trigger.WaitAsync(TimeSpan.Zero, CancellationToken.None);
+        signalled.Should().BeTrue("a ground mode auto-computes ⇒ the background trigger fires");
+    }
+
+    [Fact]
+    public async Task SetLegMode_AnyAir_SetsMode_NoComputeTrigger()
+    {
+        // To isolate the MODE-driven trigger from the shared RefreshProjectionsAsync
+        // "any uncomputed leg ⇒ Signal" behavior, give every leg a cache row first so
+        // IsAnyLegComputing is false — then the only possible trigger source is the
+        // SetLegModeAsync mode logic itself. Both roundtrip legs start Drive + cached.
+        var (vm, trigger, factory) = await EnabledVmAsync(placeable: 2);
+        await using var _ = vm;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            foreach (var item in db.PoiCollectionItems.Where(ci => ci.PoiCollectionId == CollectionId))
+            {
+                item.OutgoingTravelMode = TravelMode.Drive;
+            }
+            db.RouteSegments.Add(new RouteSegment { FromPoiId = 1, ToPoiId = 2, TravelMode = TravelMode.Drive, DurationSeconds = 300, DistanceMeters = 5000, Fidelity = Fidelity.Estimated, Source = "Mock", ComputedAt = DateTime.UtcNow });
+            db.RouteSegments.Add(new RouteSegment { FromPoiId = 2, ToPoiId = 1, TravelMode = TravelMode.Drive, DurationSeconds = 300, DistanceMeters = 5000, Fidelity = Fidelity.Estimated, Source = "Mock", ComputedAt = DateTime.UtcNow });
+            // Also seed the Any/Air row for leg 1â†’2 so switching it to Any/Air still
+            // resolves a cached row (no uncomputed leg remains after the switch).
+            db.RouteSegments.Add(new RouteSegment { FromPoiId = 1, ToPoiId = 2, TravelMode = TravelMode.AnyAir, DurationSeconds = 600, DistanceMeters = 8000, Fidelity = Fidelity.Manual, Source = "Manual", ComputedAt = DateTime.UtcNow });
+            await db.SaveChangesAsync();
+        }
+        // Refresh projections so the directly-written Drive rows + per-leg modes are
+        // picked up (a no-op dwell set refreshes WITHOUT invalidating the cache), then
+        // drain every pending signal so the post-switch assertion sees only a new one.
+        await vm.SetDwellMinutesAsync(1, null);
+        while (await trigger.WaitAsync(TimeSpan.Zero, CancellationToken.None)) { }
+
+        await vm.SetLegModeAsync(fromPoiId: 1, TravelMode.AnyAir);
+
+        (await ReadOutgoingModeAsync(factory, 1)).Should().Be(TravelMode.AnyAir,
+            "Any/Air is a real stored mode value (the manual-only state)");
+        var leg = vm.OrderedLegs.First(l => l.FromPoiId == 1);
+        leg.Mode.Should().Be(TravelMode.AnyAir);
+        vm.IsAnyLegComputing.Should().BeFalse("every leg has a cache row, so the shared refresh has nothing to kick");
+
+        var signalled = await trigger.WaitAsync(TimeSpan.Zero, CancellationToken.None);
+        signalled.Should().BeFalse("Any/Air is manual-only ⇒ NO compute trigger (FR-21)");
+    }
+
+    [Fact]
+    public async Task SetOutgoingTravelMode_InvalidMode_Throws_NoWrite()
+    {
+        var (vm, _, factory) = await EnabledVmAsync(placeable: 2);
+        await using var _v = vm;
+        var writeLock = new SqliteWriteLock();
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
+
+        var act = async () => await ordering.SetOutgoingTravelModeAsync(CollectionId, fromPoiId: 1, "Teleport", CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>("an unknown mode is rejected by the sole writer");
+        (await ReadOutgoingModeAsync(factory, 1)).Should().BeNull("nothing is written when the mode is invalid");
+    }
+
+    [Fact]
+    public async Task SetOutgoingTravelMode_IsSoleWriter_AndNoOpsWhenUnchanged()
+    {
+        var (vm, _, factory) = await EnabledVmAsync(placeable: 2);
+        await using var _v = vm;
+        var writeLock = new SqliteWriteLock();
+        var ordering = TestDbHelper.CreateOrderingService(factory, writeLock);
+
+        // The service writes the mode (sole writer of a single leg's mode).
+        await ordering.SetOutgoingTravelModeAsync(CollectionId, fromPoiId: 1, TravelMode.Cycle, CancellationToken.None);
+        (await ReadOutgoingModeAsync(factory, 1)).Should().Be(TravelMode.Cycle);
+
+        // Setting the same value again is a no-op (no throw, value unchanged).
+        await ordering.SetOutgoingTravelModeAsync(CollectionId, fromPoiId: 1, TravelMode.Cycle, CancellationToken.None);
+        (await ReadOutgoingModeAsync(factory, 1)).Should().Be(TravelMode.Cycle);
+
+        // null (≡ AnyAir) clears the stored value back to null.
+        await ordering.SetOutgoingTravelModeAsync(CollectionId, fromPoiId: 1, null, CancellationToken.None);
+        (await ReadOutgoingModeAsync(factory, 1)).Should().BeNull("null is the undefined/Any-Air state");
+    }
+
+    [Fact]
+    public async Task SetLegMode_DoesNotChangeStopOrder()
+    {
+        var (vm, _, factory) = await EnabledVmAsync(placeable: 3);
+        await using var _v = vm;
+        var before = vm.OrderedStops.Select(s => s.PoiId).ToList();
+
+        await vm.SetLegModeAsync(fromPoiId: 2, TravelMode.Walk);
+
+        vm.OrderedStops.Select(s => s.PoiId).Should().Equal(before, "setting a leg mode never reorders");
+    }
+
     [Fact]
     public async Task SetManualLegTime_WritesManualRow_UpdatesTotal()
     {
