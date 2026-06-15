@@ -90,7 +90,7 @@ public static class TravelTimeFormatting
     /// "~" approximation prefix when <paramref name="qualifier"/> is set. Clean
     /// (all-confident) arrivals carry no qualifier.
     /// </summary>
-    public static string Arrival(int? offsetSeconds, DateTime? wallClock, string? qualifier, bool isUnknown)
+    public static string Arrival(int? offsetSeconds, DateTime? wallClock, string? qualifier, bool isUnknown, DateTime? tripStart = null)
     {
         if (isUnknown || offsetSeconds is not { } secs)
         {
@@ -107,7 +107,7 @@ public static class TravelTimeFormatting
                 : string.Format(CultureInfo.CurrentCulture, UiStrings.TripTimelineQualified, offset, qualifier);
         }
 
-        var clockText = string.Format(CultureInfo.CurrentCulture, UiStrings.TripTimelineWallClock, clock);
+        var clockText = WallClockText(clock, tripStart);
         if (qualifier is not null)
         {
             // "~14:10 · Estimated" — the "~" marks the approximation, the qualifier names it.
@@ -129,7 +129,7 @@ public static class TravelTimeFormatting
     /// carried in the row's title/aria-label. NOT a loss of honesty: an estimated value
     /// is never shown as a clean confident time (the "~" + the em-dash rules still hold).
     /// </summary>
-    public static string ArrivalCompact(int? offsetSeconds, DateTime? wallClock, string? qualifier, bool isUnknown)
+    public static string ArrivalCompact(int? offsetSeconds, DateTime? wallClock, string? qualifier, bool isUnknown, DateTime? tripStart = null)
     {
         if (isUnknown || offsetSeconds is not { } secs)
         {
@@ -149,7 +149,7 @@ public static class TravelTimeFormatting
                 : string.Format(CultureInfo.CurrentCulture, UiStrings.TripTimelineEstimatedPrefix, offset);
         }
 
-        var clockText = string.Format(CultureInfo.CurrentCulture, UiStrings.TripTimelineWallClock, clock);
+        var clockText = WallClockText(clock, tripStart);
         if (qualifier is not null)
         {
             // "~14:10" — the approximation marker is kept; the qualifier word is dropped
@@ -159,4 +159,17 @@ public static class TravelTimeFormatting
 
         return $"{offset} {clockText}";
     }
+
+    /// <summary>
+    /// Story 4.2 (FR-27, UX-DR12): the wall-clock display for one arrival. A same-day
+    /// arrival (or no trip start to compare against) renders time-only as before; an
+    /// arrival on a LATER calendar day than <paramref name="tripStart"/> renders the
+    /// locale-driven short date + short time (CultureInfo.CurrentCulture — no hard-coded
+    /// MM/dd order), so a multi-day trip reads on its real days. DISPLAY only — the
+    /// accumulation math (ItineraryTimeline) is untouched.
+    /// </summary>
+    private static string WallClockText(DateTime clock, DateTime? tripStart) =>
+        tripStart is { } start && clock.Date > start.Date
+            ? string.Format(CultureInfo.CurrentCulture, UiStrings.TripTimelineWallClockWithDate, clock, clock)
+            : string.Format(CultureInfo.CurrentCulture, UiStrings.TripTimelineWallClock, clock);
 }

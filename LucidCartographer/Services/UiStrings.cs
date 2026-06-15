@@ -276,6 +276,13 @@ public static class UiStrings
     public const string TripTimelineOffset = "+{0}";
     // {0:HH:mm} = the wall-clock arrival; shown only when a TripStartTime is set.
     public const string TripTimelineWallClock = "{0:HH:mm}";
+    // Story 4.2 (FR-27, UX-DR12): a wall-clock arrival on a LATER calendar day than the
+    // trip start shows its DATE alongside the time. {0:d} = the locale short date (via
+    // CultureInfo.CurrentCulture, so the date component order follows the locale — NO
+    // hard-coded MM/dd). The TIME uses {1:HH:mm} to stay consistent with the same-day
+    // TripTimelineWallClock above (one 24h clock format across the whole timeline,
+    // rather than locale 12h/24h drift between same-day and later-day rows).
+    public const string TripTimelineWallClockWithDate = "{0:d} {1:HH:mm}";
     // {0} = the wall-clock arrival, {1} = the qualifier word (e.g. "Estimated"). Renders
     // an estimated arrival honestly: "~14:10 · Estimated". {0} alone for a clean arrival.
     public const string TripTimelineEstimatedPrefix = "~{0}";

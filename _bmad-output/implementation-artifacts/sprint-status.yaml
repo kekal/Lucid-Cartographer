@@ -58,7 +58,7 @@ development_status:
   # Epic 4: Multi-day schedule & honest finish
   epic-4: in-progress
   4-1-date-time-start-picker: done
-  4-2-date-aware-multi-day-arrivals: backlog
+  4-2-date-aware-multi-day-arrivals: done
   4-3-time-limit-as-duration-or-finish-by-deadline: backlog
   4-4-dwell-hhmm-picker: backlog
   4-5-finish-designation-and-roundtrip-readout: backlog

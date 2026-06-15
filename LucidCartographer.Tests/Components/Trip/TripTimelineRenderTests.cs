@@ -141,6 +141,47 @@ public class TripTimelineRenderTests : BunitTestContext
         cut.Markup.Should().Contain(UiStrings.TripTimelineFinishLabel);
     }
 
+    // === Story 4.2 (FR-27, UX-DR12): date-aware multi-day arrivals on BOTH surfaces ===
+
+    [Fact]
+    public async Task TripStopList_MultiDayArrival_ShowsLocaleDate()
+    {
+        var factory = Seed();
+        // Start 22:00; a 3h leg ⇒ arrival(2) = 01:00 the NEXT calendar day.
+        await AddSegmentAsync(factory, 1, 2, 3 * 3600, Fidelity.Manual);
+        await AddSegmentAsync(factory, 2, 1, 3 * 3600, Fidelity.Manual);
+        await using var vm = await EnabledVmAsync(factory);
+
+        var start = new DateTime(2026, 6, 15, 22, 0, 0);
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+        await cut.InvokeAsync(() => vm.SetTripStartTimeAsync(start));
+        cut.Render();
+
+        // The next-day arrival's locale short date must appear in the markup (no hard-coded order).
+        var nextDay = start.AddHours(3); // 2026-06-16 01:00
+        nextDay.Date.Should().BeAfter(start.Date);
+        cut.Markup.Should().Contain(nextDay.ToString("d", CultureInfo.CurrentCulture),
+            "a later-day arrival shows its locale date alongside the time (desktop)");
+    }
+
+    [Fact]
+    public async Task MobileTripPanel_MultiDayArrival_ShowsLocaleDate()
+    {
+        var factory = Seed();
+        await AddSegmentAsync(factory, 1, 2, 3 * 3600, Fidelity.Manual);
+        await AddSegmentAsync(factory, 2, 1, 3 * 3600, Fidelity.Manual);
+        await using var vm = await EnabledVmAsync(factory);
+
+        var start = new DateTime(2026, 6, 15, 22, 0, 0);
+        var cut = RenderComponent<MobileTripPanel>(p => p.Add(x => x.Vm, vm));
+        await cut.InvokeAsync(() => vm.SetTripStartTimeAsync(start));
+        cut.Render();
+
+        var nextDay = start.AddHours(3);
+        cut.Markup.Should().Contain(nextDay.ToString("d", CultureInfo.CurrentCulture),
+            "the shared formatter reaches mobile by nature (NFR5)");
+    }
+
     // === Overrun flag: only when over budget, amber not red ===
 
     [Fact]

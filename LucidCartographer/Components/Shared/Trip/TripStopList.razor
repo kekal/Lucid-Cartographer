@@ -507,13 +507,14 @@
 
     // TRIP-TIMELINE-01: the UI-edge display string for an arrival (offset always,
     // wall-clock only with a start time, qualified, or "—" unknown). Single formatter.
-    private static string ArrivalText(ItineraryArrival a) =>
-        TravelTimeFormatting.Arrival(a.OffsetSeconds, a.ArrivalWallClock, a.QualifyingFidelity, a.IsUnknown);
+    // Story 4.2 (FR-27): thread the trip start so a later-day arrival shows its date.
+    private string ArrivalText(ItineraryArrival a) =>
+        TravelTimeFormatting.Arrival(a.OffsetSeconds, a.ArrivalWallClock, a.QualifyingFidelity, a.IsUnknown, Vm.TripStartTime);
 
     // TRIP-TIMELINE-01: the COMPACT row variant (no verbose qualifier word) — keeps the
     // cramped w-64 row's name span from collapsing. The full text is in the title/aria.
-    private static string ArrivalCompactText(ItineraryArrival a) =>
-        TravelTimeFormatting.ArrivalCompact(a.OffsetSeconds, a.ArrivalWallClock, a.QualifyingFidelity, a.IsUnknown);
+    private string ArrivalCompactText(ItineraryArrival a) =>
+        TravelTimeFormatting.ArrivalCompact(a.OffsetSeconds, a.ArrivalWallClock, a.QualifyingFidelity, a.IsUnknown, Vm.TripStartTime);
 
     // Story 4.1 (FR-26, RD10): the <input type="datetime-local"> value for the active
     // start. The control's value attribute is ISO/invariant ("yyyy-MM-ddTHH:mm")

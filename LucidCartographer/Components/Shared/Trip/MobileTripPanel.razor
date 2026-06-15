@@ -356,12 +356,13 @@
     private ItineraryArrival? ArrivalFor(int poiId) =>
         Vm.Timeline.Stops.FirstOrDefault(a => a.PoiId == poiId);
 
-    private static string ArrivalText(ItineraryArrival a) =>
-        TravelTimeFormatting.Arrival(a.OffsetSeconds, a.ArrivalWallClock, a.QualifyingFidelity, a.IsUnknown);
+    // Story 4.2 (FR-27): thread the trip start so a later-day arrival shows its date.
+    private string ArrivalText(ItineraryArrival a) =>
+        TravelTimeFormatting.Arrival(a.OffsetSeconds, a.ArrivalWallClock, a.QualifyingFidelity, a.IsUnknown, Vm.TripStartTime);
 
     // TRIP-TIMELINE-01: compact row variant — full text stays in the title/aria-label.
-    private static string ArrivalCompactText(ItineraryArrival a) =>
-        TravelTimeFormatting.ArrivalCompact(a.OffsetSeconds, a.ArrivalWallClock, a.QualifyingFidelity, a.IsUnknown);
+    private string ArrivalCompactText(ItineraryArrival a) =>
+        TravelTimeFormatting.ArrivalCompact(a.OffsetSeconds, a.ArrivalWallClock, a.QualifyingFidelity, a.IsUnknown, Vm.TripStartTime);
 
     private string StartTimeValue() =>
         Vm.TripStartTime is { } t

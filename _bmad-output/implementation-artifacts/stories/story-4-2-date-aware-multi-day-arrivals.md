@@ -1,6 +1,30 @@
 # Story 4.2: Date-aware multi-day arrivals
 
-Status: ready-for-dev
+Status: done
+
+## Dev Agent Record
+
+`Arrival`/`ArrivalCompact` gained an optional `DateTime? tripStart`; a new `WallClockText` renders a
+locale date+time (`UiStrings.TripTimelineWallClockWithDate`) when `wallClock.Date > tripStart.Date`,
+else the existing time-only string. Both panels' `ArrivalText`/`ArrivalCompactText` bridge helpers
+(now instance) pass `Vm.TripStartTime`; the finish/return footer arrival gets date-awareness for
+free. `ItineraryTimeline` math untouched (accumulation already rolls across days — display only).
+Locale-driven date (`{0:d}`), no hard-coded order. Shared layer reaches both surfaces (NFR5).
+
+Adversarial review: 0 CRIT / 0 HIGH / 0 MED / 2 LOW → SHIP. Later-day rule (incl. late-start/
+early-next-day and midnight boundary), locale-drivenness, both-surface threading, honesty markers,
+and locale-robust tests all confirmed. **LOW#2 fixed:** the with-date pattern now uses `{1:HH:mm}`
+(was `{1:t}`) so the clock format is consistent 24h across same-day and later-day rows instead of
+drifting to locale 12h/24h. 896 fast + 20 Trip integration + 55 mobile green; build clean.
+
+## File List
+
+- LucidCartographer/Services/Trip/TravelTimeFormatting.cs (MOD — tripStart param + WallClockText)
+- LucidCartographer/Services/UiStrings.cs (MOD — TripTimelineWallClockWithDate, 24h)
+- LucidCartographer/Components/Shared/Trip/TripStopList.razor (MOD — thread tripStart)
+- LucidCartographer/Components/Shared/Trip/MobileTripPanel.razor (MOD — thread tripStart)
+- LucidCartographer.Tests/Services/TravelTimeFormattingTests.cs (MOD — 8 date-aware tests)
+- LucidCartographer.Tests/Components/Trip/TripTimelineRenderTests.cs (MOD — 2 multi-day bUnit tests)
 
 ## Story
 
