@@ -402,9 +402,9 @@ public class TripTimelineRenderTests : BunitTestContext
 
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
 
-        // The desktop limit is an HH:MM duration picker (native time input), not raw minutes.
+        // The desktop limit is an HH:MM duration text input (not a type=time clock), not raw minutes.
         var input = cut.Find($"input[aria-label=\"{UiStrings.TripTimeLimitAria}\"]");
-        input.GetAttribute("type").Should().Be("time", "the desktop time limit is an HH:MM duration picker (FR-28)");
+        input.GetAttribute("type").Should().Be("text", "the desktop time limit is an HH:MM duration text input, not a time-of-day clock (FR-28)");
 
         // Entering "02:00" persists 120 canonical minutes (HH:MM → minutes at the UI edge).
         await input.ChangeAsync(new ChangeEventArgs { Value = "02:00" });
@@ -458,6 +458,30 @@ public class TripTimelineRenderTests : BunitTestContext
 
         var input = cut.Find($"input[aria-label=\"{UiStrings.TripTimeLimitAria}\"]");
         input.GetAttribute("value").Should().BeNullOrEmpty("a >24h limit can't be shown in the HH:MM control");
+    }
+
+    [Theory]
+    [InlineData("01:30:00")] // seconds-bearing
+    [InlineData("2:5")]      // single-digit minute (would misread as 02:05)
+    [InlineData("120")]      // bare minutes
+    [InlineData("abc")]      // non-numeric
+    public async Task TripStopList_TimeLimitDuration_RejectsNonHhmm_NoWrite(string entered)
+    {
+        // The text time-limit input parses strictly as HH:mm (TryParseExact) so a malformed
+        // value can't slip past the lost type="time" structural enforcement and corrupt the
+        // canonical budget.
+        var factory = Seed();
+        await AddSegmentAsync(factory, 1, 2, 3600, Fidelity.Manual);
+        await AddSegmentAsync(factory, 2, 1, 3600, Fidelity.Manual);
+        await using var vm = await EnabledVmAsync(factory);
+        await vm.SetTimeBudgetMinutesAsync(90);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        var input = cut.Find($"input[aria-label=\"{UiStrings.TripTimeLimitAria}\"]");
+        await input.ChangeAsync(new ChangeEventArgs { Value = entered });
+
+        vm.TimeBudgetMinutes.Should().Be(90, "a non-HH:mm entry leaves the canonical budget untouched");
     }
 
     [Fact]

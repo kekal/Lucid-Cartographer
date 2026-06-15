@@ -74,10 +74,10 @@ public class TripStopListTests : BunitTestContext
         cut.Find($"[aria-label=\"{badgeAria}\"]").TextContent.Trim().Should().Be("1");
 
         // Story 2.5 (TRIP-DWELL-01) / Story 4.4 (FR-30): the dwell slot is now an empty
-        // HH:MM picker (unset ⇒ no value) carrying its per-stop UiStrings aria-label.
+        // HH:MM text input (unset ⇒ no value) carrying its per-stop UiStrings aria-label.
         var dwellAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripDwellAria, "P1");
         var dwell = cut.Find($"input[aria-label=\"{dwellAria}\"]");
-        dwell.GetAttribute("type").Should().Be("time");
+        dwell.GetAttribute("type").Should().Be("text");
         dwell.GetAttribute("value").Should().BeNullOrEmpty("an unset dwell prefills nothing");
         // Story 2.1: with no cached RouteSegment rows the leg slot shows the
         // computing state (em-dash + TripLegComputingAria), superseding the inert
@@ -893,8 +893,9 @@ public class TripStopListTests : BunitTestContext
             var input = cut.Find($"input[aria-label=\"{DwellAria(name)}\"]");
             if (isDesktop)
             {
-                // Story 4.4 (FR-30): the desktop dwell control is a native HH:MM picker.
-                input.GetAttribute("type").Should().Be("time");
+                // Story 4.4 (FR-30): the desktop dwell control is an HH:MM text input
+                // (not type="time" — a duration has no AM/PM time-of-day affordance).
+                input.GetAttribute("type").Should().Be("text");
             }
             else
             {
@@ -957,8 +958,8 @@ public class TripStopListTests : BunitTestContext
             : RenderComponent<MobileTripPanel>(p => p.Add(x => x.Vm, vm));
 
         // The unplaceable row carries a dwell input identically (AC4). Story 4.4
-        // (FR-30): desktop is the HH:MM picker; mobile keeps the minutes input.
-        var expectedType = surface == typeof(TripStopList) ? "time" : "number";
+        // (FR-30): desktop is the HH:MM text input; mobile keeps the minutes input.
+        var expectedType = surface == typeof(TripStopList) ? "text" : "number";
         cut.Find($"input[aria-label=\"{DwellAria("NoCoords")}\"]").GetAttribute("type").Should().Be(expectedType);
     }
 
@@ -1019,6 +1020,26 @@ public class TripStopListTests : BunitTestContext
 
         cut.WaitForAssertion(() =>
             vm.StopRows.First(r => r.PoiId == 99).DwellMinutes.Should().Be(45));
+    }
+
+    [Theory]
+    [InlineData("01:30:00")] // seconds-bearing — the text input can't be a clock, so reject it
+    [InlineData("2:5")]      // single-digit minute — would misread as 02:05, reject it
+    [InlineData("90")]       // bare minutes — only HH:MM is accepted on desktop
+    [InlineData("abc")]      // non-numeric
+    public async Task Dwell_Input_Desktop_RejectsNonHhmm_NoWrite(string entered)
+    {
+        // Switching from type="time" to a text input removed the browser's structural
+        // enforcement; strict HH:mm parsing (TryParseExact) restores it so malformed-but-
+        // loosely-parseable values never persist (no silent truncation/misread).
+        await using var vm = await EnabledVmAsync(placeable: 2);
+        await vm.SetDwellMinutesAsync(poiId: 1, minutes: 60);
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        cut.Find($"input[aria-label=\"{DwellAria("P1")}\"]").Change(entered);
+
+        // The canonical value is untouched (no write on an unparseable entry).
+        vm.StopRows.First(r => r.PoiId == 1).DwellMinutes.Should().Be(60);
     }
 
     [Fact]

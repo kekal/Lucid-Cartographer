@@ -85,15 +85,16 @@
                        value="@StartTimeValue()"
                        @onchange="OnStartTimeChangedAsync" />
             </label>
-            @* Story 4.3 (FR-28): the time LIMIT as an HH:MM DURATION (≤24h). Native
-               <input type="time"> — HH:MM ↔ minutes converts only at this UI edge
-               (DurationValue/OnDurationChangedAsync); the VM keeps canonical minutes.
-               When the limit was set via the deadline path to >24h it can't be shown
-               in an HH:MM control, so the value renders empty (the deadline path owns
-               the >24h horizon — AC4). *@
+            @* Story 4.3 (FR-28): the time LIMIT as an HH:MM DURATION (≤24h). HH:MM text
+               input (NOT type="time" — a duration is not a time of day, so the locale
+               AM/PM clock affordance of type=time is wrong/meaningless). HH:MM ↔ minutes
+               converts only at this UI edge (DurationValue/OnDurationChangedAsync); the VM
+               keeps canonical minutes. When the limit was set via the deadline path to
+               >24h it can't be shown in an HH:MM control, so the value renders empty (the
+               deadline path owns the >24h horizon — AC4). *@
             <label class="flex items-center gap-1 text-on-surface-variant min-w-0">
                 <span class="flex-shrink-0">@UiStrings.TripTimeLimitLabel</span>
-                <input type="time"
+                <input type="text" inputmode="numeric" pattern="([01]?[0-9]|2[0-3]):[0-5][0-9]" maxlength="5"
                        class="min-w-0 w-auto text-xs px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
                        placeholder="@UiStrings.TripTimeLimitPlaceholder"
                        aria-label="@UiStrings.TripTimeLimitAria"
@@ -239,9 +240,10 @@
                         @* TRIP-DWELL-01 (Story 2.5, AC4): an unplaceable stop has no
                            travel time but still carries dwell. The row is not
                            selectable, so no stopPropagation is needed here. Story 4.4
-                           (FR-30): native HH:MM duration picker; HH:MM↔minutes only at
-                           the UI edge. *@
-                        <input type="time"
+                           (FR-30): HH:MM text duration input (NOT type="time" — a duration
+                           is not a time of day; type=time draws a meaningless AM/PM clock
+                           in 12-hour locales). HH:MM↔minutes only at the UI edge. *@
+                        <input type="text" inputmode="numeric" pattern="([01]?[0-9]|2[0-3]):[0-5][0-9]" maxlength="5"
                                class="w-20 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
                                placeholder="@UiStrings.TripDwellHhmmPlaceholder"
                                aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDwellAria, row.Name)"
@@ -350,10 +352,12 @@
                             }
                         </div>
                         @* COLUMN 4 — Dwell input (TRIP-DWELL-01). Story 4.4 (FR-30):
-                           native HH:MM duration picker (24h cap fine — dwell >24h is
-                           implausible). HH:MM↔minutes only at the UI edge. stopPropagation
-                           so editing never selects/reorders the row (2.2 selection lesson). *@
-                        <input type="time"
+                           HH:MM text duration input (NOT type="time" — a duration is not a
+                           time of day; type=time draws a meaningless AM/PM clock in 12-hour
+                           locales). 24h cap fine — dwell >24h is implausible. HH:MM↔minutes
+                           only at the UI edge. stopPropagation so editing never
+                           selects/reorders the row (2.2 selection lesson). *@
+                        <input type="text" inputmode="numeric" pattern="([01]?[0-9]|2[0-3]):[0-5][0-9]" maxlength="5"
                                class="w-20 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
                                placeholder="@UiStrings.TripDwellHhmmPlaceholder"
                                aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDwellAria, row.Name)"
@@ -553,7 +557,7 @@
             : string.Empty;
 
     // Story 4.3 (FR-28): the time-limit DURATION input value as HH:mm, or empty. The
-    // native <input type="time"> wire value is invariant "HH:mm" regardless of locale.
+    // HH:MM text input carries the invariant "HH:mm" wire value regardless of locale.
     // Only representable for a ≤24h (≤1440 min) limit — a larger limit (set via the
     // finish-by deadline path) can't be shown in an HH:MM control, so it renders empty
     // (AC4: the deadline path owns the >24h horizon). m=0 still shows "00:00".
@@ -583,10 +587,14 @@
 
     // Story 4.3 (FR-28): parse the entered HH:MM duration → minutes and persist via the
     // VM. Empty/blank clears the limit (⇒ no over-limit flag). HH:MM ↔ minutes converts
-    // ONLY here at the UI edge — TimeBudgetMinutes stays canonical (NFR2). The native
-    // <input type="time"> emits invariant "HH:mm" (or "HH:mm:ss" with seconds enabled);
-    // TimeOnly.Parse handles both. The ≤24h scope is enforced by the control (max 23:59);
-    // SetTimeBudgetMinutesAsync also range-guards.
+    // ONLY here at the UI edge — TimeBudgetMinutes stays canonical (NFR2). The HH:MM text
+    // input emits invariant "HH:mm"; we parse STRICTLY against HH:mm so the text field keeps
+    // the structural rigor the old type="time" control had (no seconds "01:30:00", no
+    // single-digit minute "2:5", no bare "90") — an unparseable entry is ignored (no write).
+    // The ≤24h scope is enforced by TimeOnly (no >23:59) and SetTimeBudgetMinutesAsync
+    // range-guards.
+    private static readonly string[] HhmmFormats = ["H:mm", "HH:mm"];
+
     private async Task OnDurationChangedAsync(ChangeEventArgs e)
     {
         var text = e.Value?.ToString();
@@ -596,7 +604,7 @@
             return;
         }
 
-        if (TimeOnly.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var time))
+        if (TimeOnly.TryParseExact(text, HhmmFormats, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var time))
         {
             await Vm.SetTimeBudgetMinutesAsync((int)time.ToTimeSpan().TotalMinutes);
         }
@@ -637,17 +645,19 @@
     // commands); the interim ManualMinutes/OnManualMinutesChanged helpers moved
     // there with it.
 
-    // TRIP-DWELL-01 + Story 4.4 (FR-30): the dwell as the native <input type="time">
-    // wire value "HH:mm" (h = m/60, mins = m%60), or empty when unset. Canonical
-    // DwellMinutes stays minutes — HH:MM↔minutes is only this UI-edge conversion (NFR2).
+    // TRIP-DWELL-01 + Story 4.4 (FR-30): the dwell as the HH:MM text input wire value
+    // "HH:mm" (h = m/60, mins = m%60), or empty when unset. Canonical DwellMinutes stays
+    // minutes — HH:MM↔minutes is only this UI-edge conversion (NFR2).
     private static string DwellMinutes(TripStopRow row) =>
         row.DwellMinutes is { } m
             ? $"{m / 60:D2}:{m % 60:D2}"
             : string.Empty;
 
     // TRIP-DWELL-01 + Story 4.4 (FR-30): parse the entered HH:mm duration and persist
-    // canonical minutes via the VM. Empty/blank clears the dwell (null). The native
-    // time control emits invariant "HH:mm"; an unparseable value is ignored (no write).
+    // canonical minutes via the VM. Empty/blank clears the dwell (null). The HH:MM text
+    // input emits invariant "HH:mm"; we parse STRICTLY against HH:mm (HhmmFormats) so a
+    // seconds-bearing or single-digit-minute value can't slip through — an unparseable value
+    // is ignored (no write).
     private async Task OnDwellMinutesChangedAsync(int poiId, object? raw)
     {
         var text = raw?.ToString();
@@ -657,7 +667,7 @@
             return;
         }
 
-        if (TimeOnly.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var time))
+        if (TimeOnly.TryParseExact(text, HhmmFormats, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var time))
         {
             await Vm.SetDwellMinutesAsync(poiId, time.Hour * 60 + time.Minute);
         }
