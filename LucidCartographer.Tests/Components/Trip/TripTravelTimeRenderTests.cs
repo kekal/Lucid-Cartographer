@@ -141,10 +141,12 @@ public class TripTravelTimeRenderTests : BunitTestContext
 
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
 
-        // No badge for Placeholder.
+        // No badge for Placeholder. Placeholder has no tooltip key, so a no-badge
+        // row must carry none of the three real plain-language tooltips (Story 2.3).
         cut.Markup.Should().NotContain(Fidelity.Placeholder, "Placeholder is internal-only â€” never a badge");
-        var provenanceAria = string.Format(CultureInfo.CurrentCulture, UiStrings.TripFidelityAria, Fidelity.Placeholder);
-        cut.FindAll($"[aria-label=\"{provenanceAria}\"]").Should().BeEmpty();
+        cut.FindAll($"[aria-label=\"{UiStrings.TripFidelityEstimatedTooltip}\"]").Should().BeEmpty();
+        cut.FindAll($"[aria-label=\"{UiStrings.TripFidelityMeasuredTooltip}\"]").Should().BeEmpty();
+        cut.FindAll($"[aria-label=\"{UiStrings.TripFidelityManualTooltip}\"]").Should().BeEmpty();
         // The air estimate must NOT be rendered as a real time.
         cut.Markup.Should().NotContain("10 min", "a Placeholder air estimate is never shown as a real leg time");
         cut.Markup.Should().NotContain("20 min", "the trip total must not sum Placeholder air estimates");

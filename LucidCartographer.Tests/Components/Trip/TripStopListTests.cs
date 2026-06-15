@@ -778,8 +778,8 @@ public class TripStopListTests : BunitTestContext
         // appears (asserted via the badge's "Provenance: â€¦" aria-label, which is
         // distinct from the manual input's own aria text).
         cut.Markup.Should().Contain(UiStrings.TripLegTimeUnknown);
-        var manualProvenance = string.Format(CultureInfo.CurrentCulture, UiStrings.TripFidelityAria, UiStrings.TripFidelityManual);
-        var estimatedProvenance = string.Format(CultureInfo.CurrentCulture, UiStrings.TripFidelityAria, UiStrings.TripFidelityEstimated);
+        var manualProvenance = UiStrings.TripFidelityManualTooltip;
+        var estimatedProvenance = UiStrings.TripFidelityEstimatedTooltip;
         cut.FindAll($"[aria-label=\"{manualProvenance}\"]").Should().BeEmpty("no Manual badge on an unentered Any/Air leg");
         cut.FindAll($"[aria-label=\"{estimatedProvenance}\"]").Should().BeEmpty("Any/Air legs are never Estimated");
     }

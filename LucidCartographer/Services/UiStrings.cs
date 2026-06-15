@@ -170,6 +170,13 @@ public static class UiStrings
     public const string TripFidelityManual = "Manual";
     // {0} = the fidelity word. Badge accessible name conveying provenance.
     public const string TripFidelityAria = "Provenance: {0}";
+    // Self-explaining fidelity badge tooltips (Story 2.3, FR-7/UX-DR9). Plain-language
+    // explanation used for BOTH the badge title and aria-label (parity, NFR7), so the
+    // hover text and the AT announcement say the same thing — never the circular
+    // "Provenance: Estimated". The visible badge text stays the short word above.
+    public const string TripFidelityEstimatedTooltip = "Estimated — straight-line approximation, not road distance";
+    public const string TripFidelityMeasuredTooltip = "Measured — real road route.";
+    public const string TripFidelityManualTooltip = "Manual — you entered this time.";
     // Announced via aria-live while one or more legs are still computing.
     public const string TripLegComputingAnnouncement = "Computing travel times…";
     public const string TripLegComputingAria = "Travel time computing";

@@ -81,8 +81,8 @@ public class LegConnectorTests : BunitTestContext
         cut.Markup.Should().Contain("1h 20 min").And.Contain("12 km");
         cut.Find($"[aria-label=\"{string.Format(CultureInfo.CurrentCulture, UiStrings.TripLegTravelTimeAria, "1h 20 min")}\"]").Should().NotBeNull();
         cut.Find($"[aria-label=\"{string.Format(CultureInfo.CurrentCulture, UiStrings.TripLegDistanceAria, "12 km")}\"]").Should().NotBeNull();
-        // Fidelity badge with its provenance accessible name.
-        var prov = string.Format(CultureInfo.CurrentCulture, UiStrings.TripFidelityAria, UiStrings.TripFidelityEstimated);
+        // Fidelity badge with its plain-language tooltip accessible name (Story 2.3).
+        var prov = UiStrings.TripFidelityEstimatedTooltip;
         cut.Find($"[aria-label=\"{prov}\"]").TextContent.Trim().Should().Be(UiStrings.TripFidelityEstimated);
     }
 
@@ -103,8 +103,8 @@ public class LegConnectorTests : BunitTestContext
         // Neutral/muted tone (UX-DR11) — NEVER an error colour (red/tertiary).
         time.GetAttribute("class").Should().Contain("text-on-surface-variant");
         cut.Markup.Should().NotContain("text-red", "an uncomputed leg is neutral, not an error (UX-DR11)");
-        // No fidelity badge for a null fidelity.
-        var estProv = string.Format(CultureInfo.CurrentCulture, UiStrings.TripFidelityAria, UiStrings.TripFidelityEstimated);
+        // No fidelity badge for a null fidelity (Story 2.3 plain-language tooltip).
+        var estProv = UiStrings.TripFidelityEstimatedTooltip;
         cut.FindAll($"[aria-label=\"{estProv}\"]").Should().BeEmpty();
     }
 

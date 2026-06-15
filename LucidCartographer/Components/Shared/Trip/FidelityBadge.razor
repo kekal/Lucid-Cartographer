@@ -13,9 +13,13 @@
 }
 @if (label is not null)
 {
+    @* Self-explaining tooltip (Story 2.3, FR-7): the plain-language explanation is
+       used for BOTH title and aria-label (parity, NFR7); the visible text stays the
+       short word. *@
+    var tooltip = Tooltip(Fidelity);
     <span class="@PillClass(Fidelity)"
-          aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripFidelityAria, label)"
-          title="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripFidelityAria, label)">
+          aria-label="@tooltip"
+          title="@tooltip">
         @label
     </span>
 }
@@ -31,6 +35,17 @@
         Data.Entities.Fidelity.Measured => UiStrings.TripFidelityMeasured,
         Data.Entities.Fidelity.Estimated => UiStrings.TripFidelityEstimated,
         Data.Entities.Fidelity.Manual => UiStrings.TripFidelityManual,
+        _ => null,
+    };
+
+    // Plain-language explanation mirroring the Label switch. Only the three real
+    // fidelities have a tooltip; Placeholder/null never render a badge so they
+    // never reach here. Used for both title and aria-label (parity, NFR7).
+    private static string? Tooltip(string? fidelity) => fidelity switch
+    {
+        Data.Entities.Fidelity.Measured => UiStrings.TripFidelityMeasuredTooltip,
+        Data.Entities.Fidelity.Estimated => UiStrings.TripFidelityEstimatedTooltip,
+        Data.Entities.Fidelity.Manual => UiStrings.TripFidelityManualTooltip,
         _ => null,
     };
 
