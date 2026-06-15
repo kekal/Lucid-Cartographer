@@ -123,6 +123,29 @@
             <span>@UiStrings.TripApproximateEstimatesNote</span>
         </div>
     }
+    @* Story 2.4 (FR-8/10, RD11): the quiet OSRM-recommendation note on a default
+       deployment (no measured provider) producing normal straight-line Estimated legs.
+       Mirrors the fallback note's quiet/muted token styling + info glyph + role=status
+       aria-live, but is a DIFFERENT state (a normal Mock estimate, not an engine
+       failure). Rendered mutually exclusive with the fallback note above — when the
+       trip is in the engine-unreachable fallback state that note wins — so the two
+       contextual notes never appear together (FR-8 "distinct from the fallback note").
+       Guidance only: links to docs/osrm.md; it does not stand up/configure OSRM. *@
+    @if (Vm.RecommendsOsrm && !Vm.IsShowingApproximateEstimates)
+    {
+        @* Persistent contextual hint (the deployment is on the default Mock provider),
+           NOT a transient state change — so it is read in normal document flow, NOT a
+           role=status/aria-live region (which would re-announce on unrelated re-renders).
+           The transient engine-unreachable fallback note above keeps its live region. *@
+        <div class="flex items-start gap-1.5 px-3 py-1.5 border-b border-surface-container-high flex-shrink-0 text-xs text-on-surface-variant bg-surface-container">
+            <span class="material-symbols-outlined flex-shrink-0" style="font-size:16px" aria-hidden="true">info</span>
+            <span>
+                @UiStrings.TripMockEstimateNote
+                <a href="@UiStrings.TripMockEstimateOsrmHref" target="_blank" rel="noopener"
+                   class="text-primary hover:underline">@UiStrings.TripMockEstimateOsrmLink</a>
+            </span>
+        </div>
+    }
 
     @* TRIP-SELECT-05: announces the selected stop (list→map or map→list). *@
     <span class="sr-only" role="status" aria-live="polite">@Vm.SelectionAnnouncement</span>

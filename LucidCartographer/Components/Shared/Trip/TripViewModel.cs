@@ -189,6 +189,28 @@ public sealed class TripViewModel(
     public bool IsShowingApproximateEstimates => OrderedLegs.Any(l => l.IsFallback);
 
     /// <summary>
+    /// Story 2.4 (FR-8/10, RD11): true on a default deployment that produces
+    /// straight-line estimates because NO measured provider is configured — i.e. the
+    /// injected provider is null or the haversine Mock (its
+    /// <see cref="ITravelTimeProvider.Source"/> is not <see cref="TravelTimeSource.Osrm"/>)
+    /// AND the trip currently has at least one NORMALLY Estimated leg (a leg whose
+    /// <see cref="TripLeg.Fidelity"/> is <see cref="Data.Entities.Fidelity.Estimated"/>
+    /// and which is NOT a provider-down fallback, <see cref="TripLeg.IsFallback"/>).
+    /// Drives the quiet "enable OSRM for measured road times" recommendation note.
+    ///
+    /// Deliberately DISTINCT from <see cref="IsShowingApproximateEstimates"/>: that
+    /// covers the engine-unreachable FALLBACK state ("we tried to measure and
+    /// couldn't"), keyed on <see cref="TripLeg.IsFallback"/> legs; this covers the
+    /// normal Mock-Estimated state and explicitly EXCLUDES fallback legs, so the two
+    /// notes never describe the same leg. False when the provider is OSRM, when there
+    /// are no legs, and when every leg is Any/Air-Placeholder, Manual, Measured, or
+    /// only a fallback estimate.
+    /// </summary>
+    public bool RecommendsOsrm =>
+        travelTimeProvider?.Source != TravelTimeSource.Osrm
+        && OrderedLegs.Any(l => l.Fidelity == Data.Entities.Fidelity.Estimated && !l.IsFallback);
+
+    /// <summary>
     /// TRIP-TIMELINE-01 (Story 2.6): the honest itinerary timeline — per-stop arrivals
     /// (relative offset always, wall-clock only with a start time), the finish/return
     /// readout, the whole-trip total (travel + every dwell) and the soft budget-overrun

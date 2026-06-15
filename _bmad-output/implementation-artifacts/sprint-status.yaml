@@ -41,7 +41,7 @@ development_status:
   2-1-reconciled-travel-time-arithmetic: done
   2-2-minute-unit-reads-min: done
   2-3-self-explaining-fidelity-badges: done
-  2-4-mock-default-estimate-note-and-osrm-recommendation: backlog
+  2-4-mock-default-estimate-note-and-osrm-recommendation: done
   2-5-discoverable-icon-button-tooltips: backlog
   epic-2-retrospective: optional
 

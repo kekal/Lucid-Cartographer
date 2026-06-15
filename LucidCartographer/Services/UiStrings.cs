@@ -221,6 +221,17 @@ public static class UiStrings
     public const string TripApproximateEstimatesNote =
         "Couldn't reach the routing engine — showing straight-line estimates.";
 
+    // Story 2.4 (FR-8/10, RD11 / UX-DR5/DR9): the quiet contextual note on a default
+    // deployment (no measured provider configured) explaining why every leg is a
+    // straight-line Estimated and recommending the optional OSRM path to measured road
+    // times. Distinct from TripApproximateEstimatesNote (the engine-unreachable
+    // fallback). The link points to the operator docs (docs/osrm.md) — guidance only;
+    // this PRD does not stand up or configure OSRM (Non-Goal).
+    public const string TripMockEstimateNote =
+        "All times are straight-line estimates. Enable OSRM for measured road times.";
+    public const string TripMockEstimateOsrmLink = "How to enable OSRM";
+    public const string TripMockEstimateOsrmHref = "docs/osrm.md";
+
     // Trip View — travel-mode selector (Story 2.2, TRIP-TRAVELMODE-01). Segment
     // labels + the radiogroup's accessible name. The active segment is styled
     // primary; the choice is per-trip (persisted to PoiCollection.TravelMode).
