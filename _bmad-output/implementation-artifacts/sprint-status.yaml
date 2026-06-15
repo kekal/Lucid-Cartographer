@@ -52,7 +52,7 @@ development_status:
   3-3-reset-newly-appeared-legs-on-reorder: done
   3-4-per-leg-mode-pill-on-the-connector: done
   3-5-per-leg-manual-time-edit-and-reset: done
-  3-6-mcp-per-leg-travel-mode: backlog
+  3-6-mcp-per-leg-travel-mode: done
   epic-3-retrospective: optional
 
   # Epic 4: Multi-day schedule & honest finish

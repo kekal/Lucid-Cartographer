@@ -24,8 +24,10 @@ public static class TripTools
     [Description(
         "Read a collection's trip: the ordered placeable Stops (1-based OrderIndex, " +
         "Start/Finish flags, optional dwell minutes) and the cached directional Legs " +
-        "between consecutive Stops under the collection's Travel Mode. Durations are in " +
-        "SECONDS, distances in METERS. A Leg with null duration is not computed yet. " +
+        "between consecutive Stops. Each Leg carries its OWN travelMode (set per-leg via " +
+        "set_leg_travel_mode; AnyAir/Drive/Walk/Cycle) plus the cached time for that mode: " +
+        "durations in SECONDS, distances in METERS. A Leg with null duration is not " +
+        "computed yet (an Any/Air leg stays manual-only and shows no automatic time). " +
         "Use this before assign_stop_order to see the current order and the leg costs.")]
     public static async Task<TripDto> GetTrip(
         ITripOrderingService ordering,
@@ -38,19 +40,23 @@ public static class TripTools
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var collection = await db.PoiCollections.AsNoTracking()
             .Where(c => c.Id == collectionId)
-            .Select(c => new { c.TravelMode, c.StartPoiId, c.FinishPoiId })
+            .Select(c => new { c.StartPoiId, c.FinishPoiId })
             .FirstOrDefaultAsync(ct);
-        var travelMode = collection?.TravelMode ?? TravelMode.AnyAir;
 
         var poiIds = stops.Select(s => s.PoiId).ToList();
         var names = await db.Pois.AsNoTracking()
             .Where(p => poiIds.Contains(p.Id))
             .Select(p => new { p.Id, p.Name })
             .ToDictionaryAsync(p => p.Id, p => p.Name, ct);
-        var dwell = await db.PoiCollectionItems.AsNoTracking()
+        // TRIP-LEGMODE-01 (Story 3.6): extend the membership read to also pull each
+        // stop's OutgoingTravelMode (null ≡ AnyAir) — the From-stop's mode is the
+        // leg's mode, mirroring the VM (Story 3.2).
+        var members = await db.PoiCollectionItems.AsNoTracking()
             .Where(ci => ci.PoiCollectionId == collectionId && poiIds.Contains(ci.PoiId))
-            .Select(ci => new { ci.PoiId, ci.DwellMinutes })
-            .ToDictionaryAsync(ci => ci.PoiId, ci => ci.DwellMinutes, ct);
+            .Select(ci => new { ci.PoiId, ci.DwellMinutes, ci.OutgoingTravelMode })
+            .ToListAsync(ct);
+        var dwell = members.ToDictionary(m => m.PoiId, m => m.DwellMinutes);
+        var modeByPoiId = members.ToDictionary(m => m.PoiId, m => m.OutgoingTravelMode);
 
         var stopDtos = stops.Select(s => new TripStopDto(
             s.PoiId,
@@ -65,12 +71,14 @@ public static class TripTools
         var legDtos = new List<TripLegDto>();
         if (stops.Count >= 2)
         {
+            // TRIP-LEGMODE-01 (Story 3.6, NFR3): read the cache for the poi set across
+            // ALL modes (no single trip-wide WHERE TravelMode filter) and key it by the
+            // full directional (From, To, Mode) tuple, so each leg selects its own row.
             var cached = await db.RouteSegments.AsNoTracking()
-                .Where(r => r.TravelMode == travelMode
-                            && poiIds.Contains(r.FromPoiId) && poiIds.Contains(r.ToPoiId))
+                .Where(r => poiIds.Contains(r.FromPoiId) && poiIds.Contains(r.ToPoiId))
                 .ToListAsync(ct);
-            var byPair = cached
-                .GroupBy(r => (r.FromPoiId, r.ToPoiId))
+            var byKey = cached
+                .GroupBy(r => (r.FromPoiId, r.ToPoiId, r.TravelMode))
                 .ToDictionary(g => g.Key, g => g.First());
 
             var pairs = new List<(int From, int To)>();
@@ -87,12 +95,15 @@ public static class TripTools
 
             foreach (var (from, to) in pairs)
             {
-                byPair.TryGetValue((from, to), out var seg);
-                legDtos.Add(new TripLegDto(from, to, seg?.DurationSeconds, seg?.DistanceMeters, seg?.Fidelity));
+                // The leg's mode is the From-stop's OutgoingTravelMode (null ≡ AnyAir);
+                // its cache row is selected by (From, To, legMode) — null when none.
+                var legMode = (modeByPoiId.TryGetValue(from, out var m) ? m : null) ?? TravelMode.AnyAir;
+                byKey.TryGetValue((from, to, legMode), out var seg);
+                legDtos.Add(new TripLegDto(from, to, legMode, seg?.DurationSeconds, seg?.DistanceMeters, seg?.Fidelity));
             }
         }
 
-        return new TripDto(collectionId, travelMode, stopDtos, legDtos);
+        return new TripDto(collectionId, stopDtos, legDtos);
     }
 
     [McpServerTool(Name = "assign_stop_order")]
@@ -188,6 +199,37 @@ public static class TripTools
         CancellationToken ct = default)
     {
         await ordering.SetDwellMinutesAsync(collectionId, poiId, minutes, ct);
+        return await GetTrip(ordering, dbFactory, collectionId, ct);
+    }
+
+    [McpServerTool(Name = "set_leg_travel_mode")]
+    [Description(
+        "Set the travel mode for ONE leg of a collection's trip. The leg is identified " +
+        "by its FROM-stop PoiId (the leg LEAVING that stop, mirroring set_dwell_time). " +
+        "Valid modes: AnyAir, Drive, Walk, Cycle (any other value errors). A ground mode " +
+        "(Drive/Walk/Cycle) gets an automatic Estimated/Measured time computed in the " +
+        "background; AnyAir is manual-only (no automatic door-to-door time). Persists " +
+        "under the shared write lock. Returns the trip.")]
+    public static async Task<TripDto> SetLegTravelMode(
+        ITripOrderingService ordering,
+        IDbContextFactory<AppDbContext> dbFactory,
+        TravelTimeTrigger travelTimeTrigger,
+        [Description("The collection id.")] int collectionId,
+        [Description("The leg's FROM-stop POI id.")] int fromPoiId,
+        [Description("The travel mode: AnyAir, Drive, Walk, or Cycle.")] string travelMode,
+        CancellationToken ct = default)
+    {
+        // Sole-writer: validation (null|TravelMode.All) lives in the service and throws
+        // on invalid — let that surface to the MCP client as a tool error.
+        await ordering.SetOutgoingTravelModeAsync(collectionId, fromPoiId, travelMode, ct);
+
+        // FR-21: a GROUND mode (Walk/Drive/Cycle) needs its leg time computed — wake the
+        // background compute. AnyAir is manual-only ⇒ no signal (no auto time).
+        if (travelMode != TravelMode.AnyAir)
+        {
+            travelTimeTrigger.Signal();
+        }
+
         return await GetTrip(ordering, dbFactory, collectionId, ct);
     }
 }

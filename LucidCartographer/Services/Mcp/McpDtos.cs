@@ -111,14 +111,15 @@ public record PoiDetailDto(
 public record EnrichmentStatusDto(int Total, int Remaining, int Fetched);
 
 /// <summary>
-/// TRIP-MCP-01 (Story 3.2): a collection's Trip as seen by an MCP agent — the
-/// ordered placeable Stops plus the cached Legs between them, under the
-/// collection's persisted Travel Mode. Canonical units: durations in SECONDS,
-/// distances in METERS, dwell in MINUTES, OrderIndex 1-based.
+/// TRIP-MCP-01 (Story 3.2) / TRIP-LEGMODE-01 (Story 3.6, FR-24): a collection's
+/// Trip as seen by an MCP agent — the ordered placeable Stops plus the cached Legs
+/// between them. Travel mode is now PER-LEG (see <see cref="TripLegDto.TravelMode"/>),
+/// not trip-wide: the single trip-level mode was removed (FR-24 — no dead duplicate).
+/// Canonical units: durations in SECONDS, distances in METERS, dwell in MINUTES,
+/// OrderIndex 1-based.
 /// </summary>
 public record TripDto(
     int CollectionId,
-    string TravelMode,
     IReadOnlyList<TripStopDto> Stops,
     IReadOnlyList<TripLegDto> Legs);
 
@@ -132,12 +133,18 @@ public record TripStopDto(
     int? DwellMinutes);
 
 /// <summary>
-/// One cached, directional Leg (From → To) under the collection's mode. Null
-/// when the pair has no cache row yet (not yet computed).
+/// One cached, directional Leg (From → To) under its OWN per-leg travel mode
+/// (TRIP-LEGMODE-01, FR-24). <see cref="TravelMode"/> is the leg's mode (the
+/// From-stop's <c>OutgoingTravelMode</c>, null normalized to <c>AnyAir</c>) — one of
+/// <see cref="Data.Entities.TravelMode.All"/>. The seconds/meters/fidelity are the
+/// cached <see cref="Data.Entities.RouteSegment"/> row for THAT (From, To, Mode); all
+/// null when the pair has no cache row yet under its mode (an Any/Air leg never has a
+/// ground cache row, so it stays "—" / manual-only).
 /// </summary>
 public record TripLegDto(
     int FromPoiId,
     int ToPoiId,
+    string TravelMode,
     int? DurationSeconds,
     double? DistanceMeters,
     string? Fidelity);
