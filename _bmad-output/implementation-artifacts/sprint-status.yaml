@@ -46,14 +46,14 @@ development_status:
   epic-2-retrospective: done
 
   # Epic 3: Honest per-leg travel modes
-  epic-3: in-progress
+  epic-3: done
   3-1-add-the-per-leg-travel-mode-column-migration: done
   3-2-per-leg-mode-projection-and-ground-only-auto-compute: done
   3-3-reset-newly-appeared-legs-on-reorder: done
   3-4-per-leg-mode-pill-on-the-connector: done
   3-5-per-leg-manual-time-edit-and-reset: done
   3-6-mcp-per-leg-travel-mode: done
-  epic-3-retrospective: optional
+  epic-3-retrospective: done
 
   # Epic 4: Multi-day schedule & honest finish
   epic-4: backlog
