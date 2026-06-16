@@ -43,7 +43,7 @@ Flip Trip View on for a Collection and it becomes an ordered, mapped trip:
 
 Wave-1 affordances exist on both the desktop and `Mobile*` render paths. Wave-2 added
 desktop-only **controls** (per-leg mode pill, leg-time inline edit, datetime-local
-start, HH:MM dwell/time-limit text fields) while its **shared logic** (the reconciled
+start, HH:MM dwell/time-limit/movement `DurationInput` fields) while its **shared logic** (the reconciled
 display model, per-leg-mode VM projection, date-aware formatting, `UiStrings`) reaches
 mobile by nature — `MobileTripPanel` stays correct, only its new controls are deferred
 to the mirror phase (see "Deferred / tech-debt"). All copy routes through `UiStrings`.
@@ -59,7 +59,10 @@ cache, sole `OrderIndex` writer, background compute) and added:
 - **Desktop takeover (RD8, Epic 1).** When `TripVm.IsTripViewEnabled`, the desktop
   **filtered-results region renders `TripStopList` instead of `PoiTable`** — a
   replacement, not the old additive `w-64` side column (which is gone, along with the
-  selection batch toolbar). Toggling off restores `PoiTable` unchanged. The wide trip
+  selection batch toolbar). Toggling off restores `PoiTable` unchanged. The panel
+  **header is compact (2 rows, compaction milestone)**: title + stop count + trip total
+  inline on the left, **Sort** and **Recompute** as bordered buttons on the right
+  (collapsed from the prior 5 stacked rows). The wide trip
   table is a CSS-grid of aligned columns: reorder gutter (drag + ▲▼) · Stop # badge
   (Start/Finish glyph) · full Name + address sub-line + enrichment icon · Dwell
   (HH:MM) · date-aware Arrival · Start/Finish · Actions (Focus on map + Open in Google
@@ -95,15 +98,24 @@ cache, sole `OrderIndex` writer, background compute) and added:
   a native `datetime-local` writing the existing `TripStartTime`; wall-clock arrivals
   roll across midnight and a later-day arrival shows its locale-driven date
   (`TravelTimeFormatting.WallClockText`). The renamed **Time limit** is entered as an
-  HH:MM duration OR a finish-by deadline computed **once** as `deadline − start` and
-  stored as `TimeBudgetMinutes` (TRIP-SCHEDULE-01 — never recomputed); a soft amber
-  **"Over limit"** chip shows when the known total exceeds it. The Time-limit duration
-  and the per-stop **Dwell** are HH:MM **text inputs** (`type="text"`, not `type="time"`):
-  a duration is not a time of day, so the locale AM/PM clock affordance of `type="time"`
-  is meaningless/misleading in 12-hour locales. They parse strictly with
-  `TimeOnly.TryParseExact(["H:mm","HH:mm"])` so a seconds-bearing (`01:30:00`),
-  single-digit-minute (`2:5`), or bare-minute (`90`) entry is rejected (no write) —
-  restoring the structural rigor `type="time"` used to enforce. A designated Finish reads
+  HH:MM duration OR a finish-by deadline; **both are one canonical value** —
+  `TimeBudgetMinutes`. The **Finish-by** readout is a derived `start + budget` view;
+  editing either reflects the other, and Finish-by re-derives when the start changes
+  (the deadline path is still computed **once** as `deadline − start` and stored, never
+  recomputed — TRIP-SCHEDULE-01). A soft amber **"Over limit"** chip shows when the known
+  total exceeds it. The Time-limit, per-stop **Dwell**, and per-leg movement durations
+  all share the new reusable **`DurationInput.razor`** control (compaction milestone,
+  2026-06-16): a masked HH:MM **text** field (`type="text"`, not `type="time"` — a
+  duration is not a time of day, so the locale AM/PM clock of `type="time"` is
+  meaningless/misleading) plus ▲▼ steppers (±5 min, **Shift** ±1h; `ShiftKey` read off
+  the Blazor event, **no JS interop**), with a floor of 0 and an optional `Max` clamp.
+  **Hours are uncapped** — the Time limit **dropped its 24h cap**, so a multi-day budget
+  renders fine (e.g. `48:00`). Parsing is strict and centralized: `DurationInput` is the
+  sole consumer of `TravelTimeFormatting.FormatHhmm` / `TryParseHhmm` (the lone
+  minutes⇄"HH:MM" edge), whose regex `^(\d{1,4}):([0-5]\d)$` rejects a bare number
+  (`90`), single-digit minute (`2:5`), and seconds-bearing value (`01:30:00`); a
+  rejected/clamped entry re-keys the field back to the last good canonical display.
+  A designated Finish reads
   "Finish" + its dated arrival; roundtrip default reads "Return to start"
   (`IsRoundtrip => FinishPoiId is null`). All HH:MM/date ↔ canonical conversions happen
   only at the UI edge. (The mobile panel keeps its numeric-minutes dwell input — the
@@ -388,7 +400,14 @@ components:
 
 - **`LegConnector.razor`** (RD9) — the inter-row leg strip (time/distance/fidelity +
   click-to-edit manual time + reset, hosting the mode pill). Presentational, raises VM
-  commands only.
+  commands only. The manual-time editor now uses `DurationInput`.
+- **`DurationInput.razor`** (compaction milestone, 2026-06-16) — the reusable HH:MM
+  duration picker shared by Dwell, Time-limit, and per-leg movement. A masked
+  `type="text"` field + ▲▼ steppers (±5 min, **Shift** ±1h; `ShiftKey` read off the
+  Blazor event — no JS interop), floor 0, optional `Max` clamp, uncapped hours. Owner
+  keeps canonical minutes; it raises `ValueChanged` only and is the sole consumer of
+  `TravelTimeFormatting.FormatHhmm`/`TryParseHhmm`. A `@key` re-key snaps the field back
+  to the canonical display after a rejected/clamped entry.
 - **`LegModePill.razor`** (RD2/Story 3.4) — per-leg mode control: a rounded pill that
   opens a 4-item Walk/Drive/Cycle/Any-Air menu (active mode checked), neutral "Any —
   set mode" outline for the undefined state (never an error tone). Replaces the
@@ -398,10 +417,10 @@ components:
   writes `PoiCollection.TravelMode` (the RD1a dead-ish column) and is slated for removal
   in the mobile mirror phase.
 
-The Wave-2 schedule controls (datetime-local start, HH:MM time-limit / finish-by
-deadline, HH:MM dwell, "Over limit" chip, finish/return footer) render inline in
-`TripStopList` on desktop; the itinerary timeline renders inside the stop list rather
-than as a standalone component.
+The Wave-2 schedule controls (datetime-local start, HH:MM `DurationInput` time-limit
+with a linked derived finish-by readout, HH:MM dwell, "Over limit" chip, finish/return
+footer) render inline in `TripStopList` on desktop; the itinerary timeline renders
+inside the stop list rather than as a standalone component.
 
 **Deviation from plan:** there is no separate `TripScheduleControls.razor` — the
 schedule affordances are inline in `TripStopList`. The Wave-1 component names also
@@ -444,7 +463,7 @@ Two overloads:
 - **Mirror-to-mobile is deferred.** `MobileTripPanel` still carries the Wave-1 controls
   (incl. the inert trip-wide `TravelModeSelector`); the Wave-2 desktop controls (per-leg
   mode pill, connector inline edit, datetime-local start, finish-by deadline picker, and
-  the HH:MM time-limit / dwell text fields) are NOT yet surfaced on mobile. Shared logic/data already reach mobile
+  the HH:MM `DurationInput` time-limit / dwell / movement fields) are NOT yet surfaced on mobile. Shared logic/data already reach mobile
   correctly — only the controls are pending.
 - **`PoiCollection.TravelMode` is a dead-ish column** (RD1a fallback): no longer drives
   legs, but still written by the inert mobile selector and not dropped. Removal is tied

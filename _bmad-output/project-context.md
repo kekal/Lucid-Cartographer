@@ -1,11 +1,11 @@
 ---
 project_name: 'maps_editor'
 user_name: 'Yurik'
-date: '2026-06-15'
+date: '2026-06-16'
 sections_completed: ['technology_stack', 'language_rules', 'framework_rules', 'testing_rules', 'code_quality_rules', 'workflow_rules', 'critical_rules', 'trip_planning_rules']
 existing_patterns_found: 14
 status: 'complete'
-rule_count: 30
+rule_count: 32
 optimized_for_llm: true
 ---
 
@@ -58,7 +58,8 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **Round-once display model ([TRIP-RECONCILE-01]):** `TravelTimeFormatting.DisplayMinutes` (round-half-up) is the **sole rounding edge**. The displayed trip total == the sum of the displayed per-leg minutes, and arrivals derive from the same rounded legs — never truncate each leg while summing seconds for the total. Canonical seconds are untouched; honesty qualifiers ("—", Estimated/Measured/Manual, partial-trip em-dash) survive.
 - **Three leg-projection sites must stay mirrored:** `TripViewModel.BuildLegs`, `TravelTimeComputationBackgroundService.DirectionalPairs`, and MCP `TripTools.GetTrip` each build the leg set (consecutive pairs + roundtrip closing leg), decide open-vs-roundtrip shape, and look the cache up by the leg's own `(From,To,Mode)` key. Change one → change all three. The MCP `get_trip` reports each leg's `travelMode` (trip-level field removed); `set_leg_travel_mode` sets a leg by its From-stop id via the sole-writer.
 - **TSP-Sort is mode-invariant ([RD3]):** the cost matrix is built from straight-line/haversine distance, never per-leg `OutgoingTravelMode` (ordering happens before per-leg modes exist). The NN+2-opt algorithm is unchanged.
-- **Schedule conversions happen only at the UI edge:** `PoiCollection.TripStartTime` (`DateTime?`) and `TimeBudgetMinutes`/`DwellMinutes` stay canonical; the component bridge converts `datetime-local` (**ISO/invariant wire value**) and HH:MM↔minutes, and renders dates **locale-driven** (`CultureInfo.CurrentCulture`, no hard-coded order). A finish-by **deadline is computed once** into `TimeBudgetMinutes` (`deadline − start`) and never stored/recomputed ([TRIP-SCHEDULE-01]).
+- **Schedule conversions happen only at the UI edge:** `PoiCollection.TripStartTime` (`DateTime?`) and `TimeBudgetMinutes`/`DwellMinutes` stay canonical; the component bridge converts `datetime-local` (**ISO/invariant wire value**) and HH:MM↔minutes, and renders dates **locale-driven** (`CultureInfo.CurrentCulture`, no hard-coded order). A finish-by **deadline is computed once** into `TimeBudgetMinutes` (`deadline − start`) and never stored/recomputed ([TRIP-SCHEDULE-01]). The **Limit and Finish-by inputs are two views of the one canonical `TimeBudgetMinutes`** (a linked pair — editing one recomputes the other; never store both independently).
+- **HH:MM duration entry goes through the shared `Components/Shared/Trip/DurationInput.razor`** (masked text field + ▲▼ steppers) for every duration picker — dwell, time-limit, and per-leg movement (`LegConnector`). It is **presentational**: it owns no state, holds canonical **minutes** via `[Parameter] int? Value`, and raises `ValueChanged` only. **The minutes⇄"HH:MM" conversion is centralized in `TravelTimeFormatting.FormatHhmm`/`TryParseHhmm`** — the SOLE such edge; don't reimplement HH:MM parsing/formatting elsewhere. Hours are **UNCAPPED** (a duration is not a clock time; >24h is valid) — there is no 24h wrap and no AM/PM; callers clamp to their own `Max`. **No JS interop** in the stepper: `Shift` is read straight off the Blazor mouse/keyboard event (Shift+click / Shift+ArrowUp = ±`ShiftStep`), and a committed edit bumps a `_rev` `@key` to force Blazor to re-render the canonical display (the controlled-input gotcha). The control `stopPropagation`s click/keydown so editing never selects or reorders the trip row (the 2.2 selection lesson).
 - **Provider seam + haversine fallback:** travel times come through `ITravelTimeProvider` (haversine `MockTravelTimeProvider` is the default — OSRM is opt-in via `TravelTime:Provider=Osrm`, never default). The off-circuit `TravelTimeComputationBackgroundService` runs providers through the Polly `"travel-time"` pipeline and, on any provider failure, **degrades to the haversine Estimated value stamped `Source=EstimatedFallback`** ([TRIP-DEGRADE-01]) — one bad leg never fails the pass. A provider declares its own `Attribution` HTML; when an OSM-derived provider (OSRM) is active its OSM/ODbL attribution **must** surface on the map (NFR8) — haversine declares null (not OSM-derived).
 - **Validate the never-invalidated cache row at write time.** A Leg is computed iff no cache row exists for its key; the upsert still defends with an explicit guard that **never downgrades a `Manual` or `Measured` row** ([TRIP-MANUAL-01]/[TRIP-DEGRADE-01]) and `RouteSegmentInvalidationService` never deletes `Manual` rows. Keep these guards even when the current code path "can't" reach them.
 
@@ -83,4 +84,4 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Update when the technology stack or core patterns change.
 - Review periodically and remove rules that become obvious over time.
 
-Last Updated: 2026-06-15
+Last Updated: 2026-06-16

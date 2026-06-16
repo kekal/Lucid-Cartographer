@@ -16,8 +16,9 @@ maps_editor/
 │   │   ├── Pages/                 #   <Page>.razor + <Page>ViewModel.cs (markup + state)
 │   │   ├── Shared/                #   Reusable: LeafletMap, PoiTable, CollectionSidebar,
 │   │   │   │                      #   PoiDetailPane, Mobile* screens, dialogs, ViewportObserver
-│   │   │   └── Trip/              #   Trip View UI + TripViewModel (toggle, wide stop list/takeover, LegConnector,
-│   │   │                          #   LegModePill per-leg mode, badges; legacy TravelModeSelector now mobile-only)
+│   │   │   └── Trip/              #   Trip View UI + TripViewModel (toggle, wide stop list/takeover w/ compact 2-row header,
+│   │   │                          #   LegConnector, LegModePill per-leg mode, DurationInput HH:MM picker, badges;
+│   │   │                          #   legacy TravelModeSelector now mobile-only)
 │   │   ├── App.razor, Routes.razor, _Imports.razor
 │   │
 │   ├── Configuration/             # IServiceCollection / IApplicationBuilder extensions (DI lives here)
