@@ -21,16 +21,16 @@
        stopPropagation so editing never selects/reorders the row. *@
     @if (_editing)
     {
-        <input type="number" min="0" max="@TripViewModel.MaxManualLegMinutes" inputmode="numeric"
-               class="w-12 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
-               placeholder="@UiStrings.TripManualMinutesPlaceholder"
-               aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripManualMinutesAria, FromName)"
-               value="@ManualMinutes(Leg)"
-               autofocus
-               @onchange="OnManualMinutesChangedAsync"
-               @onblur="StopEditing"
-               @onclick:stopPropagation
-               @onkeydown:stopPropagation />
+        @* Story 3.5 / Trip stops compaction: the manual leg time is now the shared HH:MM
+           DurationInput (was a raw-minutes number field) — uncapped, with ▲▼ steppers. It
+           still lives behind the click-to-edit affordance and commits/clears via the same
+           Set/ClearManualLegTimeAsync commands; OnBlur closes the inline editor. *@
+        <DurationInput Value="ManualLegMinutes(Leg)"
+                       ValueChanged="OnManualLegChangedAsync"
+                       Max="TripViewModel.MaxManualLegMinutes"
+                       AriaLabel="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripManualMinutesAria, FromName)"
+                       AutoFocus="true"
+                       OnBlur="StopEditing" />
     }
     else
     {
@@ -109,32 +109,28 @@
     private string FromName =>
         Vm.OrderedStops.FirstOrDefault(s => s.PoiId == Leg.FromPoiId)?.Name ?? string.Empty;
 
-    // TRIP-MANUAL-01: the current manual minutes for an Any/Air leg (seconds÷60),
-    // or empty when the leg has no Manual row yet — only a Manual fidelity row
-    // pre-fills the input (a Placeholder/computing leg shows an empty field).
-    private static string ManualMinutes(TripLeg leg) =>
+    // TRIP-MANUAL-01: the current manual minutes for a Manual leg (seconds÷60), or null
+    // when the leg has no Manual row yet — only a Manual fidelity row pre-fills the input
+    // (a Placeholder/computing leg shows an empty field). Canonical seconds are untouched.
+    private static int? ManualLegMinutes(TripLeg leg) =>
         leg.Fidelity == LucidCartographer.Data.Entities.Fidelity.Manual && leg.DurationSeconds is { } s
-            ? (s / 60).ToString(System.Globalization.CultureInfo.CurrentCulture)
-            : string.Empty;
+            ? s / 60
+            : null;
 
-    // TRIP-MANUAL-01: parse the entered minutes and raise the VM command. An empty
-    // value clears the manual entry (reverts to the Placeholder).
-    private async Task OnManualMinutesChangedAsync(ChangeEventArgs e)
+    // TRIP-MANUAL-01: persist the DurationInput's canonical minutes. A committed value
+    // closes the inline editor (back to the click-to-edit button showing the new/auto
+    // time); a null (cleared field) reverts to the Placeholder via the clear command.
+    private async Task OnManualLegChangedAsync(int? minutes)
     {
-        // Story 3.5 (UX-DR6): a committed value closes the inline editor (back to the
-        // click-to-edit button showing the new/auto time).
         _editing = false;
 
-        var text = e.Value?.ToString();
-        if (string.IsNullOrWhiteSpace(text))
+        if (minutes is { } m)
+        {
+            await Vm.SetManualLegTimeAsync(Leg.FromPoiId, Leg.ToPoiId, m);
+        }
+        else
         {
             await Vm.ClearManualLegTimeAsync(Leg.FromPoiId, Leg.ToPoiId);
-            return;
-        }
-
-        if (int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.CurrentCulture, out var minutes) && minutes >= 0)
-        {
-            await Vm.SetManualLegTimeAsync(Leg.FromPoiId, Leg.ToPoiId, minutes);
         }
     }
 

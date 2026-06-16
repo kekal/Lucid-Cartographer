@@ -10,63 +10,65 @@
 
 <section class="flex flex-col h-full bg-surface-container-low border-l border-surface-container-high"
          aria-label="@UiStrings.TripStopListAria">
-    <header class="flex items-center justify-between px-3 py-2 border-b border-surface-container-high flex-shrink-0">
-        <span class="text-sm font-semibold text-on-surface">@UiStrings.TripStopList</span>
-        @* aria-live announces the stop count as it changes (seed / reorder /
-           membership). The live region's announced string is its text content —
-           the visible numeral is aria-hidden and an sr-only child carries the
-           full localized phrase (e.g. "3 stop trip"), rather than an aria-label
-           that competes with the text node on a live region. *@
-        <span class="text-xs text-on-surface-variant" role="status" aria-live="polite">
-            <span aria-hidden="true">@Vm.OrderedStops.Count</span>
-            <span class="sr-only">@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripStopCountAria, Vm.OrderedStops.Count)</span>
-        </span>
-    </header>
-
-    @* Story 3.4 (FR-23): the trip-wide TravelModeSelector is REMOVED from the desktop
-       surface — per-leg modes (the LegModePill on each connector) replace it, so the
-       trip-level selector is a dead duplicate. (Mobile keeps its selector for now —
-       the per-leg mirror is a deferred phase.) *@
-
-    @* TRIP-TRAVELTIME-01 (AC5): trip total travel time, rendered once. A partial
-       trip (any uncomputed leg) shows the em-dash — no false precision. *@
-    @if (Vm.OrderedLegs.Count > 0)
-    {
-        <div class="flex items-center justify-between px-3 py-1.5 border-b border-surface-container-high flex-shrink-0 text-xs">
-            <span class="text-on-surface-variant">@UiStrings.TripTotalTravelTimeLabel</span>
-            <span class="font-semibold text-on-surface"
-                  aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripTotalTravelTimeAria, TravelTimeFormatting.Duration(Vm.TotalTravelTimeSeconds))">
-                @TravelTimeFormatting.Duration(Vm.TotalTravelTimeSeconds)
+    @* Trip stops compaction (UX 2026-06-16): ROW 1 — the stat line. The title, the live
+       stop count, and (when the trip has legs) the total travel time sit inline on the
+       LEFT — no more far-left/far-right split (complaint #3); Sort + Recompute are real
+       buttons on the RIGHT (complaint #4). This merges the old title / total-travel-time /
+       action-links rows into one (complaint #1). Story 3.4 (FR-23): the trip-wide
+       TravelModeSelector stays REMOVED — per-leg LegModePills replace it. *@
+    <header class="flex items-center justify-between gap-2 px-3 py-2 border-b border-surface-container-high flex-shrink-0">
+        <div class="flex items-baseline gap-1.5 min-w-0 text-sm">
+            <span class="font-semibold text-on-surface flex-shrink-0">@UiStrings.TripStopList</span>
+            <span class="text-on-surface-variant" aria-hidden="true">·</span>
+            @* aria-live announces the stop count as it changes (seed / reorder /
+               membership) — behavior unchanged, just relocated. The visible numeral is
+               aria-hidden and an sr-only child carries the full localized phrase. *@
+            <span class="text-xs text-on-surface-variant flex-shrink-0" role="status" aria-live="polite">
+                <span aria-hidden="true">@Vm.OrderedStops.Count</span>
+                <span class="sr-only">@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripStopCountAria, Vm.OrderedStops.Count)</span>
             </span>
+            @if (Vm.OrderedLegs.Count > 0)
+            {
+                @* TRIP-TRAVELTIME-01 (AC5): the trip total, now inline with the count. A
+                   partial trip (any uncomputed leg) still shows the em-dash — no false
+                   precision. The "Total travel time" words live in the aria-label; the
+                   visible form is the clock glyph + value. *@
+                <span class="text-on-surface-variant" aria-hidden="true">·</span>
+                <span class="text-xs font-semibold text-on-surface flex-shrink-0"
+                      aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripTotalTravelTimeAria, TravelTimeFormatting.Duration(Vm.TotalTravelTimeSeconds))">
+                    @TravelTimeFormatting.Duration(Vm.TotalTravelTimeSeconds)
+                </span>
+            }
         </div>
-
-        @* TRIP-RECOMPUTE-01 (Story 2.4, AC4): explicit on-demand recompute. Kept in
-           the header area, NOT inside the clickable stop rows (a wide element over
-           the row centre breaks Playwright row selection — 2.2 regression). *@
-        <div class="px-3 py-1.5 border-b border-surface-container-high flex-shrink-0 flex items-center gap-4">
-            @* TRIP-TSP-01 (Story 3.1, AR-6): explicit on-demand TSP-Sort. On-demand
-               only — never fires automatically. Disabled while legs are computing so
-               the matrix sorts over settled travel times. *@
-            <button type="button"
-                    class="text-xs text-primary hover:underline disabled:opacity-50 disabled:no-underline"
-                    aria-label="@UiStrings.TripSortTspAria"
-                    title="@UiStrings.TripSortTspAria"
-                    disabled="@Vm.IsAnyLegComputing"
-                    @onclick="Vm.SortTravelingSalesmanAsync">
-                @UiStrings.TripSortTspLabel
-            </button>
-            <button type="button"
-                    class="text-xs text-primary hover:underline disabled:opacity-50 disabled:no-underline"
-                    aria-label="@UiStrings.TripRecomputeAria"
-                    title="@UiStrings.TripRecomputeAria"
-                    disabled="@Vm.IsAnyLegComputing"
-                    @onclick="Vm.RecomputeTravelTimesAsync">
-                @UiStrings.TripRecomputeLabel
-            </button>
-        </div>
-        @* TRIP-TSP-01: polite live region announcing a completed sort. *@
-        <span class="sr-only" role="status" aria-live="polite">@Vm.LastSortAnnouncement</span>
-    }
+        @if (Vm.OrderedLegs.Count > 0)
+        {
+            <div class="flex items-center gap-1.5 flex-shrink-0">
+                @* TRIP-TSP-01 (Story 3.1, AR-6): explicit on-demand TSP-Sort, now a button.
+                   On-demand only; disabled while legs compute so the matrix sorts over
+                   settled travel times. *@
+                <button type="button"
+                        class="text-xs px-2 py-1 rounded border border-surface-container-high text-on-surface enabled:hover:bg-surface-container-high disabled:opacity-50"
+                        aria-label="@UiStrings.TripSortTspAria"
+                        title="@UiStrings.TripSortTspAria"
+                        disabled="@Vm.IsAnyLegComputing"
+                        @onclick="Vm.SortTravelingSalesmanAsync">
+                    @UiStrings.TripSortTspLabel
+                </button>
+                @* TRIP-RECOMPUTE-01 (Story 2.4, AC4): explicit on-demand recompute, now a
+                   button. Kept OUT of the clickable stop rows (the 2.2 selection lesson). *@
+                <button type="button"
+                        class="text-xs px-2 py-1 rounded border border-surface-container-high text-on-surface enabled:hover:bg-surface-container-high disabled:opacity-50"
+                        aria-label="@UiStrings.TripRecomputeAria"
+                        title="@UiStrings.TripRecomputeAria"
+                        disabled="@Vm.IsAnyLegComputing"
+                        @onclick="Vm.RecomputeTravelTimesAsync">
+                    @UiStrings.TripRecomputeLabel
+                </button>
+            </div>
+        }
+    </header>
+    @* TRIP-TSP-01: polite live region announcing a completed sort. *@
+    <span class="sr-only" role="status" aria-live="polite">@Vm.LastSortAnnouncement</span>
 
     @* TRIP-TIMELINE-01 (Story 2.6) / Story 4.3 (FR-28/29): header inputs for the
        wall-clock trip start time, the soft TIME LIMIT (as an HH:MM duration ≤24h OR a
@@ -85,33 +87,34 @@
                        value="@StartTimeValue()"
                        @onchange="OnStartTimeChangedAsync" />
             </label>
-            @* Story 4.3 (FR-28): the time LIMIT as an HH:MM DURATION (≤24h). HH:MM text
-               input (NOT type="time" — a duration is not a time of day, so the locale
-               AM/PM clock affordance of type=time is wrong/meaningless). HH:MM ↔ minutes
-               converts only at this UI edge (DurationValue/OnDurationChangedAsync); the VM
-               keeps canonical minutes. When the limit was set via the deadline path to
-               >24h it can't be shown in an HH:MM control, so the value renders empty (the
-               deadline path owns the >24h horizon — AC4). *@
+            @* Story 4.3 (FR-28) + Trip stops compaction (D5): the time LIMIT as an HH:MM
+               DURATION, now the shared uncapped DurationInput (was a ≤24h-capped text field)
+               — so a multi-day limit shows as e.g. "48:00" instead of rendering empty. The
+               canonical budget (TimeBudgetMinutes, minutes) is the SINGLE source of truth;
+               Limit and Finish-by are two views of it (the component converts at the edge). *@
             <label class="flex items-center gap-1 text-on-surface-variant min-w-0">
                 <span class="flex-shrink-0">@UiStrings.TripTimeLimitLabel</span>
-                <input type="text" inputmode="numeric" pattern="([01]?[0-9]|2[0-3]):[0-5][0-9]" maxlength="5"
-                       class="min-w-0 w-auto text-xs px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
-                       placeholder="@UiStrings.TripTimeLimitPlaceholder"
-                       aria-label="@UiStrings.TripTimeLimitAria"
-                       value="@DurationValue()"
-                       @onchange="OnDurationChangedAsync" />
+                <DurationInput Value="Vm.TimeBudgetMinutes"
+                               ValueChanged="OnBudgetChangedAsync"
+                               Max="TripViewModel.MaxBudgetMinutes"
+                               AriaLabel="@UiStrings.TripTimeLimitAria"
+                               Placeholder="@UiStrings.TripTimeLimitPlaceholder" />
             </label>
-            @* Story 4.3 (FR-29, TRIP-SCHEDULE-01): the finish-by DEADLINE alternative —
-               a time GOAL (distinct from the Finish STOP of Story 4.5). REQUIRES a start;
-               on change it computes (deadline − start) minutes ONCE and persists only the
-               resulting minutes, so it never recomputes when the start/trip later change.
-               Disabled (with a short hint) when no start is set. This is the >24h path. *@
+            @* Story 4.3 (FR-29, TRIP-SCHEDULE-01) + Trip stops compaction (D5): the
+               finish-by DEADLINE — a time GOAL (distinct from the Finish STOP of Story 4.5)
+               and now a DERIVED VIEW of the canonical budget (value = start + budget, via
+               FinishByValue). REQUIRES a start (disabled + hint without one). Editing it
+               back-computes (deadline − start) → budget; the budget stays the single store,
+               so Limit and Finish-by reflect each other, and Finish-by re-derives when the
+               start later changes. (Supersedes the old persist-once-never-recompute note.) *@
             <label class="flex items-center gap-1 text-on-surface-variant min-w-0">
                 <span class="flex-shrink-0">@UiStrings.TripFinishByLabel</span>
                 <input type="datetime-local"
+                       @key="_finishByRev"
                        class="min-w-0 w-auto text-xs px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface disabled:opacity-50"
                        aria-label="@UiStrings.TripFinishByAria"
                        disabled="@(Vm.TripStartTime is null)"
+                       value="@FinishByValue()"
                        @onchange="OnFinishByChangedAsync" />
             </label>
             @if (Vm.TripStartTime is null)
@@ -237,18 +240,16 @@
                                 <div class="text-xs text-on-surface-variant break-words">@row.Address</div>
                             }
                         </div>
-                        @* TRIP-DWELL-01 (Story 2.5, AC4): an unplaceable stop has no
-                           travel time but still carries dwell. The row is not
-                           selectable, so no stopPropagation is needed here. Story 4.4
-                           (FR-30): HH:MM text duration input (NOT type="time" — a duration
-                           is not a time of day; type=time draws a meaningless AM/PM clock
-                           in 12-hour locales). HH:MM↔minutes only at the UI edge. *@
-                        <input type="text" inputmode="numeric" pattern="([01]?[0-9]|2[0-3]):[0-5][0-9]" maxlength="5"
-                               class="w-20 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
-                               placeholder="@UiStrings.TripDwellHhmmPlaceholder"
-                               aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDwellAria, row.Name)"
-                               value="@DwellMinutes(row)"
-                               @onchange="e => OnDwellMinutesChangedAsync(row.PoiId, e.Value)" />
+                        @* TRIP-DWELL-01 (Story 2.5, AC4): an unplaceable stop has no travel
+                           time but still carries dwell. Story 4.4 (FR-30) + Trip stops
+                           compaction (D3): the shared uncapped HH:MM DurationInput with ▲▼
+                           steppers (was a ≤24h-capped text field). HH:MM↔minutes only at the
+                           UI edge; canonical DwellMinutes stays minutes. *@
+                        <DurationInput Value="row.DwellMinutes"
+                                       ValueChanged="m => OnDwellChangedAsync(row.PoiId, m)"
+                                       Max="TripViewModel.MaxDwellMinutes"
+                                       AriaLabel="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDwellAria, row.Name)"
+                                       ContainerClass="w-24" />
                         @* Arrival slot — the unplaceable note (no routed arrival). *@
                         <span class="text-xs text-on-surface-variant">@UiStrings.TripStopNotPlaceable</span>
                         @* Start/Finish slot — empty (unplaceable rows can't be pinned). *@
@@ -351,20 +352,16 @@
                                 <div class="text-xs text-on-surface-variant break-words">@row.Address</div>
                             }
                         </div>
-                        @* COLUMN 4 — Dwell input (TRIP-DWELL-01). Story 4.4 (FR-30):
-                           HH:MM text duration input (NOT type="time" — a duration is not a
-                           time of day; type=time draws a meaningless AM/PM clock in 12-hour
-                           locales). 24h cap fine — dwell >24h is implausible. HH:MM↔minutes
-                           only at the UI edge. stopPropagation so editing never
+                        @* COLUMN 4 — Dwell input (TRIP-DWELL-01). Story 4.4 (FR-30) + Trip
+                           stops compaction (D3): the shared uncapped HH:MM DurationInput with
+                           ▲▼ steppers (was a ≤24h-capped text field). HH:MM↔minutes only at
+                           the UI edge; the component stopsPropagation so editing never
                            selects/reorders the row (2.2 selection lesson). *@
-                        <input type="text" inputmode="numeric" pattern="([01]?[0-9]|2[0-3]):[0-5][0-9]" maxlength="5"
-                               class="w-20 text-xs text-right px-1 py-0.5 rounded border border-surface-container-high bg-surface-container-low text-on-surface"
-                               placeholder="@UiStrings.TripDwellHhmmPlaceholder"
-                               aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDwellAria, row.Name)"
-                               value="@DwellMinutes(row)"
-                               @onchange="e => OnDwellMinutesChangedAsync(row.PoiId, e.Value)"
-                               @onclick:stopPropagation
-                               @onkeydown:stopPropagation />
+                        <DurationInput Value="row.DwellMinutes"
+                                       ValueChanged="m => OnDwellChangedAsync(row.PoiId, m)"
+                                       Max="TripViewModel.MaxDwellMinutes"
+                                       AriaLabel="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDwellAria, row.Name)"
+                                       ContainerClass="w-24" />
                         @* COLUMN 5 — Arrival (TRIP-TIMELINE-01): the per-stop honest
                            arrival (relative offset always). Stays a row column. In the
                            wide region it can show the fuller ArrivalText. *@
@@ -556,14 +553,16 @@
             ? t.ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture)
             : string.Empty;
 
-    // Story 4.3 (FR-28): the time-limit DURATION input value as HH:mm, or empty. The
-    // HH:MM text input carries the invariant "HH:mm" wire value regardless of locale.
-    // Only representable for a ≤24h (≤1440 min) limit — a larger limit (set via the
-    // finish-by deadline path) can't be shown in an HH:MM control, so it renders empty
-    // (AC4: the deadline path owns the >24h horizon). m=0 still shows "00:00".
-    private string DurationValue() =>
-        Vm.TimeBudgetMinutes is { } m && m <= 1440
-            ? $"{m / 60:D2}:{m % 60:D2}"
+    // Trip stops compaction (D5): the finish-by deadline is a DERIVED VIEW of the
+    // canonical budget — start + budget, as the datetime-local invariant wire value, or
+    // empty when either is unset. Editing the field back-computes the budget
+    // (OnFinishByChangedAsync); because the budget is the single store, this re-derives
+    // whenever the start or budget changes, keeping Limit and Finish-by in sync. (The
+    // time-limit input is now the shared DurationInput, so the old DurationValue()/
+    // OnDurationChangedAsync UI-edge helpers were removed.)
+    private string FinishByValue() =>
+        Vm.TripStartTime is { } start && Vm.TimeBudgetMinutes is { } m
+            ? start.AddMinutes(m).ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture)
             : string.Empty;
 
     // Story 4.1 (FR-26, RD10): parse the entered datetime-local value and persist the
@@ -585,59 +584,43 @@
         }
     }
 
-    // Story 4.3 (FR-28): parse the entered HH:MM duration → minutes and persist via the
-    // VM. Empty/blank clears the limit (⇒ no over-limit flag). HH:MM ↔ minutes converts
-    // ONLY here at the UI edge — TimeBudgetMinutes stays canonical (NFR2). The HH:MM text
-    // input emits invariant "HH:mm"; we parse STRICTLY against HH:mm so the text field keeps
-    // the structural rigor the old type="time" control had (no seconds "01:30:00", no
-    // single-digit minute "2:5", no bare "90") — an unparseable entry is ignored (no write).
-    // The ≤24h scope is enforced by TimeOnly (no >23:59) and SetTimeBudgetMinutesAsync
-    // range-guards.
-    private static readonly string[] HhmmFormats = ["H:mm", "HH:mm"];
+    // Trip stops compaction (D5): the time-limit DurationInput raises canonical minutes
+    // (or null when cleared) directly — the HH:MM↔minutes conversion now lives in the
+    // shared component / TravelTimeFormatting, so this is a thin pass-through to the VM.
+    private Task OnBudgetChangedAsync(int? minutes) => Vm.SetTimeBudgetMinutesAsync(minutes);
 
-    private async Task OnDurationChangedAsync(ChangeEventArgs e)
-    {
-        var text = e.Value?.ToString();
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            await Vm.SetTimeBudgetMinutesAsync(null);
-            return;
-        }
+    // Re-key for the finish-by input (mirrors DurationInput._rev): bumped after every edit
+    // so the field snaps back to the derived FinishByValue() even when the edit was rejected
+    // (no start, deadline before start, or out of range) — otherwise the rejected text would
+    // linger in the DOM (Blazor won't rewrite an unchanged value attribute).
+    private int _finishByRev;
 
-        if (TimeOnly.TryParseExact(text, HhmmFormats, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var time))
-        {
-            await Vm.SetTimeBudgetMinutesAsync((int)time.ToTimeSpan().TotalMinutes);
-        }
-    }
-
-    // Story 4.3 (FR-29, TRIP-SCHEDULE-01): the finish-by DEADLINE alternative. REQUIRES a
-    // start (the input is disabled without one). On change, compute (deadline − start)
-    // minutes ONCE here and persist only the resulting minutes — the deadline itself is
-    // NEVER persisted, so the limit never recomputes when the start/trip later change. The
-    // browser emits ISO "yyyy-MM-ddTHH:mm" ⇒ parse InvariantCulture. Guard 0 ≤ minutes ≤
-    // MaxBudgetMinutes (a multi-day deadline yields >1440 min — the >24h path, AC4).
+    // Story 4.3 (FR-29, TRIP-SCHEDULE-01) + Trip stops compaction (D5): the finish-by
+    // DEADLINE back-computes the canonical budget — (deadline − start) minutes via the SAME
+    // SetTimeBudgetMinutesAsync the Limit uses, so the two stay one value. The browser emits
+    // ISO "yyyy-MM-ddTHH:mm" ⇒ parse InvariantCulture. REQUIRES a start (input disabled
+    // without one). Guard 0 ≤ minutes ≤ MaxBudgetMinutes (a multi-day deadline yields the
+    // >24h horizon); an out-of-range edit writes nothing and the re-key restores the view.
     private async Task OnFinishByChangedAsync(ChangeEventArgs e)
     {
-        if (Vm.TripStartTime is not { } start)
+        if (Vm.TripStartTime is { } start)
         {
-            return;
-        }
-
-        var text = e.Value?.ToString();
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            await Vm.SetTimeBudgetMinutesAsync(null);
-            return;
-        }
-
-        if (DateTime.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var deadline))
-        {
-            var minutes = (int)Math.Round((deadline - start).TotalMinutes);
-            if (minutes >= 0 && minutes <= TripViewModel.MaxBudgetMinutes)
+            var text = e.Value?.ToString();
+            if (string.IsNullOrWhiteSpace(text))
             {
-                await Vm.SetTimeBudgetMinutesAsync(minutes);
+                await Vm.SetTimeBudgetMinutesAsync(null);
+            }
+            else if (DateTime.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var deadline))
+            {
+                var minutes = (int)Math.Round((deadline - start).TotalMinutes);
+                if (minutes >= 0 && minutes <= TripViewModel.MaxBudgetMinutes)
+                {
+                    await Vm.SetTimeBudgetMinutesAsync(minutes);
+                }
             }
         }
+
+        _finishByRev++;
     }
 
     // Story 1.3: the per-leg manual-minutes entry + reset now live in the
@@ -645,33 +628,10 @@
     // commands); the interim ManualMinutes/OnManualMinutesChanged helpers moved
     // there with it.
 
-    // TRIP-DWELL-01 + Story 4.4 (FR-30): the dwell as the HH:MM text input wire value
-    // "HH:mm" (h = m/60, mins = m%60), or empty when unset. Canonical DwellMinutes stays
-    // minutes — HH:MM↔minutes is only this UI-edge conversion (NFR2).
-    private static string DwellMinutes(TripStopRow row) =>
-        row.DwellMinutes is { } m
-            ? $"{m / 60:D2}:{m % 60:D2}"
-            : string.Empty;
-
-    // TRIP-DWELL-01 + Story 4.4 (FR-30): parse the entered HH:mm duration and persist
-    // canonical minutes via the VM. Empty/blank clears the dwell (null). The HH:MM text
-    // input emits invariant "HH:mm"; we parse STRICTLY against HH:mm (HhmmFormats) so a
-    // seconds-bearing or single-digit-minute value can't slip through — an unparseable value
-    // is ignored (no write).
-    private async Task OnDwellMinutesChangedAsync(int poiId, object? raw)
-    {
-        var text = raw?.ToString();
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            await Vm.SetDwellMinutesAsync(poiId, null);
-            return;
-        }
-
-        if (TimeOnly.TryParseExact(text, HhmmFormats, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var time))
-        {
-            await Vm.SetDwellMinutesAsync(poiId, time.Hour * 60 + time.Minute);
-        }
-    }
+    // TRIP-DWELL-01 + Trip stops compaction (D3): the dwell DurationInput raises canonical
+    // minutes (or null when cleared) directly — HH:MM↔minutes now lives in the shared
+    // component / TravelTimeFormatting, so this is a thin pass-through to the VM.
+    private Task OnDwellChangedAsync(int poiId, int? minutes) => Vm.SetDwellMinutesAsync(poiId, minutes);
 
     // Rows are <li role="button" tabindex="0"> — map Enter/Space onto the same
     // selection the click does, so keyboard users get the list→map sync (AC3).

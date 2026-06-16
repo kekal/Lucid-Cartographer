@@ -58,6 +58,56 @@ public static class TravelTimeFormatting
         return s > 0 ? UiStrings.TripDurationSubMinute : UiStrings.TripDurationZero;
     }
 
+    // Trip stops compaction: the SOLE minutes⇄"HH:MM" edge shared by every duration
+    // picker (dwell, time limit, per-leg movement). Hours are UNCAPPED — a duration is
+    // not a clock time, so >24h is valid (e.g. a multi-day budget). Kept here next to the
+    // other UI-edge conversions; the view-models stay in canonical minutes/seconds (NFR2).
+
+    /// <summary>
+    /// Formats a non-negative duration in MINUTES as an uncapped "HH:MM" wire value
+    /// (e.g. 2880 ⇒ "48:00", 45 ⇒ "00:45", 0 ⇒ "00:00"). A negative input is floored
+    /// to 0. Pair with <see cref="TryParseHhmm"/>.
+    /// </summary>
+    public static string FormatHhmm(int minutes)
+    {
+        if (minutes < 0)
+        {
+            minutes = 0;
+        }
+
+        return $"{minutes / 60:D2}:{minutes % 60:D2}";
+    }
+
+    /// <summary>
+    /// Strictly parses an uncapped "HH:MM" duration into MINUTES. Requires 1–4 hour
+    /// digits and exactly two minute digits 00–59 (e.g. "125:30" ⇒ 7530); rejects a
+    /// bare number ("90"), a single-digit minute ("2:5"), a seconds-bearing value
+    /// ("01:30:00"), and non-numeric text — leaving <paramref name="minutes"/> at 0 and
+    /// returning false. Hours are unbounded (callers clamp to their own Max).
+    /// </summary>
+    public static bool TryParseHhmm(string? text, out int minutes)
+    {
+        minutes = 0;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var match = HhmmPattern.Match(text.Trim());
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        var hours = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+        var mins = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
+        minutes = hours * 60 + mins;
+        return true;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex HhmmPattern =
+        new(@"^(\d{1,4}):([0-5]\d)$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
     /// <summary>
     /// Formats a distance in meters as "N km" with one decimal at/above 1 km
     /// (e.g. "12.3 km"), or "N m" below it (e.g. "850 m"). Null yields the

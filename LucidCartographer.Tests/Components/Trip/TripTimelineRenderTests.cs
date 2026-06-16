@@ -444,20 +444,21 @@ public class TripTimelineRenderTests : BunitTestContext
     }
 
     [Fact]
-    public async Task TripStopList_TimeLimitDuration_OverDayLimit_RendersEmpty()
+    public async Task TripStopList_TimeLimitDuration_OverDayLimit_RendersHhmm()
     {
         var factory = Seed();
         await AddSegmentAsync(factory, 1, 2, 3600, Fidelity.Manual);
         await AddSegmentAsync(factory, 2, 1, 3600, Fidelity.Manual);
         await using var vm = await EnabledVmAsync(factory);
-        // A >24h limit (2880 min) — only representable via the deadline path; the HH:MM
-        // control can't show it, so its value is empty (AC4).
+        // Trip stops compaction (D3/D5): the limit is now the uncapped HH:MM DurationInput,
+        // so a >24h budget (2880 min) renders as "48:00" instead of an empty field — the
+        // old ≤24h cap is gone (a duration is not a clock time).
         await vm.SetTimeBudgetMinutesAsync(2880);
 
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
 
         var input = cut.Find($"input[aria-label=\"{UiStrings.TripTimeLimitAria}\"]");
-        input.GetAttribute("value").Should().BeNullOrEmpty("a >24h limit can't be shown in the HH:MM control");
+        input.GetAttribute("value").Should().Be("48:00", "a >24h limit shows in the uncapped HH:MM control");
     }
 
     [Theory]
@@ -560,6 +561,32 @@ public class TripTimelineRenderTests : BunitTestContext
         await cut.InvokeAsync(() => vm.SetTripStartTimeAsync(new DateTime(2026, 6, 4, 7, 0, 0)));
         cut.Render();
         vm.TimeBudgetMinutes.Should().Be(240, "the limit is fixed minutes; it never recomputes when the start changes");
+    }
+
+    [Fact]
+    public async Task TripStopList_FinishByDeadline_Display_ReDerivesFromStartPlusBudget()
+    {
+        var factory = Seed();
+        await AddSegmentAsync(factory, 1, 2, 3600, Fidelity.Manual);
+        await AddSegmentAsync(factory, 2, 1, 3600, Fidelity.Manual);
+        await using var vm = await EnabledVmAsync(factory);
+        await vm.SetTripStartTimeAsync(new DateTime(2026, 6, 4, 9, 0, 0));
+        // Trip stops compaction (D5): Limit and Finish-by are two views of the canonical
+        // budget. Setting the budget (the Limit's value) derives the Finish-by display as
+        // start + budget; when the start later moves, the Finish-by display re-derives while
+        // the canonical budget holds.
+        await vm.SetTimeBudgetMinutesAsync(240);
+
+        var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));
+
+        var finishBy = cut.Find($"input[aria-label=\"{UiStrings.TripFinishByAria}\"]");
+        finishBy.GetAttribute("value").Should().Be("2026-06-04T13:00", "Finish-by = start + budget (09:00 + 4h)");
+
+        await cut.InvokeAsync(() => vm.SetTripStartTimeAsync(new DateTime(2026, 6, 4, 10, 0, 0)));
+        cut.Render();
+        cut.Find($"input[aria-label=\"{UiStrings.TripFinishByAria}\"]").GetAttribute("value")
+            .Should().Be("2026-06-04T14:00", "Finish-by re-derives when the start changes");
+        vm.TimeBudgetMinutes.Should().Be(240, "the canonical budget holds while the derived deadline shifts");
     }
 
     [Fact]

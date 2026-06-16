@@ -213,7 +213,9 @@ public class LegConnectorTests : BunitTestContext
             .Add(x => x.Vm, vm));
 
         await cut.Find($"button[title=\"{editTitle}\"]").ClickAsync(new MouseEventArgs());
-        cut.Find($"input[aria-label=\"{manualAria}\"]").Change("75");
+        // Trip stops compaction (D3): the per-leg time is now the shared HH:MM DurationInput,
+        // so a 75-minute manual override is entered as "01:15".
+        cut.Find($"input[aria-label=\"{manualAria}\"]").Change("01:15");
 
         var leg = vm.OrderedLegs.First(l => l.FromPoiId == 1 && l.ToPoiId == 2);
         leg.Fidelity.Should().Be(Fidelity.Manual, "entering a value set a Manual override via Vm.SetManualLegTimeAsync");

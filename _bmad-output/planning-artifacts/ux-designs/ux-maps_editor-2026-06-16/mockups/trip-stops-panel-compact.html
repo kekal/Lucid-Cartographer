@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>Trip stops panel — compact redesign mock</title>
+<style>
+  :root{
+    --bg:#fbfbfa; --surface:#fff; --b1:rgba(0,0,0,.12); --b2:rgba(0,0,0,.22);
+    --t1:#1c1b1a; --t2:#5f5e5a; --t3:#8b8a85; --info-bg:#e6f1fb; --info-t:#185fa5;
+    --r:8px;
+  }
+  body{font-family:system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);padding:24px;color:var(--t1)}
+  .frame{max-width:520px}
+  .panel{background:var(--surface);border:.5px solid var(--b2);border-radius:var(--r);overflow:hidden;font-size:13px}
+  .row{display:flex;align-items:center;padding:8px 12px;border-bottom:.5px solid var(--b1);gap:8px}
+  .muted{color:var(--t2)} .hint{color:var(--t3)}
+  button{font:inherit;background:transparent;border:.5px solid var(--b2);border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer}
+  input{font:inherit}
+  .step{display:flex;align-items:center;border:.5px solid var(--b2);border-radius:6px;height:28px;overflow:hidden}
+  .step input{border:none;width:46px;text-align:right;height:100%;font-size:13px;padding:0 6px;font-variant-numeric:tabular-nums;outline:none}
+  .step .arrows{display:flex;flex-direction:column;border-left:.5px solid var(--b1)}
+  .step .arrows button{border:none;border-radius:0;padding:0 6px;height:14px;line-height:14px;font-size:8px}
+  .step .arrows button+button{border-top:.5px solid var(--b1)}
+  .badge{width:20px;height:20px;border-radius:50%;background:var(--info-bg);color:var(--info-t);font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .badge.sel{background:var(--info-t);color:#fff}
+  .est{font-size:11px;padding:1px 7px;border:.5px solid var(--b1);border-radius:6px}
+</style>
+<p style="color:#5f5e5a;font-size:13px;max-width:520px">
+  Mock for the Trip stops panel compaction (bmad-ux, 2026-06-16). Two-row header,
+  Sort/Recompute as buttons, OSRM note auto-hides under a real engine, dwell &amp;
+  per-leg movement as uncapped HH:MM fields with ±5min / Shift±1h steppers.
+  Spec: <code>EXPERIENCE-delta.md</code> (wins on conflict).
+</p>
+<div class="frame">
+<div class="panel">
+
+  <div class="row" style="justify-content:space-between">
+    <div style="display:flex;align-items:baseline;gap:8px;min-width:0">
+      <span style="font-weight:600">Trip stops</span>
+      <span class="hint">·</span><span class="muted">4 stops</span>
+      <span class="hint">·</span><span class="muted">⏱ 15h 48 min</span>
+    </div>
+    <div style="display:flex;gap:6px;flex-shrink:0">
+      <button>↪ Sort</button><button>⟳ Recompute</button>
+    </div>
+  </div>
+
+  <div class="row" style="flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--t2)">
+    <label>Start <input type="datetime-local" value="2026-06-23T12:59" style="height:26px;font-size:12px"></label>
+    <label>Limit <input type="text" placeholder="hh:mm" maxlength="6" style="height:26px;width:62px;font-size:12px"></label>
+    <label>Finish by <input type="datetime-local" style="height:26px;font-size:12px"></label>
+  </div>
+
+  <div class="row" style="background:var(--info-bg);color:var(--info-t);font-size:12px">
+    ℹ Straight-line estimates. <a href="#" style="color:var(--info-t)">How to enable OSRM</a>
+    <span style="margin-left:auto;font-style:italic;color:var(--t3);font-size:11px">auto-hides when OSRM active</span>
+  </div>
+
+  <div class="row">
+    <span class="hint">⠿</span><span class="badge">1</span>
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:600">📍 Wawel Castle 2</div>
+      <div class="hint" style="font-size:12px">Historic royal castle in Krakow</div>
+    </div>
+    <div class="step"><input value="45:00"><div class="arrows"><button>▲</button><button>▼</button></div></div>
+    <span class="hint" style="font-size:12px;width:78px;text-align:right">+0 min · 12:59</span>
+  </div>
+
+  <div class="row" style="padding-left:40px;color:var(--t2);font-size:12px;border-bottom:.5px solid var(--b1)">
+    ↓
+    <div class="step" style="height:24px"><input value="5:04" style="width:40px;font-size:12px"><div class="arrows"><button>▲</button><button>▼</button></div></div>
+    <span>· 253.3 km</span><span class="est">Estimated</span><span>🚗 Drive</span>
+  </div>
+
+  <div class="row" style="background:var(--info-bg)">
+    <span class="hint">⠿</span><span class="badge sel">2</span>
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:600">📍 Palace of Culture and Science</div>
+      <div class="hint" style="font-size:12px">Tallest building in Warsaw</div>
+    </div>
+    <div class="step" style="background:#fff"><input placeholder="hh:mm"><div class="arrows"><button>▲</button><button>▼</button></div></div>
+    <span class="hint" style="font-size:12px;width:78px;text-align:right">+5h 4 min · ~18:03</span>
+  </div>
+
+</div>
+</div>

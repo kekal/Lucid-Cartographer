@@ -1,0 +1,153 @@
+@using System.Globalization
+@using LucidCartographer.Services
+@using LucidCartographer.Services.Trip
+
+@* Trip stops compaction: a reusable HH:MM duration control shared by the dwell,
+   time-limit, and per-leg movement inputs. A masked text field that shows the canonical
+   MINUTES as an uncapped "HH:MM" (no AM/PM, no 24h cap) plus ▲▼ steppers — each click
+   ±Step minutes, Shift+click ±ShiftStep (clamped to [0, Max]). ArrowUp/ArrowDown on the
+   field mirror the steppers, so keyboard users never need the buttons. No JS interop:
+   ShiftKey is read straight off the Blazor mouse/keyboard event. Conversion is
+   centralized in TravelTimeFormatting.FormatHhmm/TryParseHhmm; the owner keeps canonical
+   minutes (NFR2). Presentational — it raises ValueChanged only. stopPropagation so
+   editing never selects/reorders a trip row (the 2.2 selection lesson). *@
+
+<span class="inline-flex items-stretch rounded border border-surface-container-high bg-surface-container-low overflow-hidden @ContainerClass">
+    <input type="text" inputmode="numeric" maxlength="8"
+           @key="_rev"
+           class="text-xs text-right px-1 py-0.5 bg-transparent text-on-surface focus:outline-none w-12 @InputClass"
+           placeholder="@Placeholder"
+           aria-label="@AriaLabel"
+           disabled="@Disabled"
+           value="@Display"
+           @attributes="ExtraAttrs"
+           @onchange="OnTextChangedAsync"
+           @onkeydown="OnKeyDownAsync"
+           @onblur="OnBlurAsync"
+           @onclick:stopPropagation
+           @onkeydown:stopPropagation />
+    <span class="flex flex-col border-l border-surface-container-high">
+        <button type="button" tabindex="-1"
+                class="inline-flex items-center justify-center px-1 leading-none text-on-surface-variant enabled:hover:bg-surface-container-high disabled:opacity-40"
+                style="height:50%;font-size:9px"
+                aria-label="@UiStrings.TripDurationStepUpAria"
+                title="@UiStrings.TripDurationStepUpAria"
+                disabled="@Disabled"
+                @onclick="e => StepAsync(e, +1)"
+                @onclick:stopPropagation
+                @onkeydown:stopPropagation>
+            <span aria-hidden="true">▲</span>
+        </button>
+        <button type="button" tabindex="-1"
+                class="inline-flex items-center justify-center px-1 leading-none text-on-surface-variant enabled:hover:bg-surface-container-high disabled:opacity-40"
+                style="height:50%;font-size:9px"
+                aria-label="@UiStrings.TripDurationStepDownAria"
+                title="@UiStrings.TripDurationStepDownAria"
+                disabled="@Disabled"
+                @onclick="e => StepAsync(e, -1)"
+                @onclick:stopPropagation
+                @onkeydown:stopPropagation>
+            <span aria-hidden="true">▼</span>
+        </button>
+    </span>
+</span>
+
+@code {
+    /// <summary>The canonical duration in MINUTES, or null when unset (shows the placeholder).</summary>
+    [Parameter] public int? Value { get; set; }
+
+    /// <summary>Raised with the new canonical minutes (or null when the field is cleared).</summary>
+    [Parameter] public EventCallback<int?> ValueChanged { get; set; }
+
+    [Parameter] public string? AriaLabel { get; set; }
+    [Parameter] public string Placeholder { get; set; } = UiStrings.TripDwellHhmmPlaceholder;
+
+    /// <summary>Optional upper clamp in minutes (steppers/parse never exceed it). Null ⇒ unbounded.</summary>
+    [Parameter] public int? Max { get; set; }
+
+    /// <summary>Plain stepper increment (minutes).</summary>
+    [Parameter] public int Step { get; set; } = 5;
+
+    /// <summary>Shift-modified stepper increment (minutes).</summary>
+    [Parameter] public int ShiftStep { get; set; } = 60;
+
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>Focus the field on first render (used by the per-leg click-to-edit affordance).</summary>
+    [Parameter] public bool AutoFocus { get; set; }
+
+    /// <summary>Raised when the field loses focus (e.g. the leg editor closes on blur).</summary>
+    [Parameter] public EventCallback OnBlur { get; set; }
+
+    /// <summary>Extra classes for the inner input (e.g. a wider field).</summary>
+    [Parameter] public string? InputClass { get; set; }
+
+    /// <summary>Extra classes for the bordered container (e.g. a fixed width or height).</summary>
+    [Parameter] public string? ContainerClass { get; set; }
+
+    private string Display => Value is { } m ? TravelTimeFormatting.FormatHhmm(m) : string.Empty;
+
+    private Dictionary<string, object> ExtraAttrs =>
+        AutoFocus ? new Dictionary<string, object> { ["autofocus"] = true } : new();
+
+    // Re-key for the input: bumping this on every committed edit forces Blazor to recreate
+    // the element with the canonical @Display, so a rejected entry ("90"), a clamped entry,
+    // or a re-typed same value never leaves stale text in the DOM (the controlled-input
+    // gotcha — Blazor's diff won't rewrite an unchanged value attribute).
+    private int _rev;
+
+    // Typed entry: a valid HH:MM persists clamped minutes; blank clears to null; an
+    // unparseable value is ignored (no write). The _rev bump then snaps the field back to
+    // the last good @Display regardless of which branch ran.
+    private async Task OnTextChangedAsync(ChangeEventArgs e)
+    {
+        var text = e.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            await ValueChanged.InvokeAsync(null);
+        }
+        else if (TravelTimeFormatting.TryParseHhmm(text, out var minutes))
+        {
+            await ValueChanged.InvokeAsync(Clamp(minutes));
+        }
+
+        _rev++;
+    }
+
+    private Task OnBlurAsync() => OnBlur.InvokeAsync();
+
+    private Task StepAsync(MouseEventArgs e, int direction) => StepBy(e.ShiftKey, direction);
+
+    private Task OnKeyDownAsync(KeyboardEventArgs e) => e.Key switch
+    {
+        "ArrowUp" => StepBy(e.ShiftKey, +1),
+        "ArrowDown" => StepBy(e.ShiftKey, -1),
+        _ => Task.CompletedTask,
+    };
+
+    private async Task StepBy(bool shift, int direction)
+    {
+        if (Disabled)
+        {
+            return;
+        }
+
+        var delta = (shift ? ShiftStep : Step) * direction;
+        await ValueChanged.InvokeAsync(Clamp((Value ?? 0) + delta));
+    }
+
+    private int Clamp(int minutes)
+    {
+        if (minutes < 0)
+        {
+            minutes = 0;
+        }
+
+        if (Max is { } max && minutes > max)
+        {
+            minutes = max;
+        }
+
+        return minutes;
+    }
+}

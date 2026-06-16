@@ -319,8 +319,11 @@ public static class UiStrings
     // placeholder below replace the old "Time budget" copy on the desktop surface; the
     // overrun chip reads "Over limit". (Mobile keeps the TripBudget* strings above.)
     public const string TripTimeLimitLabel = "Time limit";
-    public const string TripTimeLimitAria = "Time limit as a duration (HH:MM, up to 24h)";
+    public const string TripTimeLimitAria = "Time limit as a duration (HH:MM)";
     public const string TripTimeLimitPlaceholder = "hh:mm";
+    // Trip stops compaction: aria/title for the shared DurationInput ▲▼ steppers.
+    public const string TripDurationStepUpAria = "Increase duration";
+    public const string TripDurationStepDownAria = "Decrease duration";
     // Story 4.3 (FR-29): the finish-by deadline alternative (a TIME GOAL, computed once
     // into minutes — distinct from the Finish STOP of Story 4.5). Requires a start.
     public const string TripFinishByLabel = "Finish by";

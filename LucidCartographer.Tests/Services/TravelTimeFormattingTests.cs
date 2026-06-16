@@ -184,4 +184,45 @@ public class TravelTimeFormattingTests
         var text = TravelTimeFormatting.ArrivalCompact(Offset2h15, wallClock: null, qualifier: null, isUnknown: false, tripStart: null);
         text.Should().Be("+2h 15 min");
     }
+
+    // === Trip stops compaction (D3/D5): the uncapped minutes⇄"HH:MM" edge shared by
+    // the dwell, time-limit, and per-leg DurationInput controls. ===
+
+    [Theory]
+    [InlineData(0, "00:00")]
+    [InlineData(45, "00:45")]
+    [InlineData(90, "01:30")]
+    [InlineData(125, "02:05")]
+    [InlineData(1440, "24:00")]   // exactly a day — no cap
+    [InlineData(2880, "48:00")]   // multi-day budget renders as HH:MM, not blank
+    [InlineData(7530, "125:30")]  // hours are unbounded
+    [InlineData(-5, "00:00")]     // negative floors to zero
+    public void FormatHhmm_RendersUncappedHoursAndPaddedMinutes(int minutes, string expected) =>
+        TravelTimeFormatting.FormatHhmm(minutes).Should().Be(expected);
+
+    [Theory]
+    [InlineData("00:00", 0)]
+    [InlineData("01:30", 90)]
+    [InlineData("48:00", 2880)]
+    [InlineData("125:30", 7530)]  // uncapped hours accepted
+    [InlineData(" 02:05 ", 125)]  // surrounding whitespace tolerated
+    public void TryParseHhmm_ParsesValidUncappedDurations(string text, int expected)
+    {
+        TravelTimeFormatting.TryParseHhmm(text, out var minutes).Should().BeTrue();
+        minutes.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("90")]        // bare number, no colon
+    [InlineData("2:5")]       // single-digit minute
+    [InlineData("01:30:00")]  // seconds-bearing
+    [InlineData("01:60")]     // minutes out of range
+    [InlineData("abc")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void TryParseHhmm_RejectsMalformed_LeavingZero(string? text)
+    {
+        TravelTimeFormatting.TryParseHhmm(text, out var minutes).Should().BeFalse();
+        minutes.Should().Be(0);
+    }
 }

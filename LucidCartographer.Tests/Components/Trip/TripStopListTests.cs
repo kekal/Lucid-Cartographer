@@ -805,7 +805,9 @@ public class TripStopListTests : BunitTestContext
         // Story 3.5 (UX-DR6): open the inline editor by clicking the leg's time button.
         var editTitle = string.Format(CultureInfo.CurrentCulture, UiStrings.TripLegEditTimeAria, "P1");
         cut.Find($"button[title=\"{editTitle}\"]").Click();
-        cut.Find($"input[aria-label=\"{aria}\"]").Change("90");
+        // Trip stops compaction (D3): the per-leg time is now the shared HH:MM
+        // DurationInput, so a 90-minute manual override is entered as "01:30".
+        cut.Find($"input[aria-label=\"{aria}\"]").Change("01:30");
 
         cut.WaitForAssertion(() =>
         {
@@ -829,7 +831,8 @@ public class TripStopListTests : BunitTestContext
         // Story 3.5 (UX-DR6): open the inline editor; it pre-fills the existing Manual minutes.
         var editTitle = string.Format(CultureInfo.CurrentCulture, UiStrings.TripLegEditTimeAria, "P1");
         cut.Find($"button[title=\"{editTitle}\"]").Click();
-        cut.Find($"input[aria-label=\"{aria}\"]").GetAttribute("value").Should().Be("75");
+        // Trip stops compaction (D3): the per-leg time pre-fills as HH:MM (75 min ⇒ "01:15").
+        cut.Find($"input[aria-label=\"{aria}\"]").GetAttribute("value").Should().Be("01:15");
     }
 
     // === Story 2.4 (TRIP-RECOMPUTE-01, AC4): the Recompute button, both surfaces ===
