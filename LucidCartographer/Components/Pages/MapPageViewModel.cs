@@ -69,8 +69,23 @@ public sealed class MapPageViewModel(
         }
     }
 
-    /// <summary>Placeable (lat+lon present) POIs in the current filtered result set — drives the Trip toggle's ≥2 gate.</summary>
+    /// <summary>Placeable (lat+lon present) POIs in the current filtered result set (viewport-dependent).</summary>
     public int PlaceablePoiCount => FilteredPois.Count(p => p is { Latitude: not null, Longitude: not null });
+
+    /// <summary>
+    /// Placeable (lat+lon present) POIs in the single visible collection's FULL
+    /// membership — viewport-INDEPENDENT — and drives the Trip toggle's ≥1 gate.
+    /// Trip View shows the whole collection regardless of map pan/zoom, so the
+    /// gate must too: a pan that empties the viewport never hides the toggle.
+    /// Zero when no single collection is in scope (multi-collection or search) so
+    /// the gate stays closed exactly as before. <see cref="VisiblePois"/> is the
+    /// lone visible collection's members when <see cref="SingleVisibleCollectionId"/>
+    /// is set; <see cref="FilteredPois"/> is its viewport subset.
+    /// </summary>
+    public int CollectionPlaceablePoiCount =>
+        SingleVisibleCollectionId is null
+            ? 0
+            : VisiblePois.Count(p => p is { Latitude: not null, Longitude: not null });
 
     // --- State ---
 

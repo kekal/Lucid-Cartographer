@@ -71,7 +71,19 @@ public sealed class TripViewModel(
     /// <summary>The collection a Trip is scoped to, or null when none is in scope.</summary>
     public int? ActiveCollectionId { get; private set; }
 
-    /// <summary>Number of placeable POIs in scope; drives the ≥2 availability gate.</summary>
+    /// <summary>
+    /// The single UX-DR1 placeable-count threshold for the toggle. Both
+    /// <see cref="IsToggleAvailable"/> and <see cref="AutoDisableBelowGateAsync"/>
+    /// gate on this one value so the "offer" and "auto-disable" edges can never
+    /// drift apart.
+    /// </summary>
+    private const int MinPlaceableForToggle = 1;
+
+    /// <summary>
+    /// Number of placeable POIs in scope; drives the ≥1 availability gate. Fed the
+    /// single visible collection's FULL placeable membership (viewport-independent)
+    /// by the host, so the gate tracks the collection, not the map viewport.
+    /// </summary>
     public int PlaceableCount { get; private set; }
 
     /// <summary>Whether Trip View is currently on for the active collection.</summary>
@@ -79,10 +91,12 @@ public sealed class TripViewModel(
 
     /// <summary>
     /// The toggle is only offered when a single collection is in scope and it has
-    /// at least two placeable POIs (UX-DR1 / FR-17). Below that it is absent — never
-    /// an error or broken affordance (UX-DR10).
+    /// at least one placeable POI (UX-DR1 / FR-17). Below that (an empty collection)
+    /// it is absent — never an error or broken affordance (UX-DR10). The count is
+    /// the collection's full membership, so the toggle does not hide when the map
+    /// is panned away from the POIs.
     /// </summary>
-    public bool IsToggleAvailable => ActiveCollectionId is not null && PlaceableCount >= 2;
+    public bool IsToggleAvailable => ActiveCollectionId is not null && PlaceableCount >= MinPlaceableForToggle;
 
     /// <summary>
     /// <c>PoiId → Stop number</c> for the active collection when Trip View is on;
@@ -593,13 +607,13 @@ public sealed class TripViewModel(
     }
 
     /// <summary>
-    /// Updates only the placeable count (e.g. as the viewport filter changes)
-    /// without re-reading persisted state. Re-evaluates the availability gate.
-    /// Does NOT auto-disable Trip View: the count fed here is the transient
-    /// visible/filtered count (0 mid-load, dropping when a search narrows the
-    /// set), so acting on a dip would persist Trip View off on a reopen or
-    /// search. The genuine "content dropped below the gate" signal is a
-    /// membership change — see <see cref="RefreshAfterMembershipChangeAsync"/>.
+    /// Updates only the placeable count without re-reading persisted state and
+    /// re-evaluates the availability gate. Does NOT auto-disable Trip View: the
+    /// count can transiently read 0 (mid-load, or as a search narrows the visible
+    /// set toward a non-single-collection scope), so acting on a dip here would
+    /// persist Trip View off on a reopen or search. The genuine "content dropped
+    /// below the gate" signal is a membership change — see
+    /// <see cref="RefreshAfterMembershipChangeAsync"/>.
     /// </summary>
     public void UpdatePlaceableCount(int placeableCount)
     {
@@ -613,16 +627,17 @@ public sealed class TripViewModel(
     }
 
     /// <summary>
-    /// [TRIP-GATE-01] When the active collection falls below the ≥2-placeable
-    /// availability gate (UX-DR1) while Trip View is on, turn Trip View off and
-    /// persist the flag — otherwise the overlays (badges, legs, Start/Finish
-    /// controls) would strand on a sub-trip with the toggle itself gone, leaving
-    /// no way to dismiss them. Returns true when it disabled the view. Caller
-    /// raises <see cref="StateChanged"/>.
+    /// [TRIP-GATE-01] When the active collection falls below the ≥1-placeable
+    /// availability gate (UX-DR1) while Trip View is on — i.e. the last placeable
+    /// member is removed — turn Trip View off and persist the flag, otherwise the
+    /// overlays (badges, legs, Start/Finish controls) would strand with the toggle
+    /// itself gone, leaving no way to dismiss them. Shares the same threshold as
+    /// <see cref="IsToggleAvailable"/> (one UX-DR1 gate). Returns true when it
+    /// disabled the view. Caller raises <see cref="StateChanged"/>.
     /// </summary>
     private async Task<bool> AutoDisableBelowGateAsync()
     {
-        if (!IsTripViewEnabled || ActiveCollectionId is not { } collectionId || PlaceableCount >= 2)
+        if (!IsTripViewEnabled || ActiveCollectionId is not { } collectionId || PlaceableCount >= MinPlaceableForToggle)
         {
             return false;
         }
@@ -651,7 +666,7 @@ public sealed class TripViewModel(
     /// <summary>
     /// Flips Trip View on/off for the active collection and persists the flag.
     /// First enable of a never-ordered collection seeds the Stop Order. No-op
-    /// when the toggle is not available (below the ≥2 placeable gate).
+    /// when the toggle is not available (below the ≥1 placeable gate).
     /// </summary>
     public async Task ToggleAsync()
     {
@@ -729,9 +744,9 @@ public sealed class TripViewModel(
             return;
         }
 
-        // [TRIP-GATE-01] A removal / un-enrichment that drops below the ≥2 gate
-        // auto-disables Trip View rather than reconciling a sub-trip the user
-        // can no longer toggle off.
+        // [TRIP-GATE-01] A removal / un-enrichment that empties the collection's
+        // placeable membership (drops below the ≥1 gate) auto-disables Trip View
+        // rather than stranding overlays the user can no longer toggle off.
         if (await AutoDisableBelowGateAsync())
         {
             Notify();

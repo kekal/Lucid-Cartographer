@@ -3,8 +3,8 @@
 
 @* Mobile Trip View toggle. Same semantics as the desktop TripToggle
    (aria-pressed + aria-live announcement) on the mobile render path; ≥44px
-   touch target. Lives in the bottom-panel results header. Absent below 2
-   placeable POIs. *@
+   touch target. Lives in the bottom-panel results header. Available when a
+   single collection has ≥1 placeable POI; absent for an empty collection. *@
 
 @if (Vm.IsToggleAvailable)
 {

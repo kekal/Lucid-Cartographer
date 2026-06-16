@@ -52,14 +52,25 @@ public class TripToggleTests : BunitTestContext
     }
 
     [Fact]
-    public async Task IsHidden_WhenFewerThanTwoPlaceable()
+    public async Task IsVisible_WhenCollectionHasSinglePlaceable()
     {
         var vm = CreateVm(SeedFactory(placeable: 1));
         await vm.LoadAsync(CollectionId, 1);
 
         var cut = RenderComponent<TripToggle>(p => p.Add(x => x.Vm, vm));
 
-        cut.FindAll("button[role='switch']").Should().BeEmpty("the toggle is absent below the â‰¥2 gate, never an error");
+        cut.FindAll("button[role='switch']").Should().ContainSingle("a single placeable POI clears the ≥1 gate");
+    }
+
+    [Fact]
+    public async Task IsHidden_WhenNoPlaceable()
+    {
+        var vm = CreateVm(SeedFactory(placeable: 0));
+        await vm.LoadAsync(CollectionId, 0);
+
+        var cut = RenderComponent<TripToggle>(p => p.Add(x => x.Vm, vm));
+
+        cut.FindAll("button[role='switch']").Should().BeEmpty("the toggle is absent for an empty collection, never an error");
     }
 
     [Fact]

@@ -2,9 +2,11 @@
 @implements IDisposable
 
 @* Desktop Trip View toggle. Lives in the filtered-results region (never in a
-   menu, per FR-17/UX-DR1). Absent entirely below 2 placeable POIs — never an
-   error or broken affordance (UX-DR10). A switch exposing aria-pressed; its
-   on/off change is announced through the adjacent aria-live region. *@
+   menu, per FR-17/UX-DR1). Available when a single collection is in scope with
+   ≥1 placeable POI (its full membership, viewport-independent); absent for an
+   empty collection — never an error or broken affordance (UX-DR10). A switch
+   exposing aria-pressed; its on/off change is announced through the adjacent
+   aria-live region. *@
 
 @if (Vm.IsToggleAvailable)
 {

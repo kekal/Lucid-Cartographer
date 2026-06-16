@@ -95,6 +95,58 @@ public class MapPageViewModelTests
     }
 
     [Fact]
+    public async Task CollectionPlaceablePoiCount_CountsFullMembership_IndependentOfViewport()
+    {
+        _poi.Setup(p => p.GetCollectionsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((List<PoiCollection>)[MakeCollection(1, "A", isVisible: true)]);
+        var vm = CreateVm();
+        await vm.InitializeAsync();
+
+        // Full membership: 2 placeable + 1 without coordinates.
+        typeof(MapPageViewModel).GetProperty(nameof(MapPageViewModel.VisiblePois))!
+            .SetValue(vm, (IReadOnlyList<Poi>)[MakePoi(1, 50.0, 19.0), MakePoi(2, 51.0, 19.0), MakePoi(3)]);
+        // Viewport currently excludes everything (e.g. panned away).
+        typeof(MapPageViewModel).GetProperty(nameof(MapPageViewModel.FilteredPois))!
+            .SetValue(vm, (IReadOnlyList<Poi>)[]);
+
+        vm.SingleVisibleCollectionId.Should().Be(1);
+        vm.PlaceablePoiCount.Should().Be(0, "the viewport-filtered set is empty");
+        vm.CollectionPlaceablePoiCount.Should()
+            .Be(2, "the gate counts the collection's full placeable membership, not the viewport subset");
+    }
+
+    [Fact]
+    public async Task CollectionPlaceablePoiCount_IsZero_WhenNotASingleVisibleCollection()
+    {
+        _poi.Setup(p => p.GetCollectionsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((List<PoiCollection>)[MakeCollection(1, "A", isVisible: true), MakeCollection(2, "B", isVisible: true)]);
+        var vm = CreateVm();
+        await vm.InitializeAsync();
+
+        typeof(MapPageViewModel).GetProperty(nameof(MapPageViewModel.VisiblePois))!
+            .SetValue(vm, (IReadOnlyList<Poi>)[MakePoi(1, 50.0, 19.0)]);
+
+        vm.SingleVisibleCollectionId.Should().BeNull();
+        vm.CollectionPlaceablePoiCount.Should().Be(0, "the gate stays closed unless exactly one collection is visible");
+    }
+
+    [Fact]
+    public async Task CollectionPlaceablePoiCount_IsZero_DuringActiveSearch()
+    {
+        _poi.Setup(p => p.GetCollectionsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((List<PoiCollection>)[MakeCollection(1, "A", isVisible: true)]);
+        var vm = CreateVm();
+        await vm.InitializeAsync();
+        typeof(MapPageViewModel).GetProperty(nameof(MapPageViewModel.PreviousSearchQuery))!
+            .SetValue(vm, "wawel");
+        typeof(MapPageViewModel).GetProperty(nameof(MapPageViewModel.VisiblePois))!
+            .SetValue(vm, (IReadOnlyList<Poi>)[MakePoi(1, 50.0, 19.0)]);
+
+        vm.SingleVisibleCollectionId.Should().BeNull("an active search suppresses single-collection scope");
+        vm.CollectionPlaceablePoiCount.Should().Be(0);
+    }
+
+    [Fact]
     public async Task ResetSearch_ClearsState_AndNavigatesHome()
     {
         var vm = CreateVm();

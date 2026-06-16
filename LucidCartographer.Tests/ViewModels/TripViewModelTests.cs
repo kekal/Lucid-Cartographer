@@ -47,7 +47,7 @@ public class TripViewModelTests
     }
 
     [Fact]
-    public async Task ToggleAvailable_RequiresSingleCollection_AndTwoPlaceable()
+    public async Task ToggleAvailable_RequiresSingleCollection_AndOnePlaceable()
     {
         var factory = SeedFactory(placeable: 2);
         await using var vm = CreateVm(factory);
@@ -55,11 +55,11 @@ public class TripViewModelTests
         await vm.LoadAsync(null, 5);
         vm.IsToggleAvailable.Should().BeFalse("no active collection");
 
-        await vm.LoadAsync(CollectionId, 1);
-        vm.IsToggleAvailable.Should().BeFalse("fewer than 2 placeable");
+        await vm.LoadAsync(CollectionId, 0);
+        vm.IsToggleAvailable.Should().BeFalse("an empty collection has nothing to route");
 
-        await vm.LoadAsync(CollectionId, 2);
-        vm.IsToggleAvailable.Should().BeTrue();
+        await vm.LoadAsync(CollectionId, 1);
+        vm.IsToggleAvailable.Should().BeTrue("a single placeable POI clears the ≥1 gate");
     }
 
     [Fact]
@@ -104,9 +104,9 @@ public class TripViewModelTests
     [Fact]
     public async Task Toggle_IsNoOp_WhenUnavailable()
     {
-        var factory = SeedFactory(placeable: 1);
+        var factory = SeedFactory(placeable: 0);
         await using var vm = CreateVm(factory);
-        await vm.LoadAsync(CollectionId, 1);
+        await vm.LoadAsync(CollectionId, 0);
 
         await vm.ToggleAsync();
 
@@ -151,32 +151,70 @@ public class TripViewModelTests
     }
 
     [Fact]
-    public async Task UpdatePlaceableCount_FlipsAvailability_WithoutDbRead()
+    public async Task IsToggleAvailable_True_WhenCollectionHasSinglePlaceable()
     {
-        var factory = SeedFactory(placeable: 2);
+        var factory = SeedFactory(placeable: 1);
         await using var vm = CreateVm(factory);
-        await vm.LoadAsync(CollectionId, 2);
-        vm.IsToggleAvailable.Should().BeTrue();
 
-        vm.UpdatePlaceableCount(1);
+        await vm.LoadAsync(CollectionId, 1);
 
-        vm.IsToggleAvailable.Should().BeFalse();
+        vm.IsToggleAvailable.Should().BeTrue("one placeable POI clears the ≥1 gate");
     }
 
-    // === [TRIP-GATE-01] Auto-disable below the â‰¥2 placeable gate ===
+    [Fact]
+    public async Task UpdatePlaceableCount_FlipsAvailability_WithoutDbRead()
+    {
+        var factory = SeedFactory(placeable: 1);
+        await using var vm = CreateVm(factory);
+        await vm.LoadAsync(CollectionId, 1);
+        vm.IsToggleAvailable.Should().BeTrue();
+
+        vm.UpdatePlaceableCount(0);
+        vm.IsToggleAvailable.Should().BeFalse("an empty collection drops below the ≥1 gate");
+
+        vm.UpdatePlaceableCount(1);
+        vm.IsToggleAvailable.Should().BeTrue();
+    }
+
+    // === [TRIP-GATE-01] Auto-disable below the ≥1 placeable gate ===
     // Only the membership-change signal (real add/remove, fired after the
-    // filtered set is refreshed) auto-disables â€” never the transient
-    // visible/filtered count fed to LoadAsync/UpdatePlaceableCount.
+    // filtered set is refreshed) auto-disables — never the transient
+    // count fed to LoadAsync/UpdatePlaceableCount.
 
     [Fact]
-    public async Task RefreshAfterMembershipChange_AutoDisables_WhenRemovalDropsBelowGate()
+    public async Task RefreshAfterMembershipChange_AutoDisables_WhenRemovalEmptiesCollection()
     {
         var factory = SeedFactory(placeable: 2);
         await using var vm = CreateVm(factory);
         await vm.LoadAsync(CollectionId, 2);
         await vm.ToggleAsync(); // on, seeds 1..2
 
-        // Remove a placeable POI, leaving a single stop.
+        // Remove every placeable POI, leaving an empty collection.
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var items = await db.PoiCollectionItems.Where(ci => ci.PoiCollectionId == CollectionId).ToListAsync();
+            db.PoiCollectionItems.RemoveRange(items);
+            await db.SaveChangesAsync();
+        }
+
+        await vm.RefreshAfterMembershipChangeAsync(0);
+
+        vm.IsTripViewEnabled.Should().BeFalse("a removal below the ≥1 gate auto-disables Trip View");
+        vm.StopOrders.Should().BeEmpty();
+        vm.Announcement.Should().Be(UiStrings.TripViewAutoDisabledAnnouncement);
+
+        await using var db2 = await factory.CreateDbContextAsync();
+        (await db2.PoiCollections.FirstAsync(c => c.Id == CollectionId)).TripViewEnabled.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RefreshAfterMembershipChange_StaysEnabled_WhenRemovalLeavesOnePlaceable()
+    {
+        var factory = SeedFactory(placeable: 2);
+        await using var vm = CreateVm(factory);
+        await vm.LoadAsync(CollectionId, 2);
+        await vm.ToggleAsync(); // on, seeds 1..2
+
         await using (var db = await factory.CreateDbContextAsync())
         {
             var item = await db.PoiCollectionItems.FirstAsync(ci => ci.PoiId == 2 && ci.PoiCollectionId == CollectionId);
@@ -186,33 +224,8 @@ public class TripViewModelTests
 
         await vm.RefreshAfterMembershipChangeAsync(1);
 
-        vm.IsTripViewEnabled.Should().BeFalse("a removal below the â‰¥2 gate auto-disables Trip View");
-        vm.StopOrders.Should().BeEmpty();
-        vm.Announcement.Should().Be(UiStrings.TripViewAutoDisabledAnnouncement);
-
-        await using var db2 = await factory.CreateDbContextAsync();
-        (await db2.PoiCollections.FirstAsync(c => c.Id == CollectionId)).TripViewEnabled.Should().BeFalse();
-    }
-
-    [Fact]
-    public async Task RefreshAfterMembershipChange_StaysEnabled_WhenRemovalLeavesTwoPlaceable()
-    {
-        var factory = SeedFactory(placeable: 3);
-        await using var vm = CreateVm(factory);
-        await vm.LoadAsync(CollectionId, 3);
-        await vm.ToggleAsync(); // on, seeds 1..3
-
-        await using (var db = await factory.CreateDbContextAsync())
-        {
-            var item = await db.PoiCollectionItems.FirstAsync(ci => ci.PoiId == 3 && ci.PoiCollectionId == CollectionId);
-            db.PoiCollectionItems.Remove(item);
-            await db.SaveChangesAsync();
-        }
-
-        await vm.RefreshAfterMembershipChangeAsync(2);
-
-        vm.IsTripViewEnabled.Should().BeTrue("two placeable stops still clear the â‰¥2 gate");
-        vm.StopOrders.Should().HaveCount(2, "the order re-compacts to the remaining stops");
+        vm.IsTripViewEnabled.Should().BeTrue("one placeable stop still clears the ≥1 gate");
+        vm.StopOrders.Should().HaveCount(1, "the order re-compacts to the remaining stop");
     }
 
     [Fact]

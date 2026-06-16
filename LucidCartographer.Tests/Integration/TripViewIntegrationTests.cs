@@ -6,7 +6,7 @@ namespace LucidCartographer.Tests.Integration;
 /// <summary>
 /// Desktop end-to-end coverage of the Trip View toggle/seed/persist/restore flow
 /// (Story 1.2). The sample GPX seeds one collection of 3 placeable POIs, so the
-/// ≥2-placeable gate is satisfied and the lone-visible-collection rule holds.
+/// ≥1-placeable gate is satisfied and the lone-visible-collection rule holds.
 /// </summary>
 [Collection("Integration")]
 public class TripViewIntegrationTests : IntegrationTestBase

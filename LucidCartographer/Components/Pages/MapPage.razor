@@ -584,7 +584,10 @@ else
     private async Task SyncTripAsync()
     {
         var colId = Vm.SingleVisibleCollectionId;
-        var count = Vm.PlaceablePoiCount;
+        // Gate on the collection's full placeable membership (viewport-independent),
+        // not the viewport-filtered count: Trip View shows the whole collection
+        // regardless of map state, so a pan that empties the view must not hide it.
+        var count = Vm.CollectionPlaceablePoiCount;
         if (!_tripScopeInit || colId != _tripCollectionId)
         {
             _tripScopeInit = true;
@@ -603,7 +606,7 @@ else
     // real add/remove, not on every state notification.
     private async Task OnMembershipChangedAsync()
     {
-        await TripVm.RefreshAfterMembershipChangeAsync(Vm.PlaceablePoiCount);
+        await TripVm.RefreshAfterMembershipChangeAsync(Vm.CollectionPlaceablePoiCount);
         await PushTripAsync();
     }
 
