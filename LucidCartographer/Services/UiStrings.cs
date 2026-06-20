@@ -255,6 +255,15 @@ public static class UiStrings
     public const string TripLegModePillTitle = "Set the travel mode for the leg departing {0}";
     public const string TripLegModeMenuAria = "Choose travel mode for the leg departing {0}";
 
+    // Trip View — bulk leg-mode selector (TRIP-BULKMODE-01). A header control that
+    // assigns one travel mode to ALL legs at once, with an overwrite toggle (default
+    // off = fill only the undefined Any/Air legs). Reuses the four mode names above.
+    public const string TripBulkModeLabel = "Set mode for all…";
+    public const string TripBulkModeAria = "Set travel mode for all legs";
+    public const string TripBulkModeMenuAria = "Choose a travel mode to apply to all legs";
+    public const string TripBulkModeOverwriteLabel = "Overwrite legs that already have a mode";
+    public const string TripBulkModeOverwriteAria = "Overwrite legs that already have a mode";
+
     // Trip View — manual Any/Air leg time (Story 2.2, TRIP-MANUAL-01). The numeric
     // minutes input shown only on Any/Air legs; entering a value carries
     // Fidelity.Manual and overrides the placeholder. {0} = POI name of the leg's

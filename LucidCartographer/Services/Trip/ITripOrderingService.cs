@@ -177,6 +177,23 @@ public interface ITripOrderingService
     Task SetOutgoingTravelModeAsync(int collectionId, int fromPoiId, string? mode, CancellationToken ct = default);
 
     /// <summary>
+    /// TRIP-BULKMODE-01: bulk sibling of <see cref="SetOutgoingTravelModeAsync"/> — assigns
+    /// ONE <paramref name="mode"/> to the <c>OutgoingTravelMode</c> of EVERY leg's From-stop
+    /// of the collection's trip in a single gated transaction (no per-leg round-trip). The
+    /// From-stop set mirrors <c>TripViewModel.BuildLegs</c> / the background service's
+    /// <c>DirectionalPairs</c>: every ordered placeable stop except a distinct Finish (which
+    /// departs no leg); on a Roundtrip the last stop is included (it departs the closing leg).
+    /// When <paramref name="overwriteExisting"/> is false, only legs currently unset
+    /// (null ≡ AnyAir, or the explicit AnyAir value) are changed; legs with an explicit mode
+    /// are left untouched. <paramref name="mode"/> must be <c>null</c> (≡ AnyAir) or one of
+    /// <see cref="Data.Entities.TravelMode.All"/>; any other value throws
+    /// <see cref="ArgumentException"/>. Does NOT change Stop Order, Start, or Finish. No-op for
+    /// fewer than two placeable stops, an absent collection, or when nothing actually changes.
+    /// Shared by the UI (TripViewModel) bulk control.
+    /// </summary>
+    Task SetAllOutgoingTravelModesAsync(int collectionId, string? mode, bool overwriteExisting, CancellationToken ct = default);
+
+    /// <summary>
     /// Reconciles the order after an arbitrary membership change: any placeable
     /// item that has no order yet (<c>OrderIndex == 0</c>) is appended after the
     /// existing Stops (by AddedDate, then PoiId), then the whole set is compacted

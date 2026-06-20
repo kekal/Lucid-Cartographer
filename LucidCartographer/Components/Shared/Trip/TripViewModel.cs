@@ -1447,6 +1447,48 @@ public sealed class TripViewModel(
         Notify();
     }
 
+    /// <summary>
+    /// TRIP-BULKMODE-01: assigns one travel mode to ALL of the trip's legs at once by
+    /// delegating to the bulk writer <see cref="ITripOrderingService.SetAllOutgoingTravelModesAsync"/>,
+    /// then refreshing projections. Mirrors <see cref="SetLegModeAsync"/>: a ground mode
+    /// (Walk/Drive/Cycle) signals the background compute trigger so every newly-grounded leg
+    /// computes; Any/Air raises no trigger (manual-only, FR-21). When <paramref name="overwriteExisting"/>
+    /// is false only the unset (Any/Air) legs change. One refresh + one Notify (NFR-2).
+    /// Guards: active collection + Trip View on. Presentational callers (the bulk selector)
+    /// raise this command only and never touch the service/DB (NFR1).
+    /// </summary>
+    public async Task SetAllLegsModeAsync(string mode, bool overwriteExisting)
+    {
+        if (ActiveCollectionId is not { } collectionId || !IsTripViewEnabled)
+        {
+            return;
+        }
+
+        try
+        {
+            await ordering.SetAllOutgoingTravelModesAsync(collectionId, mode, overwriteExisting, _cts.Token);
+            await RefreshProjectionsAsync(collectionId);
+
+            if (mode is Data.Entities.TravelMode.Walk
+                or Data.Entities.TravelMode.Drive
+                or Data.Entities.TravelMode.Cycle)
+            {
+                travelTimeTrigger.Signal();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to set all leg modes to {Mode} (overwrite={Overwrite}) in collection {CollectionId}", mode, overwriteExisting, collectionId);
+            return;
+        }
+
+        Notify();
+    }
+
     private async Task PersistTravelModeAsync(int collectionId, string mode)
     {
         await using var db = await factory.CreateDbContextAsync(_cts.Token);

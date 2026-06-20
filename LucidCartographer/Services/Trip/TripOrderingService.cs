@@ -291,6 +291,97 @@ public sealed class TripOrderingService(
             mode ?? "(null/AnyAir)", fromPoiId, collectionId);
     }
 
+    public async Task SetAllOutgoingTravelModesAsync(
+        int collectionId, string? mode, bool overwriteExisting, CancellationToken ct = default)
+    {
+        // TRIP-BULKMODE-01: bulk assignment of one mode to every leg's From-stop in a
+        // single gated transaction (NFR-5: no per-leg round-trip). Validate up front,
+        // identical rule to the single writer (SetOutgoingTravelModeAsync).
+        if (mode is not null && !TravelMode.IsValid(mode))
+        {
+            throw new ArgumentException(
+                $"'{mode}' is not a valid travel mode; expected null or one of {string.Join(", ", TravelMode.All)}.",
+                nameof(mode));
+        }
+
+        await using var db = await factory.CreateDbContextAsync(ct);
+
+        // The collection's Finish pin decides whether the last ordered stop is a leg
+        // From-stop: a distinct Finish makes an open path (the Finish departs no leg),
+        // while a Roundtrip closes back to the Start (the last stop departs the closing
+        // leg). Mirrors TripViewModel.BuildLegs / DirectionalPairs.
+        var collection = await db.PoiCollections
+            .AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == collectionId, ct);
+        if (collection is null)
+        {
+            return;
+        }
+
+        // Ordered placeable stops (Start pinned to OrderIndex 1, Finish to N), tracked
+        // for write. Same placeability predicate as the rest of the service.
+        var stops = await db.PoiCollectionItems
+            .Where(ci => ci.PoiCollectionId == collectionId && ci.OrderIndex > 0
+                && ci.Poi.Latitude != null && ci.Poi.Longitude != null)
+            .OrderBy(ci => ci.OrderIndex)
+            .ToListAsync(ct);
+
+        if (stops.Count < 2)
+        {
+            // Fewer than two placeable stops ⇒ no legs ⇒ nothing to assign.
+            return;
+        }
+
+        var finishIsDistinctStop = collection.FinishPoiId is { } fid
+            && fid != stops[0].PoiId
+            && stops.Any(s => s.PoiId == fid);
+
+        // From-stops: every leg's origin. On an open path the Finish (last) stop departs
+        // no leg and is excluded; on a Roundtrip the last stop departs the closing leg.
+        var fromStopCount = finishIsDistinctStop ? stops.Count - 1 : stops.Count;
+
+        var changed = false;
+        for (var i = 0; i < fromStopCount; i++)
+        {
+            var membership = stops[i];
+            // Overwrite-off: only fill the undefined Any/Air legs (null or the explicit
+            // AnyAir value). A leg with an explicit ground mode is left untouched.
+            var isUnset = membership.OutgoingTravelMode is null
+                || membership.OutgoingTravelMode == TravelMode.AnyAir;
+            if (!overwriteExisting && !isUnset)
+            {
+                continue;
+            }
+            if (membership.OutgoingTravelMode == mode)
+            {
+                continue;
+            }
+            membership.OutgoingTravelMode = mode;
+            changed = true;
+        }
+
+        if (!changed)
+        {
+            return;
+        }
+
+        // Setting a mode never reorders — a single gated write, NOT routed through
+        // SetOrderAsync (the order-reset rule does not apply).
+        await writeLock.Gate.WaitAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        finally
+        {
+            writeLock.Gate.Release();
+        }
+
+        logger.LogDebug(
+            "TRIP-BULKMODE-01: bulk outgoing travel mode {Mode} (overwrite={Overwrite}) written across {Count} From-stops in collection {CollectionId}",
+            mode ?? "(null/AnyAir)", overwriteExisting, fromStopCount, collectionId);
+    }
+
     private static int? MatrixIndexOf(IReadOnlyList<PlaceableStop> stops, int? poiId)
     {
         if (poiId is not { } id)

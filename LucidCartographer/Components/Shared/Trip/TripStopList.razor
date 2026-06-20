@@ -43,6 +43,11 @@
         @if (Vm.OrderedLegs.Count > 0)
         {
             <div class="flex items-center gap-1.5 flex-shrink-0">
+                @* TRIP-BULKMODE-01: assign a travel mode to ALL legs in one action. Sits
+                   first in the action row. NOT gated on IsAnyLegComputing (FR-13): it is the
+                   remedy for uncomputed/Any-Air legs, so it stays enabled exactly when the
+                   Sort/Recompute buttons below are disabled. *@
+                <BulkLegModeSelector Vm="Vm" />
                 @* TRIP-TSP-01 (Story 3.1, AR-6): explicit on-demand TSP-Sort, now a button.
                    On-demand only; disabled while legs compute so the matrix sorts over
                    settled travel times. *@
