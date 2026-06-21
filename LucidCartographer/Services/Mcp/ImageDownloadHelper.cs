@@ -108,23 +108,12 @@ public static class ImageDownloadHelper
                     $"URL did not return an image (content-type: {contentType ?? "none"}).", nameof(imageUrl));
             }
 
-            // Reject early on an honest oversized Content-Length…
             if (resp.Content.Headers.ContentLength is > MaxBytes)
             {
                 throw new ArgumentException(
                     $"Image exceeds the {MaxBytes / (1024 * 1024)} MB limit.", nameof(imageUrl));
             }
 
-            // …then cap while reading (don't trust Content-Length alone).
-            // With HttpCompletionOption.ResponseHeadersRead the 20s client timeout
-            // also covers the body read, so a slow/Slowloris host can fire it
-            // mid-stream — surfaced as OperationCanceledException (incl.
-            // TaskCanceledException) or an IOException wrapping it. Translate those
-            // to the documented ArgumentException, matching the GetAsync-phase catch.
-            // Genuine caller cancellation (ct.IsCancellationRequested) still
-            // propagates via the filter; the size-cap ArgumentException from
-            // ReadCappedAsync is not an OperationCanceledException/IOException, so it
-            // passes through untouched.
             byte[] bytes;
             try
             {
@@ -174,7 +163,6 @@ public static class ImageDownloadHelper
 
         if (image is null)
         {
-            // Clear.
             if (existing is not null)
             {
                 db.PoiImages.Remove(existing);

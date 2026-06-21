@@ -4,10 +4,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace LucidCartographer.Services.Operations;
 
-/// <summary>
-/// Executes set operations (subtract, intersect, union, dedup) on POI collections.
-/// Uses <see cref="IPoiMatcher"/> for POI comparison with URL pre-indexing for O(N+M) binary operations.
-/// </summary>
 public class SetOperationService(IDbContextFactory<AppDbContext> factory, IPoiMatcher matcher) : ISetOperationService
 {
     public async Task<OperationResult> ExecuteAsync(
@@ -39,11 +35,6 @@ public class SetOperationService(IDbContextFactory<AppDbContext> factory, IPoiMa
     {
         var poisB = await GetCollectionPois(db, collectionBId, cancellationToken);
 
-        // Matching runs directly against the candidate lists via
-        // PoiIdentity.AreSamePlace (name + proximity). The old URL-index
-        // optimisation is gone because URL is no longer part of the
-        // identity rule — two franchise branches at different coords
-        // must stay distinct.
         return operation switch
         {
             SetOperation.Subtract => ExecuteSubtract(poisA, poisB, toleranceMeters),
@@ -64,8 +55,7 @@ public class SetOperationService(IDbContextFactory<AppDbContext> factory, IPoiMa
     }
 
     /// <summary>
-    /// OPS-R06: Intersect merges B-side metadata into A-side POIs.
-    /// When A has a match in B, any fields that A is missing but B has are filled in.
+    /// Merges B-side metadata into A-side POIs where A is missing data.
     /// </summary>
     private OperationResult ExecuteIntersect(List<Poi> poisA, List<Poi> poisB, double toleranceMeters)
     {
@@ -86,9 +76,6 @@ public class SetOperationService(IDbContextFactory<AppDbContext> factory, IPoiMa
         };
     }
 
-    /// <summary>
-    /// Merges useful fields from B into A where A is missing data.
-    /// </summary>
     private static void MergeBSideData(Poi a, Poi b)
     {
         if (string.IsNullOrEmpty(a.Address) && !string.IsNullOrEmpty(b.Address))
@@ -137,13 +124,8 @@ public class SetOperationService(IDbContextFactory<AppDbContext> factory, IPoiMa
         }
     }
 
-    /// <summary>
-    /// OPS-R05: Deduplicates within A first, then adds unique items from B.
-    /// A true set union contains each unique element exactly once.
-    /// </summary>
     private OperationResult ExecuteUnion(List<Poi> poisA, List<Poi> poisB, double toleranceMeters)
     {
-        // Dedup within A first so the union result contains no internal duplicates.
         var dedupGroups = matcher.FindDuplicateGroups(poisA, toleranceMeters);
         var dupIdsInA = dedupGroups.SelectMany(g => g.Skip(1).Select(p => p.Id)).ToHashSet();
         var dedupedA = poisA.Where(p => !dupIdsInA.Contains(p.Id)).ToList();
@@ -170,16 +152,12 @@ public class SetOperationService(IDbContextFactory<AppDbContext> factory, IPoiMa
         };
     }
 
-    /// <summary>
-    /// Saves operation result as a new collection.
-    /// </summary>
     public async Task<PoiCollection> CommitResultAsync(
         List<Poi> pois,
         string name,
         string color = "#7c3aed",
         CancellationToken cancellationToken = default)
     {
-        // OPS-R14: Validate inputs
         ArgumentNullException.ThrowIfNull(pois);
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -189,10 +167,7 @@ public class SetOperationService(IDbContextFactory<AppDbContext> factory, IPoiMa
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
-        // Defence-in-depth: the supplied rows may be stale (e.g. a whole-DB
-        // dedup pass deleted a previewed Poi between the operation and the
-        // commit). Inserting a dangling PoiId would violate the FK to Poi.Id
-        // and abort the transaction, so only link ids that still exist.
+        // Guard against stale POI references deleted between operation and commit.
         var requestedIds = pois.Select(p => p.Id).Distinct().ToList();
         var existingIds = await db.Pois
             .AsNoTracking()
@@ -222,9 +197,6 @@ public class SetOperationService(IDbContextFactory<AppDbContext> factory, IPoiMa
         return collection;
     }
 
-    /// <summary>
-    /// OPS-R04: Filters out null navigation properties from orphaned FKs.
-    /// </summary>
     private static async Task<List<Poi>> GetCollectionPois(AppDbContext db, int collectionId, CancellationToken cancellationToken = default)
     {
         return await db.PoiCollectionItems

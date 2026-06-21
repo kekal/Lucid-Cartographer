@@ -8,14 +8,10 @@ using ModelContextProtocol.Server;
 namespace LucidCartographer.Services.Mcp;
 
 /// <summary>
-/// TRIP-MCP-01 (Story 3.2, AR-8/FR-16): MCP trip tools — read a collection's
-/// ordered Stops + computed Legs, assign the Stop Order, set Start/Finish, and set
-/// Dwell Time. Auto-discovered by <c>WithToolsFromAssembly()</c> and served by the
-/// existing authenticated <c>/mcp</c> endpoint (LAN → API key → OAuth) — no new
-/// unauthenticated surface. Every write delegates to <see cref="ITripOrderingService"/>
-/// (the single 1-based <c>OrderIndex</c> writer, AR-11): an MCP-assigned order
-/// persists identically to a manual drag and stays drag-editable. No business logic
-/// lives here.
+/// MCP trip tools — read a collection's ordered Stops and computed Legs, assign the Stop Order,
+/// set Start/Finish, and set Dwell Time. All writes delegate to <see cref="ITripOrderingService"/>
+/// (the sole writer of 1-based <c>OrderIndex</c>), ensuring MCP-assigned order persists like
+/// a manual drag and stays drag-editable. No business logic lives here.
 /// </summary>
 [McpServerToolType]
 public static class TripTools
@@ -48,9 +44,7 @@ public static class TripTools
             .Where(p => poiIds.Contains(p.Id))
             .Select(p => new { p.Id, p.Name })
             .ToDictionaryAsync(p => p.Id, p => p.Name, ct);
-        // TRIP-LEGMODE-01 (Story 3.6): extend the membership read to also pull each
-        // stop's OutgoingTravelMode (null ≡ AnyAir) — the From-stop's mode is the
-        // leg's mode, mirroring the VM (Story 3.2).
+        // Pull each stop's OutgoingTravelMode (null ≡ AnyAir); the From-stop's mode is the leg's mode.
         var members = await db.PoiCollectionItems.AsNoTracking()
             .Where(ci => ci.PoiCollectionId == collectionId && poiIds.Contains(ci.PoiId))
             .Select(ci => new { ci.PoiId, ci.DwellMinutes, ci.OutgoingTravelMode })
@@ -71,9 +65,7 @@ public static class TripTools
         var legDtos = new List<TripLegDto>();
         if (stops.Count >= 2)
         {
-            // TRIP-LEGMODE-01 (Story 3.6, NFR3): read the cache for the poi set across
-            // ALL modes (no single trip-wide WHERE TravelMode filter) and key it by the
-            // full directional (From, To, Mode) tuple, so each leg selects its own row.
+            // Read cache across ALL modes and key by (From, To, Mode) tuple so each leg selects its own row.
             var cached = await db.RouteSegments.AsNoTracking()
                 .Where(r => poiIds.Contains(r.FromPoiId) && poiIds.Contains(r.ToPoiId))
                 .ToListAsync(ct);
@@ -122,8 +114,7 @@ public static class TripTools
         [Description("All placeable Stop PoiIds in the desired visiting order.")] int[] orderedPoiIds,
         CancellationToken ct = default)
     {
-        // int[] (not IReadOnlyList<int>) so the MCP input schema reliably emits an
-        // array across clients; the service method accepts the IReadOnlyList<int> it implements.
+        // int[] for stable MCP schema emission across clients; service accepts IReadOnlyList<int>.
         await ordering.AssignOrderAsync(collectionId, orderedPoiIds, ct);
         return await GetTrip(ordering, dbFactory, collectionId, ct);
     }
@@ -219,12 +210,10 @@ public static class TripTools
         [Description("The travel mode: AnyAir, Drive, Walk, or Cycle.")] string travelMode,
         CancellationToken ct = default)
     {
-        // Sole-writer: validation (null|TravelMode.All) lives in the service and throws
-        // on invalid — let that surface to the MCP client as a tool error.
+        // Service (sole writer) validates; errors surface to MCP client as tool errors.
         await ordering.SetOutgoingTravelModeAsync(collectionId, fromPoiId, travelMode, ct);
 
-        // FR-21: a GROUND mode (Walk/Drive/Cycle) needs its leg time computed — wake the
-        // background compute. AnyAir is manual-only ⇒ no signal (no auto time).
+        // Ground modes need background time compute; AnyAir is manual-only (no auto signal).
         if (travelMode != TravelMode.AnyAir)
         {
             travelTimeTrigger.Signal();

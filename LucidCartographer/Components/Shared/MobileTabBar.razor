@@ -1,11 +1,6 @@
 @inject NavigationManager Nav
 
-@* Bottom tab bar for the mobile shell. Lives in the (static) MainLayout and is
-   shown only at phone widths via CSS. Plain route NavLinks, so navigation works
-   without interactivity. The active tab is colored and its icon filled. *@
-@* Uses a role="navigation" div rather than a <nav> tag so it does not collide
-   with the desktop header's <nav> in tests/selectors that target `nav a`; only
-   one of the two is ever visible (CSS media query). *@
+@* Mobile-only tab bar (shown via CSS); uses role="navigation" div instead of <nav> tag to avoid test selector collisions with the desktop header. *@
 <div class="m-tabbar" role="navigation" aria-label="Mobile navigation">
     @foreach (var t in Tabs)
     {

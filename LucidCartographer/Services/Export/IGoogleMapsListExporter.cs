@@ -1,9 +1,8 @@
 namespace LucidCartographer.Services.Export;
 
 /// <summary>
-/// Pushes places into a Google Maps Saved List via headful UI automation.
-/// Abstracts <see cref="GoogleMapsListExporter"/> so the export job pipeline can
-/// be unit-tested without launching a browser.
+/// Pushes places into a Google Maps Saved List. Abstraction enables unit-testing
+/// the export pipeline without launching a browser.
 /// </summary>
 public interface IGoogleMapsListExporter
 {

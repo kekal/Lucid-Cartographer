@@ -30,24 +30,11 @@ public sealed class TripViewModel(
     TravelTimeProgressService travelTimeProgress,
     IRouteSegmentInvalidationService routeSegmentInvalidation,
     ILogger<TripViewModel> logger,
-    // TRIP-OSRM-02 (Story 4.2, AC4): the active travel-time provider, read ONLY for its
-    // declared routing Attribution. OPTIONAL with a null default so the parameterless
-    // construction paths (unit/component tests that compose the VM by hand) keep working
-    // unchanged — DI still injects the registered provider in the app and the integration
-    // host (AddTripServices registers the haversine Mock, which declares null
-    // attribution). A null provider here simply means no routing attribution is surfaced.
     ITravelTimeProvider? travelTimeProvider = null) : IAsyncDisposable
 {
     /// <summary>
-    /// TRIP-OSRM-02 (Story 4.2, AC4): the active travel-time provider's routing-data
-    /// attribution HTML, or <c>null</c> when the provider's data is not licence-bound
-    /// (the haversine Mock) or no provider was supplied. The page pushes it to Leaflet's
-    /// attribution control once after map init so an OSM-based routing provider (OSRM)
-    /// surfaces its OSM/ODbL obligation on top of the base tile attribution (NFR8); under
-    /// the default Mock it is null ⇒ nothing is added. Surfaced on the VM (rather than the
-    /// page sniffing the provider/config) to keep the Component → ViewModel → Service
-    /// layering, and read off <see cref="ITravelTimeProvider.Attribution"/> — the data
-    /// source declares its own licence.
+    /// The active travel-time provider's routing-data attribution HTML, or null if the provider
+    /// is not licence-bound (haversine Mock) or not supplied.
     /// </summary>
     public string? RoutingAttributionHtml => travelTimeProvider?.Attribution;
 
@@ -57,16 +44,11 @@ public sealed class TripViewModel(
     private readonly CancellationTokenSource _cts = new();
     private bool _disposed;
 
-    // TRIP-TRAVELTIME-01: subscription to the background compute progress. When
-    // the pending count changes (a leg just landed in the cache), re-read the
-    // projections off the circuit thread and Notify — never poll, never block.
     private IDisposable? _progressSubscription;
 
     public event Action? StateChanged;
 
     private void Notify() => StateChanged?.Invoke();
-
-    // --- State ---
 
     /// <summary>The collection a Trip is scoped to, or null when none is in scope.</summary>
     public int? ActiveCollectionId { get; private set; }
@@ -159,108 +141,59 @@ public sealed class TripViewModel(
     public IReadOnlyList<TripStop> OrderedStops { get; private set; } = [];
 
     /// <summary>
-    /// Full-membership stop-list rows: every placeable stop (carrying its
-    /// presented routed number, contiguous 1..M) followed by every unplaceable
-    /// POI (no routed number — the "Not placeable" treatment). Unplaceable POIs
-    /// are kept in the collection and in this list but excluded from
-    /// <see cref="OrderedStops"/>/<see cref="OrderedLegs"/>/<see cref="StopOrders"/>
-    /// (markers, legs, routing). Empty when Trip View is off.
-    /// [TRIP-PLACE-04][TRIP-ORDER-UNPLACE-01]
+    /// Full-membership stop-list rows: every placeable stop (with its routed number,
+    /// contiguous 1..M) followed by every unplaceable POI ("Not placeable" treatment).
+    /// Unplaceable POIs excluded from markers, legs, routing. Empty when Trip View is off.
     /// </summary>
     public IReadOnlyList<TripStopRow> StopRows { get; private set; } = [];
 
     /// <summary>
     /// Straight connecting legs between consecutive placeable stops, plus the
-    /// closing leg back to the Start on a Roundtrip (no distinct Finish). Empty
-    /// when Trip View is off or fewer than two placeable stops exist. Every leg
-    /// is non-Measured in Phase 1 (TRIP-LEG-01).
+    /// closing leg back to Start on a Roundtrip (no distinct Finish). Empty
+    /// when Trip View is off or fewer than two placeable stops exist.
     /// </summary>
     public IReadOnlyList<TripLeg> OrderedLegs { get; private set; } = [];
 
     /// <summary>
-    /// TRIP-TRAVELTIME-01 (AC5): the trip's total travel time in seconds — the Σ
-    /// of every leg's <see cref="TripLeg.DurationSeconds"/> — or <c>null</c> when
-    /// any leg is uncomputed (no cache row yet). A null total renders as an
-    /// em-dash so the UI never presents false precision over a partial trip.
+    /// Trip's total travel time in seconds (sum of all legs' durations), or null
+    /// when any leg is uncomputed. Null total renders as em-dash to avoid false precision.
     /// </summary>
     public int? TotalTravelTimeSeconds { get; private set; }
 
-    /// <summary>
-    /// TRIP-TRAVELTIME-01: true while at least one leg has no cache row yet, so
-    /// the UI can show the per-leg / total computing state via aria-live.
-    /// </summary>
+    /// <summary>True when at least one leg has no cache row yet (computing state).</summary>
     public bool IsAnyLegComputing { get; private set; }
 
     /// <summary>
-    /// TRIP-DEGRADE-01 (Story 2.3, AC2): true when any current leg is backed by
-    /// the provider-down straight-line fallback (its <see cref="RouteSegment.Source"/>
-    /// is <see cref="TravelTimeSource.EstimatedFallback"/>). Drives the honest
-    /// "couldn't reach the routing engine — showing straight-line estimates" note
-    /// on both surfaces. Cleared automatically once no fallback legs remain (a
-    /// later successful recompute replaces the row), via the existing refresh path
-    /// — no polling. A normal Mock-Estimated leg does NOT trip this.
+    /// True when any leg is backed by provider-down fallback (EstimatedFallback source).
+    /// Distinct from mock-Estimated legs, which do not trip this.
     /// </summary>
     public bool IsShowingApproximateEstimates => OrderedLegs.Any(l => l.IsFallback);
 
     /// <summary>
-    /// Story 2.4 (FR-8/10, RD11): true on a default deployment that produces
-    /// straight-line estimates because NO measured provider is configured — i.e. the
-    /// injected provider is null or the haversine Mock (its
-    /// <see cref="ITravelTimeProvider.Source"/> is not <see cref="TravelTimeSource.Osrm"/>)
-    /// AND the trip currently has at least one NORMALLY Estimated leg (a leg whose
-    /// <see cref="TripLeg.Fidelity"/> is <see cref="Data.Entities.Fidelity.Estimated"/>
-    /// and which is NOT a provider-down fallback, <see cref="TripLeg.IsFallback"/>).
-    /// Drives the quiet "enable OSRM for measured road times" recommendation note.
-    ///
-    /// Deliberately DISTINCT from <see cref="IsShowingApproximateEstimates"/>: that
-    /// covers the engine-unreachable FALLBACK state ("we tried to measure and
-    /// couldn't"), keyed on <see cref="TripLeg.IsFallback"/> legs; this covers the
-    /// normal Mock-Estimated state and explicitly EXCLUDES fallback legs, so the two
-    /// notes never describe the same leg. False when the provider is OSRM, when there
-    /// are no legs, and when every leg is Any/Air-Placeholder, Manual, Measured, or
-    /// only a fallback estimate.
+    /// True when no measured provider is configured (null/haversine Mock) AND the trip has
+    /// at least one normally-Estimated leg (not a fallback). Distinct from fallback estimates
+    /// (provider-down); the two notes describe different states.
     /// </summary>
     public bool RecommendsOsrm =>
         travelTimeProvider?.Source != TravelTimeSource.Osrm
         && OrderedLegs.Any(l => l.Fidelity == Data.Entities.Fidelity.Estimated && !l.IsFallback);
 
     /// <summary>
-    /// TRIP-TIMELINE-01 (Story 2.6): the honest itinerary timeline — per-stop arrivals
-    /// (relative offset always, wall-clock only with a start time), the finish/return
-    /// readout, the whole-trip total (travel + every dwell) and the soft budget-overrun
-    /// flag. Recomputed in both refresh paths from the already-loaded stops/dwell/legs +
-    /// the collection's TripStartTime/TimeBudgetMinutes. <see cref="ItineraryTimelineResult.Empty"/>
-    /// when Trip View is off or fewer than two placeable stops exist.
+    /// Itinerary timeline with per-stop arrivals, finish readout, whole-trip total (travel + dwell),
+    /// and soft budget-overrun flag. Empty when Trip View is off or fewer than two placeable stops.
     /// </summary>
     public ItineraryTimelineResult Timeline { get; private set; } = ItineraryTimelineResult.Empty;
 
-    /// <summary>
-    /// TRIP-TIMELINE-01: the active collection's persisted wall-clock start time, or null
-    /// ⇒ relative offsets only. Drives the header start-time input's active value.
-    /// </summary>
+    /// <summary>Active collection's persisted wall-clock start time, or null for relative offsets only.</summary>
     public DateTime? TripStartTime { get; private set; }
 
-    /// <summary>
-    /// TRIP-TIMELINE-01: the active collection's persisted soft time budget in minutes, or
-    /// null ⇒ no overrun flag is ever shown. Drives the header budget input's active value.
-    /// </summary>
+    /// <summary>Active collection's persisted soft time budget in minutes, or null for no overrun flag.</summary>
     public int? TimeBudgetMinutes { get; private set; }
 
-    /// <summary>Localized on/off text for the aria-live announcement region; null until first toggle.</summary>
     public string? Announcement { get; private set; }
 
-    /// <summary>
-    /// TRIP-TRAVELMODE-01: the active collection's persisted travel mode (one of
-    /// <see cref="TravelMode"/>; defaults <see cref="TravelMode.AnyAir"/>). Drives
-    /// the segmented selector's active segment and gates the per-leg manual entry
-    /// (only shown under Any/Air). Cleared (back to AnyAir) when projections clear.
-    /// </summary>
+    /// <summary>Active collection's persisted travel mode (defaults AnyAir).</summary>
     public string TravelMode { get; private set; } = Data.Entities.TravelMode.AnyAir;
-
-    // TRIP-SELECT-01: bidirectional list ↔ map selection. A single transient
-    // (never persisted) selection that both surfaces read and write through
-    // SelectStop. Independent of MapPageViewModel.SelectedPoiId (the non-trip
-    // POI-detail selection) — turning Trip View off restores that untouched.
 
     /// <summary>The currently-selected Stop's PoiId, or null when nothing is selected.</summary>
     public int? SelectedStopPoiId { get; private set; }
@@ -272,14 +205,11 @@ public sealed class TripViewModel(
     public TripSelectionSource LastSelectionSource { get; private set; }
 
     /// <summary>
-    /// Monotonic counter bumped on every <see cref="SelectStop"/> invocation — even an
-    /// idempotent re-select of the already-selected Stop. Lets the host distinguish a
-    /// genuine (re-)selection from unrelated <see cref="StateChanged"/> notifications, so
-    /// re-tapping the current row can still re-pan its marker into view (TRIP-SELECT-03).
+    /// Monotonic counter bumped on every SelectStop invocation, including idempotent re-selects.
+    /// Lets the host distinguish a genuine selection from unrelated StateChanged notifications.
     /// </summary>
     public long SelectionTick { get; private set; }
 
-    /// <summary>Localized "Selected stop N: name" text for the aria-live region; null until first select.</summary>
     public string? SelectionAnnouncement { get; private set; }
 
     /// <summary>
@@ -291,17 +221,13 @@ public sealed class TripViewModel(
     /// </summary>
     public void SelectStop(int? poiId, TripSelectionSource source = TripSelectionSource.List)
     {
-        // A selection is only meaningful while Trip View is on; ignore otherwise
-        // so a stray call can't leave a stale selection on a plain collection.
+        // A selection is only meaningful while Trip View is on; ignore otherwise.
         if (!IsTripViewEnabled)
         {
             return;
         }
 
-        // [TRIP-PLACE-04] Only placeable stops are selectable — an unplaceable
-        // row has no marker to pan to, so a selection of it is meaningless.
-        // (The row components don't wire selection on unplaceable rows; this
-        // guard keeps the VM honest against any other caller.)
+        // Only placeable stops are selectable — unplaceable rows have no marker.
         if (poiId is { } requested && OrderedStops.All(s => s.PoiId != requested))
         {
             return;
@@ -310,8 +236,6 @@ public sealed class TripViewModel(
         SelectedStopPoiId = poiId;
         SelectedStop = poiId is { } id ? OrderedStops.FirstOrDefault(s => s.PoiId == id) : null;
         LastSelectionSource = source;
-        // Bump even on an idempotent re-select so the host re-runs the directional
-        // follow-up (re-pan a List selection whose marker the user has scrolled away).
         SelectionTick++;
         SelectionAnnouncement = SelectedStop is { } s
             ? string.Format(System.Globalization.CultureInfo.CurrentCulture,
@@ -320,24 +244,12 @@ public sealed class TripViewModel(
         Notify();
     }
 
-    // --- Stop reorder (Story 1.5) ---
-
-    // TRIP-ORDER-03: drag and keyboard both surface here and delegate to the
-    // single OrderIndex writer (ITripOrderingService.ReorderStopAsync, AR-11).
-    // The VM never mutates OrderIndex itself; after a successful move it
-    // re-reads the projections and raises StateChanged, which the host page
-    // already turns into the incremental Story-1.3 leg redraw (no full reload).
-
     /// <summary>
     /// Localized "name moved to stop X of Y" text for the reorder aria-live
     /// region; null until the first successful move. Not set on no-op moves.
     /// </summary>
     public string? LastReorderAnnouncement { get; private set; }
 
-    /// <summary>
-    /// TRIP-TSP-01 (Story 3.1): localized "stops sorted into travel order" text for
-    /// the aria-live region after a successful TSP-Sort; null until the first sort.
-    /// </summary>
     public string? LastSortAnnouncement { get; private set; }
 
     /// <summary>
@@ -430,16 +342,7 @@ public sealed class TripViewModel(
         Notify();
     }
 
-    // --- Start/Finish designation (Story 1.7) ---
-
-    // TRIP-STARTFINISH-01: the four designation intents delegate to the single
-    // ordering write path (ITripOrderingService.Set/Clear Start/Finish, AR-11) —
-    // the VM never writes StartPoiId/FinishPoiId or OrderIndex itself. After a
-    // successful change it re-reads the projections (stops, rows, legs — the
-    // closing-leg presence recomputes in BuildLegs) and raises StateChanged, which
-    // the host page turns into the existing incremental Story-1.3 redraw.
-
-    /// <summary>The PoiId pinned as Start (Order 1), or null. Read in RefreshProjections.</summary>
+    /// <summary>The PoiId pinned as Start (Order 1), or null.</summary>
     public int? StartPoiId { get; private set; }
 
     /// <summary>The PoiId pinned as Finish (Order N), or null ⇒ Roundtrip.</summary>
@@ -458,20 +361,12 @@ public sealed class TripViewModel(
         : poiId == FinishPoiId ? TripStopRole.Finish
         : TripStopRole.None;
 
-    /// <summary>
-    /// Whether the Stop may be designated Start. False on the current Finish —
-    /// a stop cannot be both (AC-6 rejection surfaced as a disabled control).
-    /// </summary>
+    /// <summary>Whether the Stop may be designated Start. False on the current Finish.</summary>
     public bool CanSetStart(int poiId) => poiId != FinishPoiId;
 
     /// <summary>Whether the Stop may be designated Finish. False on the current Start.</summary>
     public bool CanSetFinish(int poiId) => poiId != StartPoiId;
 
-    /// <summary>
-    /// Localized designation/shape announcement for the aria-live region
-    /// ("X set as start", "Open path — ends at X", "Roundtrip — returns to
-    /// start"); null until the first designation change.
-    /// </summary>
     public string? StartFinishAnnouncement { get; private set; }
 
     /// <summary>Designates the Stop as Start (pinned to Order 1).</summary>
@@ -545,12 +440,8 @@ public sealed class TripViewModel(
         Notify();
     }
 
-    // --- Lifecycle / loading ---
-
     /// <summary>
     /// Sets the active-collection scope and restores persisted Trip View state.
-    /// Called by the host page after collections load and whenever the visible
-    /// set or its placeable count changes.
     /// </summary>
     public async Task LoadAsync(int? collectionId, int placeableCount)
     {
@@ -561,8 +452,6 @@ public sealed class TripViewModel(
         {
             IsTripViewEnabled = false;
             ClearProjections();
-            // Story 1.4 (AC3): no single collection in scope (e.g. multi-collection)
-            // ⇒ no forced order on the plain list.
             CanonicalStopOrder = NoStops;
             Notify();
             return;
@@ -571,19 +460,9 @@ public sealed class TripViewModel(
         try
         {
             IsTripViewEnabled = await ReadTripViewEnabledAsync(collectionId.Value);
-            // Story 1.4 (FR-4): the canonical order lives on the entity regardless
-            // of the Trip View toggle, so cache it here for BOTH branches — when
-            // Trip View is ON, RefreshProjectionsAsync refreshes it again (cheap,
-            // idempotent); when OFF, this is the only populate point so the plain
-            // list still renders in the persisted Stop Order (AC2).
             await RefreshCanonicalStopOrderAsync();
             if (IsTripViewEnabled)
             {
-                // Reopening a Trip-enabled collection: heal any Stop Order drift
-                // from membership changes made while it was last viewed/off, so the
-                // restored badges are contiguous and cover every placeable POI.
-                // Idempotent — only writes when the order actually changed.
-                // [Review][Patch]
                 await ordering.ReconcileOrderAsync(collectionId.Value, _cts.Token);
                 await RefreshProjectionsAsync(collectionId.Value);
             }
@@ -606,15 +485,7 @@ public sealed class TripViewModel(
         Notify();
     }
 
-    /// <summary>
-    /// Updates only the placeable count without re-reading persisted state and
-    /// re-evaluates the availability gate. Does NOT auto-disable Trip View: the
-    /// count can transiently read 0 (mid-load, or as a search narrows the visible
-    /// set toward a non-single-collection scope), so acting on a dip here would
-    /// persist Trip View off on a reopen or search. The genuine "content dropped
-    /// below the gate" signal is a membership change — see
-    /// <see cref="RefreshAfterMembershipChangeAsync"/>.
-    /// </summary>
+    /// <summary>Updates only the placeable count without re-reading persisted state.</summary>
     public void UpdatePlaceableCount(int placeableCount)
     {
         if (PlaceableCount == placeableCount)
@@ -627,13 +498,8 @@ public sealed class TripViewModel(
     }
 
     /// <summary>
-    /// [TRIP-GATE-01] When the active collection falls below the ≥1-placeable
-    /// availability gate (UX-DR1) while Trip View is on — i.e. the last placeable
-    /// member is removed — turn Trip View off and persist the flag, otherwise the
-    /// overlays (badges, legs, Start/Finish controls) would strand with the toggle
-    /// itself gone, leaving no way to dismiss them. Shares the same threshold as
-    /// <see cref="IsToggleAvailable"/> (one UX-DR1 gate). Returns true when it
-    /// disabled the view. Caller raises <see cref="StateChanged"/>.
+    /// Auto-disables Trip View when the collection falls below the ≥1-placeable
+    /// availability gate. Returns true when disabled. Caller raises StateChanged.
     /// </summary>
     private async Task<bool> AutoDisableBelowGateAsync()
     {
@@ -653,8 +519,6 @@ public sealed class TripViewModel(
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to persist Trip View off below the placeable gate for collection {CollectionId}", collectionId);
-            // Fall through: still drop the in-memory overlays so nothing is
-            // stranded; the next LoadAsync re-applies the gate against the flag.
         }
 
         IsTripViewEnabled = false;
@@ -687,11 +551,6 @@ public sealed class TripViewModel(
                 }
                 else
                 {
-                    // Already seeded in a prior session — heal any drift from
-                    // membership changes made while Trip View was off (removals
-                    // leave gaps, new placeable POIs have no order) before we
-                    // surface the badges. Idempotent: writes only if changed.
-                    // [Review][Patch]
                     await ordering.ReconcileOrderAsync(collectionId, _cts.Token);
                 }
             }
@@ -723,30 +582,17 @@ public sealed class TripViewModel(
         Notify();
     }
 
-    /// <summary>
-    /// Called by the host page after a membership mutation (POI added/removed).
-    /// When Trip View is on for the active collection, reconciles the Stop Order
-    /// (append new placeable Stops, re-compact after removals) and refreshes the
-    /// badge projection.
-    /// </summary>
+    /// <summary>Called after a membership mutation. Reconciles Stop Order and refreshes projections when Trip View is on.</summary>
     public async Task RefreshAfterMembershipChangeAsync(int placeableCount)
     {
         PlaceableCount = placeableCount;
 
         if (ActiveCollectionId is not { } collectionId || !IsTripViewEnabled)
         {
-            // FR-4: while Trip View is OFF, no reorder/reconcile runs, so surviving
-            // members' OrderIndex values don't change — CanonicalStopOrder stays valid
-            // (a removed POI's stale map entry simply won't appear in FilteredPois, and
-            // an added POI gets OrderIndex 0 ⇒ sorts after as a non-member). If a future
-            // change ever reconciles order while OFF, refresh the canonical cache here.
             Notify();
             return;
         }
 
-        // [TRIP-GATE-01] A removal / un-enrichment that empties the collection's
-        // placeable membership (drops below the ≥1 gate) auto-disables Trip View
-        // rather than stranding overlays the user can no longer toggle off.
         if (await AutoDisableBelowGateAsync())
         {
             Notify();
@@ -770,14 +616,10 @@ public sealed class TripViewModel(
         Notify();
     }
 
-    // --- Stop Order projections (badges + legs + panel rows) ---
-
     /// <summary>
-    /// Story 1.4 (FR-4): refreshes the cached <see cref="CanonicalStopOrder"/> from
-    /// the persisted entity order, INDEPENDENT of <see cref="IsTripViewEnabled"/>.
-    /// Empty when no single collection is in scope (<see cref="ActiveCollectionId"/>
-    /// is null) or the collection has no explicit order. Called from every async
-    /// load/refresh/reorder path so the plain list's cached order tracks the entity.
+    /// Refreshes the cached CanonicalStopOrder from the persisted entity order,
+    /// independent of IsTripViewEnabled. Empty when no single collection is in scope
+    /// or the collection has no explicit order.
     /// </summary>
     private async Task RefreshCanonicalStopOrderAsync()
     {
@@ -788,8 +630,6 @@ public sealed class TripViewModel(
         }
 
         var order = await ordering.GetStopOrderAsync(collectionId, _cts.Token);
-        // GetStopOrderAsync returns only placeable, ordered items; an empty map
-        // (never-ordered collection) leaves the plain list in its default sort (AC3).
         CanonicalStopOrder = order.Count == 0 ? NoStops : order;
     }
 
@@ -799,28 +639,15 @@ public sealed class TripViewModel(
         OrderedStops = [];
         StopRows = [];
         OrderedLegs = [];
-        // TRIP-TRAVELTIME-01: travel-time totals are scoped to an enabled Trip.
         TotalTravelTimeSeconds = null;
         IsAnyLegComputing = false;
-        // TRIP-TIMELINE-01 (Story 2.6): the timeline + its inputs are read state scoped to
-        // an enabled Trip (the persisted TripStartTime/TimeBudgetMinutes are untouched) —
-        // reset the surfaced values alongside the projections.
         Timeline = ItineraryTimelineResult.Empty;
         TripStartTime = null;
         TimeBudgetMinutes = null;
-        // TRIP-TRAVELMODE-01: the surfaced mode is read state scoped to an enabled
-        // Trip (the persisted PoiCollection.TravelMode is untouched) — reset the
-        // selector's active segment to the default alongside the projections.
         TravelMode = Data.Entities.TravelMode.AnyAir;
-        // TRIP-SELECT-01: selection is transient and only valid while Trip View
-        // is on — drop it (and its announcement) whenever the projections clear
-        // so toggling off never leaves a stale SelectedStopPoiId (AC4).
         SelectedStopPoiId = null;
         SelectedStop = null;
         SelectionAnnouncement = null;
-        // TRIP-STARTFINISH-01: the pins are read state scoped to an enabled Trip
-        // (the persisted StartPoiId/FinishPoiId are untouched) — clear the
-        // surfaced values and the stale announcement alongside the projections.
         StartPoiId = null;
         FinishPoiId = null;
         StartFinishAnnouncement = null;
@@ -899,22 +726,9 @@ public sealed class TripViewModel(
     }
 
     /// <summary>
-    /// Reads the active collection's FULL membership in one pass and splits it
-    /// through the canonical <see cref="StopPlaceability"/> predicate
-    /// ([TRIP-PLACE-01]) into:
-    /// <list type="bullet">
-    /// <item>the placeable, ordered stops (OrderIndex &gt; 0, both coordinates
-    /// non-null) — the only inputs to markers, legs and routing
-    /// ([TRIP-PLACE-02]/[TRIP-PLACE-03]); and</item>
-    /// <item>the stop-list rows over everything: placeable rows first (with the
-    /// presented routed number), then the unplaceable POIs (kept visible with
-    /// the "Not placeable" treatment, never silently dropped — UX-DR10).</item>
-    /// </list>
-    /// [TRIP-ORDER-UNPLACE-01] Stored <c>OrderIndex</c> (written only by
-    /// TripOrderingService over the placeable membership; unplaceable items hold
-    /// 0 = "not a stop") is read, never written, here. The user-facing routed
-    /// number is recomputed contiguously 1..M over the placeable subset so the
-    /// presented badges can never show a gap, whatever the stored values are.
+    /// Reads the active collection's full membership and splits it into placeable
+    /// ordered stops (markers, legs, routing) and stop-list rows (placeable first, then
+    /// unplaceable "Not placeable" items). Routed numbers recomputed contiguously 1..M.
     /// </summary>
     private async Task<(IReadOnlyList<TripStop> Stops, IReadOnlyList<TripStopRow> Rows)> ReadStopsAndRowsAsync(
         int collectionId, int? startPoiId, int? finishPoiId)
@@ -931,16 +745,8 @@ public sealed class TripViewModel(
                 ci.Poi.Latitude,
                 ci.Poi.Longitude,
                 ci.Poi.AddedDate,
-                // TRIP-DWELL-01 (Story 2.5): carry the per-membership dwell minutes.
                 ci.DwellMinutes,
-                // TRIP-LEGMODE-01 (Story 3.2): per-leg outgoing travel mode (null ≡
-                // AnyAir) for the leg leaving this stop — BuildLegs sets each leg's Mode
-                // and its (From, To, Mode) cache key from it, NOT one trip-wide mode.
                 ci.OutgoingTravelMode,
-                // Story 1.2 (FR-2): the Name-column + Actions presentation fields,
-                // read from the already-loaded Poi (no extra round-trip, no new ctor
-                // dependency). Address backs the sub-line; the enrichment flags pick
-                // the state icon; GoogleMapsUrl/Category feed PoiUrlHelper below.
                 ci.Poi.Address,
                 ci.Poi.IsEnriched,
                 ci.Poi.EnrichmentNeedsManualUrl,
@@ -962,14 +768,9 @@ public sealed class TripViewModel(
                 r.Longitude!.Value,
                 r.PoiId == startPoiId,
                 r.PoiId == finishPoiId,
-                // TRIP-LEGMODE-01 (Story 3.2): carry the per-leg outgoing mode (null ≡ AnyAir).
                 r.OutgoingTravelMode))
             .ToList();
 
-        // Story 1.2 (FR-2): per-PoiId presentation fields for the Name column +
-        // Actions. The Google Maps URL is resolved HERE (projection edge) via the
-        // shared PoiUrlHelper over a lightweight Poi carrying only the fields the
-        // helper reads — keeping the component free of Poi/helper logic (NFR1).
         var presentationByPoiId = members.ToDictionary(
             r => r.PoiId,
             r => (
@@ -984,16 +785,10 @@ public sealed class TripViewModel(
                     GoogleMapsUrl = r.GoogleMapsUrl,
                 })));
 
-        // Unplaceable rows trail the routed stops in a stable, deterministic
-        // order (AddedDate, then PoiId — the same tie-break the ordering service
-        // uses). They carry no routed number. [TRIP-PLACE-04]
         var unplaceable = members
             .Where(r => !StopPlaceability.IsPlaceable(r.Latitude, r.Longitude))
             .OrderBy(r => r.AddedDate)
             .ThenBy(r => r.PoiId)
-            // TRIP-DWELL-01: an unplaceable stop still carries its membership dwell.
-            // Story 1.2: it also carries the Name-column presentation fields (address,
-            // enrichment) even though it renders the "Not placeable" treatment.
             .Select(r =>
             {
                 var p = presentationByPoiId[r.PoiId];
@@ -1027,10 +822,8 @@ public sealed class TripViewModel(
     }
 
     /// <summary>
-    /// TRIP-TRAVELTIME-01 / TRIP-TIMELINE-01: the collection's persisted Trip settings —
-    /// the travel mode (entity default AnyAir) and the timeline inputs (TripStartTime,
-    /// TimeBudgetMinutes) — read in one pass so the timeline recompute adds no extra DB
-    /// round-trip beyond the pre-existing mode read.
+    /// Reads the collection's persisted Trip settings (travel mode and timeline inputs)
+    /// in one pass to avoid extra DB round-trips.
     /// </summary>
     private async Task<(string TravelMode, DateTime? TripStartTime, int? BudgetMinutes)> ReadTripSettingsAsync(
         int collectionId)
@@ -1044,14 +837,8 @@ public sealed class TripViewModel(
     }
 
     /// <summary>
-    /// TRIP-TRAVELTIME-01 / TRIP-LEGMODE-01 (Story 3.2): reads the cached
-    /// <see cref="RouteSegment"/> rows for this collection's stops keyed by the FULL
-    /// directional <c>(From, To, Mode)</c> tuple (TRIP-CACHE-01), so legs that travel
-    /// under different per-leg modes select different cache rows. Each leg's mode comes
-    /// from its From-stop's <c>OutgoingTravelMode</c> (null ≡ AnyAir) — NOT one trip-wide
-    /// mode — so this reads every RouteSegment row for the collection's poi set across
-    /// ALL modes and lets <see cref="MakeLeg"/> select by the leg's own <c>(From,To,Mode)</c>
-    /// key. (An Any/Air leg has no ground cache row ⇒ null duration ⇒ "—".)
+    /// Reads cached RouteSegment rows for this collection's stops, keyed by directional
+    /// (From, To, Mode) tuple. Legs select their own cache rows by mode.
     /// </summary>
     private async Task<IReadOnlyDictionary<(int From, int To, string Mode), RouteSegment>> ReadRouteSegmentsAsync(
         int collectionId)
@@ -1081,36 +868,20 @@ public sealed class TripViewModel(
     private static readonly IReadOnlyDictionary<(int From, int To, string Mode), RouteSegment> EmptyCache =
         new ReadOnlyDictionary<(int, int, string), RouteSegment>(new Dictionary<(int, int, string), RouteSegment>());
 
-    /// <summary>
-    /// TRIP-TRAVELTIME-01: idempotently subscribes to the background compute
-    /// progress. On a change (the pending count dropped because a leg landed in
-    /// the cache) it re-reads the projections off the circuit thread via
-    /// <see cref="Notify"/>'s host-driven redraw path — no polling, no blocking.
-    /// </summary>
+    /// <summary>Idempotently subscribes to background compute progress changes to re-read projections.</summary>
     private void EnsureProgressSubscription()
     {
-        // Skip(1): Changes is a BehaviorSubject that replays its current value on
-        // subscribe. That initial replay is not a real progress event — reacting
-        // to it would race a fire-and-forget leg rebuild against the projection
-        // refresh that just ran. Only subsequent changes (a leg landed in the
-        // cache) should trigger a re-read.
         _progressSubscription ??= System.Reactive.Linq.Observable
             .Skip(travelTimeProgress.Changes, 1)
             .Subscribe(onNext: _ => RefreshLegsFromCacheFireAndForget());
     }
 
-    // Fire-and-forget bridge: the Rx subscription is synchronous, so kick the
-    // async cache re-read without awaiting (errors are logged inside).
     private void RefreshLegsFromCacheFireAndForget()
     {
         _ = RefreshLegsFromCacheAsync();
     }
 
-    /// <summary>
-    /// TRIP-TRAVELTIME-01: re-reads only the cached travel times for the current
-    /// stops and rebuilds the legs + total, then Notifies. Called when the
-    /// background service reports progress; a no-op when Trip View is off.
-    /// </summary>
+    /// <summary>Re-reads cached travel times and rebuilds legs + total on progress updates.</summary>
     private async Task RefreshLegsFromCacheAsync()
     {
         if (_disposed || ActiveCollectionId is not { } collectionId || !IsTripViewEnabled)
@@ -1120,10 +891,6 @@ public sealed class TripViewModel(
 
         try
         {
-            // TRIP-TIMELINE-01: re-read the timeline inputs alongside the mode so a leg
-            // landing in the cache recomputes arrivals/total too (both refresh paths).
-            // TRIP-TIMELINE-01: re-read the timeline inputs; the trip-wide mode is no
-            // longer used for leg lookup (per-leg modes drive legs, Story 3.2).
             var (_, tripStartTime, budgetMinutes) = await ReadTripSettingsAsync(collectionId);
             TripStartTime = tripStartTime;
             TimeBudgetMinutes = budgetMinutes;
@@ -1146,12 +913,8 @@ public sealed class TripViewModel(
     }
 
     /// <summary>
-    /// TRIP-LEG-02: builds the straight connecting legs from the ordered stops.
-    /// Consecutive pairs (k → k+1) give N−1 legs; when there is no distinct
-    /// Finish (Roundtrip — <paramref name="finishPoiId"/> null or equal to Start,
-    /// which is Order 1) the closing leg from the last stop back to the Start is
-    /// appended, giving N legs. A distinct Finish leaves the path open (N−1 legs,
-    /// no closing leg). Every leg is non-Measured in Phase 1 (TRIP-LEG-01).
+    /// Builds straight connecting legs from ordered stops. Consecutive pairs give N-1 legs;
+    /// Roundtrip adds closing leg back to Start (N legs). Distinct Finish leaves path open (N-1 legs).
     /// </summary>
     private static IReadOnlyList<TripLeg> BuildLegs(
         IReadOnlyList<TripStop> stops,
@@ -1169,14 +932,6 @@ public sealed class TripViewModel(
             legs.Add(MakeLeg(stops[k], stops[k + 1], cache));
         }
 
-        // Roundtrip closes the loop with a leg from the last stop back to the
-        // Start (Order 1). The path is left OPEN (no closing leg) only when a
-        // distinct Finish resolves to a real placeable stop other than the first.
-        // A Finish that is null, equals the first stop, or points at a POI that is
-        // not a placeable stop (coordinate-less, or no longer in the collection)
-        // cannot terminate a drawn path, so it falls back to Roundtrip rather than
-        // silently dropping the closing leg. (Start/Finish editing is Story 1.7;
-        // Phase-1 Finish is always null.)
         var finishIsDistinctStop = finishPoiId is { } fid
             && fid != stops[0].PoiId
             && stops.Any(s => s.PoiId == fid);
@@ -1188,38 +943,14 @@ public sealed class TripViewModel(
         return legs;
     }
 
-    /// <summary>
-    /// TRIP-TRAVELTIME-01: builds a leg, folding in the cached
-    /// duration/distance/fidelity when a directional RouteSegment row exists for
-    /// the (from→to) pair; otherwise the travel-time fields stay null (the leg is
-    /// "computing"). <see cref="TripLeg.IsMeasured"/> is derived solely from the
-    /// cached fidelity (Measured only) — the Mock yields Estimated, so legs stay
-    /// non-Measured for now.
-    /// </summary>
+    /// <summary>Builds a leg with cached duration/distance/fidelity, or null fields if uncomputed.</summary>
     private static TripLeg MakeLeg(
         TripStop from, TripStop to, IReadOnlyDictionary<(int From, int To, string Mode), RouteSegment> cache)
     {
-        // TRIP-LEGMODE-01 (Story 3.2): the leg's mode is the From-stop's own
-        // OutgoingTravelMode, null normalized to AnyAir (one single Any/Air state).
-        // The cache row is looked up by this leg's OWN (From, To, Mode) key — an
-        // Any/Air leg has no ground cache row ⇒ null fields ⇒ "—" (never auto-timed).
         var legMode = from.OutgoingTravelMode ?? Data.Entities.TravelMode.AnyAir;
         cache.TryGetValue((from.PoiId, to.PoiId, legMode), out var seg);
         var fidelity = seg?.Fidelity;
-        // TRIP-TRAVELMODE-01 (Story 2.2, AC4): a Placeholder leg (Any/Air with no
-        // Manual entry) carries an internal straight-line air estimate, but it must
-        // NEVER surface as a real door-to-door time. Null its DURATION at the
-        // projection edge so the time slot renders "—" and the trip total stays
-        // unknown ("—"), while keeping the distance (a real haversine value) and the
-        // Placeholder fidelity (the badge renders nothing for it). A leg that simply
-        // has no cache row yet keeps a null fidelity — that is the "computing" state,
-        // kept distinct from Placeholder so the aria-live computing announcement does
-        // not fire forever on Any/Air.
         var displayDuration = fidelity == Fidelity.Placeholder ? null : seg?.DurationSeconds;
-        // TRIP-DEGRADE-01 (Story 2.3): a leg backed by the provider-down fallback
-        // (Source == EstimatedFallback) is "degraded" — it keeps its real Estimated
-        // duration but flags the trip as showing straight-line estimates. A normal
-        // Mock Estimated leg does NOT set this.
         var isFallback = seg?.Source == TravelTimeSource.EstimatedFallback;
         return new TripLeg(
             from.PoiId, to.PoiId, from.Lat, from.Lon, to.Lat, to.Lon,
@@ -1228,50 +959,26 @@ public sealed class TripViewModel(
             DistanceMeters: seg?.DistanceMeters,
             Fidelity: fidelity,
             IsFallback: isFallback,
-            // TRIP-OSRM-02 (Story 4.2): carry the measured road geometry through to
-            // the map projection. Already null for non-Measured rows (only OSRM
-            // writes it for a Measured leg); the JS side decodes the precision-5
-            // encoded polyline and gates "solid road" on its presence (AC1/AC5).
             GeometryPolyline: seg?.GeometryPolyline,
-            // TRIP-LEGMODE-01 (Story 3.2, FR-19): carry the leg's own mode (normalized
-            // null ≡ AnyAir) into the projection.
             Mode: legMode);
     }
 
     /// <summary>
-    /// TRIP-TRAVELTIME-01 (AC5): Σ of the legs' durations. The total is null
-    /// (rendered "—" — no false precision) whenever any leg lacks a known duration,
-    /// which covers both an uncomputed leg and a Placeholder Any/Air leg (both carry
-    /// a null <see cref="TripLeg.DurationSeconds"/> at the projection edge).
-    /// <see cref="IsAnyLegComputing"/> is driven by row PRESENCE (null fidelity =
-    /// no cache row yet), NOT by a null duration — a computed Placeholder leg is not
-    /// "computing" (TRIP-TRAVELMODE-01 / AC4).
+    /// Sum of all legs' durations (rendered "—" when any leg lacks a known duration).
+    /// IsAnyLegComputing is driven by fidelity (computing ⇔ null fidelity), not duration.
     /// </summary>
     private void RecomputeTotal()
     {
         IsAnyLegComputing = OrderedLegs.Any(l => l.Fidelity is null);
         var allDurationsKnown = OrderedLegs.Count > 0 && OrderedLegs.All(l => l.DurationSeconds is not null);
-        // TRIP-RECONCILE-01 (Story 2.1): the displayed total is Σ of the ROUND-ONCE
-        // per-leg minutes (×60 to keep this seconds-typed field), NOT Duration(Σ raw
-        // seconds). The per-leg connector shows Duration(legSeconds) = DisplayMinutes(leg)
-        // and the total now sums those same rounded minutes, so the displayed total equals
-        // Σ of the displayed per-leg times (FR-13). A leg with DisplayMinutes==0 && seconds>0
-        // shows "<1 min" but contributes 0 — consistent (a 0-contribution annotation), not
-        // special-cased. Null total (partial em-dash) whenever any leg is uncomputed/Any —
-        // unchanged.
         TotalTravelTimeSeconds = allDurationsKnown
             ? OrderedLegs.Sum(l => TravelTimeFormatting.DisplayMinutes(l.DurationSeconds!.Value)) * 60
             : null;
     }
 
     /// <summary>
-    /// TRIP-TIMELINE-01 (Story 2.6): recomputes the honest itinerary timeline from the
-    /// already-built projections (ordered placeable stops + their dwell, the ordered
-    /// legs with duration/fidelity, the unplaceable stops' dwell), the trip shape
-    /// (<see cref="IsRoundtrip"/>), and the persisted <see cref="TripStartTime"/> /
-    /// <see cref="TimeBudgetMinutes"/>. Pure, presentation-only — no DB. The dwell is
-    /// carried per-PoiId in <see cref="StopRows"/>; placeable rows feed the routed walk
-    /// (in OrderedStops order) and unplaceable rows feed the total-only dwell list.
+    /// Recomputes the itinerary timeline from already-built projections, trip shape, and
+    /// persisted start time / budget. Pure presentation-only.
     /// </summary>
     private void RecomputeTimeline()
     {
@@ -1290,31 +997,20 @@ public sealed class TripViewModel(
                 dwellByPoiId.TryGetValue(s.PoiId, out var dwell) ? dwell : null))
             .ToList();
 
-        // Legs in the SAME order BuildLegs produced: N−1 consecutive legs, then the
-        // closing leg on a Roundtrip. The timeline walk consumes them positionally.
         var legs = OrderedLegs
             .Select(l => new ItineraryLegInput(l.DurationSeconds, l.Fidelity))
             .ToList();
 
-        // Unplaceable rows contribute dwell to the total only (no leg, no arrival).
         var unplaceableDwell = StopRows
             .Where(r => !r.IsPlaceable)
             .Select(r => r.DwellMinutes)
             .ToList();
 
-        // TRIP-TIMELINE-01: derive the roundtrip shape from the ACTUAL leg set
-        // (BuildLegs emits N legs for a roundtrip, N−1 for an open path) rather than
-        // from IsRoundtrip directly. The two normally agree, but a stale/Start-equal
-        // FinishPoiId makes BuildLegs fall back to a closing leg while IsRoundtrip is
-        // still false — deriving from the legs keeps the timeline total consistent with
-        // the rendered legs no matter what.
         var hasClosingLeg = legs.Count >= stops.Count;
 
         Timeline = ItineraryTimeline.Compute(
             stops, legs, unplaceableDwell, hasClosingLeg, TripStartTime, TimeBudgetMinutes);
     }
-
-    // --- TripViewEnabled persistence (collection-level Trip state) ---
 
     private async Task<bool> ReadTripViewEnabledAsync(int collectionId)
     {
@@ -1336,8 +1032,6 @@ public sealed class TripViewModel(
 
         collection.TripViewEnabled = enabled;
 
-        // Serialize with the background enrichment / dedup writers via the shared
-        // gate so this user-initiated commit never hits "database is locked".
         await writeLock.Gate.WaitAsync(_cts.Token);
         try
         {
@@ -1349,16 +1043,9 @@ public sealed class TripViewModel(
         }
     }
 
-    // --- Travel Mode + manual Any/Air time (Story 2.2) ---
-
     /// <summary>
-    /// TRIP-TRAVELMODE-01: persists a new travel mode for the active collection
-    /// and triggers a recompute. Mirrors the <see cref="PersistTripViewEnabledAsync"/>
-    /// write path (factory + <see cref="SqliteWriteLock"/>). No-ops when the mode
-    /// is invalid or already active (selecting the active segment does nothing —
-    /// no write, no recompute). After a change: re-read projections (the directional
-    /// cache key naturally selects the new mode's rows; legs with no row yet render
-    /// "—" + computing), signal the background trigger to fill missing legs, Notify.
+    /// Persists a new travel mode and triggers a recompute.
+    /// No-op when mode is invalid or already active.
     /// </summary>
     public async Task SetTravelModeAsync(string mode)
     {
@@ -1367,8 +1054,6 @@ public sealed class TripViewModel(
             return;
         }
 
-        // Reject unknown modes and short-circuit the already-active mode (SM-C2:
-        // recomputation stays rare — re-selecting the current mode is a no-op).
         if (!Data.Entities.TravelMode.IsValid(mode) || mode == TravelMode)
         {
             return;
@@ -1377,13 +1062,7 @@ public sealed class TripViewModel(
         try
         {
             await PersistTravelModeAsync(collectionId, mode);
-            // Re-read projections under the new mode; the cache read now filters
-            // r.TravelMode == mode so the legs switch to the new mode's rows.
             await RefreshProjectionsAsync(collectionId);
-            // Any leg missing a row under the new mode is already kicked by
-            // RefreshProjectionsAsync (IsAnyLegComputing ⇒ Signal); signal once
-            // more unconditionally so a switch to an all-cached mode still wakes
-            // the loop to compute any newly-needed closing leg. Cheap + idempotent.
             travelTimeTrigger.Signal();
         }
         catch (OperationCanceledException)
@@ -1400,17 +1079,8 @@ public sealed class TripViewModel(
     }
 
     /// <summary>
-    /// TRIP-LEGMODE-01 (Story 3.4, FR-19/21): sets ONE leg's travel mode (the mode
-    /// of the leg departing <paramref name="fromPoiId"/>) by delegating to the sole
-    /// writer <see cref="ITripOrderingService.SetOutgoingTravelModeAsync"/>, then
-    /// refreshes the projections so the leg's <see cref="TripLeg.Mode"/> reflects it.
-    /// A ground mode (Walk/Drive/Cycle) signals the background compute trigger so the
-    /// leg's time computes (mirroring how <see cref="SetTravelModeAsync"/> triggers a
-    /// recompute); Any/Air leaves the leg manual-only — NO compute trigger (FR-21).
-    /// Setting a mode never changes Stop Order, so no order-reset rule applies. Guards:
-    /// active collection + Trip View on; an invalid mode throws from the service. Surfaces
-    /// via <see cref="StateChanged"/>. Presentational callers (the LegModePill) raise this
-    /// command only and never touch the service/DB (NFR1).
+    /// Sets ONE leg's travel mode and refreshes projections. Ground modes signal
+    /// background compute; Any/Air is manual-only. Guards: active collection + Trip View on.
     /// </summary>
     public async Task SetLegModeAsync(int fromPoiId, string mode)
     {
@@ -1424,9 +1094,6 @@ public sealed class TripViewModel(
             await ordering.SetOutgoingTravelModeAsync(collectionId, fromPoiId, mode, _cts.Token);
             await RefreshProjectionsAsync(collectionId);
 
-            // FR-21: only a ground mode (Walk/Drive/Cycle) auto-computes — signal the
-            // background loop to fill the leg's (From, To, Mode) cache row. Any/Air is
-            // manual-only and never auto-computes, so it raises no trigger.
             if (mode is Data.Entities.TravelMode.Walk
                 or Data.Entities.TravelMode.Drive
                 or Data.Entities.TravelMode.Cycle)
@@ -1448,14 +1115,8 @@ public sealed class TripViewModel(
     }
 
     /// <summary>
-    /// TRIP-BULKMODE-01: assigns one travel mode to ALL of the trip's legs at once by
-    /// delegating to the bulk writer <see cref="ITripOrderingService.SetAllOutgoingTravelModesAsync"/>,
-    /// then refreshing projections. Mirrors <see cref="SetLegModeAsync"/>: a ground mode
-    /// (Walk/Drive/Cycle) signals the background compute trigger so every newly-grounded leg
-    /// computes; Any/Air raises no trigger (manual-only, FR-21). When <paramref name="overwriteExisting"/>
-    /// is false only the unset (Any/Air) legs change. One refresh + one Notify (NFR-2).
-    /// Guards: active collection + Trip View on. Presentational callers (the bulk selector)
-    /// raise this command only and never touch the service/DB (NFR1).
+    /// Assigns one travel mode to all trip legs at once. Ground modes signal background compute;
+    /// Any/Air manual-only. When overwriteExisting is false, only unset (Any/Air) legs change.
     /// </summary>
     public async Task SetAllLegsModeAsync(string mode, bool overwriteExisting)
     {
@@ -1511,22 +1172,7 @@ public sealed class TripViewModel(
         }
     }
 
-    /// <summary>
-    /// TRIP-MANUAL-01 (AC5) / Story 3.5 (RD7, FR-25): upserts a manual travel time for
-    /// ANY leg (ground or Any/Air). The minutes entered at the UI edge are converted to
-    /// canonical seconds (×60, AR-11) and stored on the directional
-    /// <c>(from, to, legMode)</c> — the From-stop's own OutgoingTravelMode (null ≡ AnyAir),
-    /// NOT a hardcoded AnyAir (TRIP-CACHE-01) — <see cref="RouteSegment"/> row with
-    /// <see cref="Fidelity.Manual"/>,
-    /// <c>Source = "Manual"</c>, <c>GeometryPolyline = null</c>, and the haversine
-    /// distance for display. Persisted under the shared write lock so it survives
-    /// reorder and recompute. After the write: refresh + Notify.
-    /// </summary>
-    /// <summary>
-    /// Upper bound on a manual leg time: 60 days in minutes. Generous enough for any
-    /// real flight/overnight-haul entry, but rejects absurd input so the ×60 seconds
-    /// conversion can never overflow <see cref="int"/> or poison the cached total.
-    /// </summary>
+    /// <summary>Upper bound on a manual leg time: 60 days in minutes.</summary>
     internal const int MaxManualLegMinutes = 60 * 24 * 60;
 
     public async Task SetManualLegTimeAsync(int fromPoiId, int toPoiId, int minutes)
@@ -1545,13 +1191,7 @@ public sealed class TripViewModel(
         }
 
         var meters = GeoUtils.HaversineDistance(from.Lat, from.Lon, to.Lat, to.Lon);
-        // Convert minutes ↔ seconds only here, at the UI edge (AR-11).
         var seconds = minutes * 60;
-        // Story 3.5 (RD7, TRIP-CACHE-01): the Manual row is keyed by THIS leg's own
-        // mode (the From-stop's OutgoingTravelMode, null ≡ AnyAir) — NOT a hardcoded
-        // AnyAir. Setting Manual on a ground leg overwrites its auto (Estimated/Measured)
-        // row at the ground key (an explicit user override — allowed; "never downgrade"
-        // is about AUTO compute, not user action).
         var mode = from.OutgoingTravelMode ?? Data.Entities.TravelMode.AnyAir;
 
         try
@@ -1572,28 +1212,10 @@ public sealed class TripViewModel(
         Notify();
     }
 
-    /// <summary>
-    /// Upper bound on a per-stop dwell time: 60 days in minutes — generous enough for
-    /// any real overnight/multi-day stay, but rejects absurd input so the future
-    /// minutes→seconds conversion (Story 2.6) can never overflow <see cref="int"/>.
-    /// Mirrors the <see cref="MaxManualLegMinutes"/> precedent.
-    /// </summary>
+    /// <summary>Upper bound on a per-stop dwell time: 60 days in minutes.</summary>
     internal const int MaxDwellMinutes = TripOrderingService.MaxDwellMinutes;
 
-    /// <summary>
-    /// TRIP-DWELL-01 (Story 2.5): sets the dwell time (minutes) on the active
-    /// collection's membership for <paramref name="poiId"/>. <paramref name="minutes"/>
-    /// is stored verbatim on <c>PoiCollectionItem.DwellMinutes</c>; <c>null</c> clears
-    /// it (unset ⇒ contributes zero). Written under the shared write lock so it survives
-    /// reorder/recompute, then refresh + Notify. Dwell is independent of route segments:
-    /// this path itself touches NO <see cref="RouteSegment"/> and never invalidates or
-    /// recomputes a cached leg (it makes no provider call). The shared
-    /// <c>RefreshProjectionsAsync</c> it calls may still wake the compute loop if some
-    /// leg is genuinely uncomputed (the pre-existing <c>IsAnyLegComputing</c> behavior) —
-    /// that is a harmless no-op re-check, not a dwell-driven recompute. Guards: active
-    /// collection + Trip View on; rejects out-of-range minutes (negative or
-    /// &gt; <see cref="MaxDwellMinutes"/>).
-    /// </summary>
+    /// <summary>Sets the dwell time on the active collection's membership for a POI.</summary>
     public async Task SetDwellMinutesAsync(int poiId, int? minutes)
     {
         if (ActiveCollectionId is not { } collectionId || !IsTripViewEnabled
@@ -1620,30 +1242,13 @@ public sealed class TripViewModel(
         Notify();
     }
 
-    // TRIP-DWELL-01: the dwell DB-write now lives on ITripOrderingService
-    // (SetDwellMinutesAsync) so the UI and the MCP set_dwell_time tool (Story 3.2)
-    // share one validated, write-locked implementation. The VM keeps its guard,
-    // RefreshProjectionsAsync and Notify; only the persistence is delegated.
     private Task PersistDwellMinutesAsync(int collectionId, int poiId, int? minutes) =>
         ordering.SetDwellMinutesAsync(collectionId, poiId, minutes, _cts.Token);
 
-    // --- Trip start time + soft time budget (Story 2.6, TRIP-TIMELINE-01) ---
-
-    /// <summary>
-    /// Upper bound on the soft time budget, in minutes: 60 days. Generous enough for any
-    /// real multi-day trip, but rejects absurd input so the ×60 seconds comparison in the
-    /// pure timeline can never overflow <see cref="int"/>. Mirrors the
-    /// <see cref="MaxDwellMinutes"/> / <see cref="MaxManualLegMinutes"/> precedent.
-    /// </summary>
+    /// <summary>Upper bound on the soft time budget, in minutes: 60 days.</summary>
     internal const int MaxBudgetMinutes = 60 * 24 * 60;
 
-    /// <summary>
-    /// TRIP-TIMELINE-01 (Story 2.6, AC2): sets the per-trip wall-clock start time on the
-    /// active collection (<c>PoiCollection.TripStartTime</c>); <c>null</c> clears it (⇒
-    /// relative offsets only). Mirrors the dwell/mode persistence (factory +
-    /// <see cref="SqliteWriteLock"/>), then refresh + Notify. Start time does NOT affect
-    /// route segments, so this never signals the travel-time trigger.
-    /// </summary>
+    /// <summary>Sets the per-trip wall-clock start time; null clears it (relative offsets only).</summary>
     public async Task SetTripStartTimeAsync(DateTime? start)
     {
         if (ActiveCollectionId is not { } collectionId || !IsTripViewEnabled)
@@ -1669,14 +1274,7 @@ public sealed class TripViewModel(
         Notify();
     }
 
-    /// <summary>
-    /// TRIP-TIMELINE-01 (Story 2.6, AC5): sets the per-trip soft time budget in minutes on
-    /// the active collection (<c>PoiCollection.TimeBudgetMinutes</c>); <c>null</c> clears it
-    /// (⇒ no overrun flag is ever shown). Range-guarded (<c>&gt;= 0</c>,
-    /// <c>&lt;= <see cref="MaxBudgetMinutes"/></c>). Mirrors the dwell/mode persistence,
-    /// then refresh + Notify. The budget does NOT affect route segments, so this never
-    /// signals the travel-time trigger.
-    /// </summary>
+    /// <summary>Sets the per-trip soft time budget in minutes; null clears it (no overrun flag).</summary>
     public async Task SetTimeBudgetMinutesAsync(int? minutes)
     {
         if (ActiveCollectionId is not { } collectionId || !IsTripViewEnabled
@@ -1748,12 +1346,8 @@ public sealed class TripViewModel(
     }
 
     /// <summary>
-    /// TRIP-MANUAL-01 / Story 3.5 (FR-25): clears a manual leg time on ANY leg. Deletes
-    /// the <c>(from, to, legMode)</c> cache row — keyed by the From-stop's own mode (null
-    /// ≡ AnyAir), NOT a hardcoded AnyAir — then signals the background compute. A GROUND
-    /// leg reverts to its re-computed Estimated/Measured value (the compute re-creates the
-    /// missing ground row); an Any/Air leg reverts to "—" (compute skips it, FR-21).
-    /// No-op when no row exists.
+    /// Clears a manual leg time on any leg. Ground legs revert to re-computed values;
+    /// Any/Air reverts to "—". No-op when no row exists.
     /// </summary>
     public async Task ClearManualLegTimeAsync(int fromPoiId, int toPoiId)
     {
@@ -1762,11 +1356,6 @@ public sealed class TripViewModel(
             return;
         }
 
-        // Story 3.5 (FR-25): reset deletes the Manual row at THIS leg's own (From,To,Mode)
-        // key. For a ground leg the subsequent Signal()ed compute pass re-creates the
-        // Estimated/Measured row (it enqueues ground legs lacking a row, Story 3.2); for an
-        // Any/Air leg the compute skips it (FR-21) so it returns to "—". Resolve the mode
-        // from the From-stop; default to AnyAir when the stop is gone (delete is a no-op then).
         var mode = OrderedStops.FirstOrDefault(s => s.PoiId == fromPoiId)?.OutgoingTravelMode
                    ?? Data.Entities.TravelMode.AnyAir;
 
@@ -1790,17 +1379,8 @@ public sealed class TripViewModel(
     }
 
     /// <summary>
-    /// TRIP-RECOMPUTE-01 (Story 2.4, AC4/5/6): user-initiated "Recompute travel
-    /// times" for the active trip. Invalidates the recompute-eligible cached rows
-    /// (Estimated/Placeholder/EstimatedFallback — never the user's Manual entries,
-    /// never a higher-fidelity Measured row) then refreshes the projections. The
-    /// now-missing rows make a leg "computing", so <see cref="RefreshProjectionsAsync"/>
-    /// already signals the off-circuit compute (no unconditional Signal added) — and
-    /// when the background service writes a higher-fidelity row, the existing
-    /// progress→<see cref="RefreshLegsFromCacheAsync"/> subscription upgrades the leg
-    /// (Estimated→Measured: solid line + secondary badge) via <see cref="StateChanged"/>,
-    /// never a silent mutation on a stale screen. On-demand only — never automatic.
-    /// Mirrors the 2.2 Set/ClearManualLegTimeAsync write-then-refresh-then-Notify shape.
+    /// User-initiated recompute of travel times. Invalidates recompute-eligible cached rows
+    /// (not Manual or higher-fidelity rows), then refreshes projections.
     /// </summary>
     public async Task RecomputeTravelTimesAsync()
     {
@@ -1812,9 +1392,6 @@ public sealed class TripViewModel(
         try
         {
             await routeSegmentInvalidation.InvalidateRecomputableForCollectionAsync(collectionId, _cts.Token);
-            // Refresh rebuilds the legs from the now-thinned cache; any leg without a
-            // row flips IsAnyLegComputing ⇒ RefreshProjectionsAsync Signal()s the
-            // background compute. No unconditional Signal here (AC1 stays intact).
             await RefreshProjectionsAsync(collectionId);
         }
         catch (OperationCanceledException)
@@ -1830,16 +1407,7 @@ public sealed class TripViewModel(
         Notify();
     }
 
-    /// <summary>
-    /// TRIP-TSP-01 (Story 3.1, AR-6): explicit on-demand "Sort in Traveling Salesman
-    /// order". Delegates to the single ordering write path
-    /// (<see cref="ITripOrderingService.SortTravelingSalesmanAsync"/>) — the VM never
-    /// computes or writes order itself — then re-reads the projections (stops, legs,
-    /// timeline) and Notifies, which the host page turns into the existing incremental
-    /// redraw. On-demand ONLY: nothing else calls this, so the system never reorders
-    /// without the explicit press (AC2). Mirrors the RecomputeTravelTimesAsync
-    /// guard → service → refresh → notify shape.
-    /// </summary>
+    /// <summary>Explicit on-demand sort in Traveling Salesman order.</summary>
     public async Task SortTravelingSalesmanAsync()
     {
         if (ActiveCollectionId is not { } collectionId || !IsTripViewEnabled)
@@ -1847,9 +1415,6 @@ public sealed class TripViewModel(
             return;
         }
 
-        // Snapshot the order so a sort that the never-worse guard leaves unchanged
-        // stays silent — the live region must never report a reorder that didn't
-        // happen (mirrors MoveStopToAsync's no-op-move silence).
         var before = OrderedStops.Select(s => s.PoiId).ToList();
 
         try
@@ -1951,16 +1516,11 @@ public sealed class TripViewModel(
 
     public async ValueTask DisposeAsync()
     {
-        // Idempotent: the host page disposes this VM explicitly, and the DI
-        // container disposes the same Transient instance again at circuit
-        // teardown. Without this guard the second CancelAsync would throw
-        // ObjectDisposedException on the already-disposed CTS. [Review][Patch]
         if (_disposed)
         {
             return;
         }
         _disposed = true;
-        // TRIP-TRAVELTIME-01: stop reacting to compute progress before teardown.
         _progressSubscription?.Dispose();
         _progressSubscription = null;
         await _cts.CancelAsync();

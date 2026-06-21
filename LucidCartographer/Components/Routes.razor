@@ -1,8 +1,7 @@
 <Router AppAssembly="typeof(Program).Assembly">
     <Found Context="routeData">
         <RouteView RouteData="routeData" DefaultLayout="typeof(MainLayout)" />
-        @* LOW-02: Changed from h1 to [tabindex="-1"] — works on any page
-           even if it lacks a visible h1. The main content area receives focus. *@
+        @* Selector targets main content area to ensure focus works on any page layout. *@
         <FocusOnNavigate RouteData="routeData" Selector="main" />
     </Found>
     <NotFound>

@@ -1,13 +1,9 @@
-@* Reusable Stop-order badge: a small primary-filled circle with the white stop
-   number. Used in the stop list rows (and mirrored on map markers via the JS
-   interop). A bare number on a pin is meaningless to a screen reader, so the
-   badge carries a descriptive aria-label ("Stop {N}"). *@
+@* aria-label prevents screen readers from reading the bare number twice. *@
 
 <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary text-on-primary text-xs font-bold flex-shrink-0"
       aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.StopOrderBadgeAria, Number)"
       title="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.StopOrderBadgeAria, Number)">
-    @* aria-hidden: the descriptive aria-label ("Stop N") already conveys this; hide the
-       bare numeral so screen readers don't read the number twice. [Review][Patch] *@
+    @* aria-hidden: hides bare numeral so screen readers don't read the number twice. *@
     <span aria-hidden="true">@Number</span>
 </span>
 

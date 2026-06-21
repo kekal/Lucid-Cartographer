@@ -2,26 +2,15 @@
 @inject IJSRuntime Js
 @implements IAsyncDisposable
 
-@* Invisible component: registers a browser resize listener and forwards the
-   viewport width into the circuit-scoped ViewportService. Drop one of these in
-   MainLayout so the desktop/mobile verdict is available everywhere on the
-   circuit. Renders nothing. *@
-
 @code {
     private DotNetObjectReference<ViewportObserver>? _selfRef;
     private bool _registered;
-    // M01 (Wave 7): integer token returned by LucidViewport.register. The JS
-    // side compares tokens (not refs) on unregister; passing back the same
-    // token we received guarantees only THIS observer's teardown runs even if
-    // a newer observer has already registered.
+    // Token from JS side; compared on unregister to ensure only this observer's teardown runs.
     private int _registrationToken;
 
     /// <summary>
-    /// Shape of the value returned by LucidViewport.register — viewport width
-    /// plus a token that identifies this particular registration on dispose.
-    /// Blazor JS interop uses System.Text.Json with case-insensitive matching
-    /// (JsonSerializerDefaults.Web), so the JS-side `{ width, token }` object
-    /// binds to these PascalCase properties via the constructor.
+    /// Result from LucidViewport.register. Blazor's case-insensitive JSON deserialization
+    /// (JsonSerializerDefaults.Web) binds JS `{ width, token }` to these PascalCase properties.
     /// </summary>
     private sealed class RegistrationResult
     {
@@ -41,21 +30,14 @@
         try
         {
             var result = await Js.InvokeAsync<RegistrationResult>("LucidViewport.register", _selfRef);
-            // bUnit's loose JSInterop returns default(RegistrationResult) == null
-            // for unconfigured calls; guard so test renders don't NRE.
+            // Guard: bUnit's mock JS interop returns null for unconfigured calls.
             if (result is not null)
             {
                 _registrationToken = result.Token;
                 Viewport.SetWidth(result.Width);
             }
 
-            // M05 (Wave 7): re-apply the saved theme on every page's first
-            // interactive render. Blazor's in-circuit SPA navigation between
-            // InteractiveServer pages does NOT fire `enhancedload` (that event
-            // is reserved for ENHANCED HTTP navigation), and the renderer's
-            // diff clears `<html>` attributes the JS side set. Re-applying
-            // here closes that gap — every page hosts a ViewportObserver, so
-            // every nav lands with the correct theme.
+            // Reapply theme: in-circuit SPA nav doesn't fire enhancedload, and Blazor's diff clears <html> attributes set by JS.
             await Js.InvokeVoidAsync("LucidTheme.apply");
         }
         catch (JSDisconnectedException)
@@ -82,8 +64,7 @@
     {
         try
         {
-            // M01 (Wave 7): hand the JS side OUR token. It compares tokens and
-            // ignores the call if a newer observer is the current owner.
+            // Pass our token; JS compares and ignores if a newer observer owns the viewport.
             await Js.InvokeVoidAsync("LucidViewport.unregister", _registrationToken);
         }
         catch (JSDisconnectedException) { }

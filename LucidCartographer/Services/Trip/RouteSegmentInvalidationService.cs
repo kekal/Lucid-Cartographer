@@ -5,11 +5,9 @@ using Microsoft.EntityFrameworkCore;
 namespace LucidCartographer.Services.Trip;
 
 /// <summary>
-/// TRIP-INVALIDATE-01 (Story 2.4): default <see cref="IRouteSegmentInvalidationService"/>.
-/// Each call takes a fresh per-worker <see cref="AppDbContext"/> from the factory
-/// (EF contexts are not thread-safe) and commits the delete under the shared
-/// process-wide <see cref="SqliteWriteLock"/>, the same write gate the enrichment
-/// worker, dedup pass and compute service use.
+/// Default <see cref="IRouteSegmentInvalidationService"/>. Each call takes a fresh
+/// per-worker <see cref="AppDbContext"/> from the factory (EF contexts are not thread-safe)
+/// and commits the delete under the shared process-wide <see cref="SqliteWriteLock"/>.
 /// </summary>
 public sealed class RouteSegmentInvalidationService(
     IDbContextFactory<AppDbContext> factory,
@@ -37,7 +35,7 @@ public sealed class RouteSegmentInvalidationService(
         await SaveUnderWriteLockAsync(db, ct);
 
         logger.LogInformation(
-            "TRIP-INVALIDATE-01: invalidated {Count} cached segment(s) touching POI {PoiId} (coords changed)",
+            "Invalidated {Count} cached segment(s) touching POI {PoiId} (coords changed)",
             stale.Count, poiId);
     }
 
@@ -77,7 +75,7 @@ public sealed class RouteSegmentInvalidationService(
         await SaveUnderWriteLockAsync(db, ct);
 
         logger.LogInformation(
-            "TRIP-INVALIDATE-01: invalidated {Count} recomputable segment(s) for collection {CollectionId} (explicit recompute)",
+            "Invalidated {Count} recomputable segment(s) for collection {CollectionId}",
             eligible.Count, collectionId);
 
         return eligible.Count;

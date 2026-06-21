@@ -2,12 +2,7 @@
 @using LucidCartographer.Data.Entities
 @using LucidCartographer.Services.Trip
 
-@* TRIP-TRAVELMODE-01 (Story 2.2): segmented Travel-Mode control — Any/Air · Drive
-   · Walk · Cycle. The active segment is styled `primary`; the choice is per-trip
-   (persisted to PoiCollection.TravelMode via the VM). role=radiogroup + per-option
-   aria-pressed/aria-checked expose the selection to AT. Markup + a thin VM bridge
-   only — all persistence/recompute logic lives in TripViewModel.SetTravelModeAsync.
-   Dark mode is first-class: every colour is a token, never a raw hex. *@
+@* Persistence and recompute logic live in TripViewModel.SetTravelModeAsync; all colours are design tokens (no raw hex). *@
 
 <div role="radiogroup" aria-label="@UiStrings.TripTravelModeSelectorAria"
      class="inline-flex items-center rounded-md border border-surface-container-high overflow-hidden">

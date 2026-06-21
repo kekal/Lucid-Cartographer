@@ -8,10 +8,7 @@ using ModelContextProtocol.Server;
 namespace LucidCartographer.Services.Mcp;
 
 /// <summary>
-/// MCP write tools — create collections/POIs and move/copy/delete POIs between
-/// collections. All calls delegate to the existing <see cref="IPoiService"/>;
-/// validation (name, coordinate ranges, category enum) is enforced by
-/// the service. No business logic is duplicated here.
+/// MCP write tools for managing collections and POIs; all operations delegate to <see cref="IPoiService"/>.
 /// </summary>
 [McpServerToolType]
 public static class PoiWriteTools
@@ -74,14 +71,12 @@ public static class PoiWriteTools
             Phone = phone,
             Rating = rating,
             AddedDate = DateTime.UtcNow,
-            // Pure data state: not enriched, and NOT enqueued. Creation is
-            // decoupled from enrichment — call enrich_poi explicitly to enrich.
+            // Creation is decoupled from enrichment — call enrich_poi explicitly.
             IsEnriched = false,
             EnrichmentRequested = false
         };
 
-        // Download+validate the photo BEFORE creating the row, so a bad URL fails
-        // cleanly without leaving an orphan POI (which would invite a duplicate retry).
+        // Validate image URL before creating POI to avoid orphans.
         DownloadedImage? image = null;
         if (!string.IsNullOrWhiteSpace(imageUrl))
         {
@@ -92,7 +87,6 @@ public static class PoiWriteTools
 
         if (image is not null)
         {
-            // Atomic write of bytes + ImageUrl on one context.
             created.ImageUrl = await ImageDownloadHelper.ApplyAsync(dbFactory, created.Id, image, ct);
         }
 
@@ -130,9 +124,7 @@ public static class PoiWriteTools
         [Description("Image URL (http/https) to download and store as the photo, replacing any existing one. Pass \"\" to remove the photo. Omit to leave the photo unchanged.")] string? imageUrl = null,
         CancellationToken ct = default)
     {
-        // Load the full entity so enrichment-owned fields (GoogleRating,
-        // ReviewCount) and any unedited fields round-trip untouched through
-        // UpdatePoiAsync — it copies every field from the entity it's given.
+        // Load full entity to round-trip enrichment-owned fields (GoogleRating, ReviewCount) untouched.
         var poi = await poiService.GetPoiAsync(poiId, ct);
         if (poi is null)
         {
@@ -141,8 +133,6 @@ public static class PoiWriteTools
 
         if (name is not null)
         {
-            // Name is required; reject a blank rename (the service also validates,
-            // but fail early with a clearer message).
             if (string.IsNullOrWhiteSpace(name))
             {
                 throw new ArgumentException("Name cannot be blank.", nameof(name));
@@ -159,20 +149,14 @@ public static class PoiWriteTools
         if (phone is not null) poi.Phone = NullIfEmpty(phone);
         if (country is not null) poi.Country = NullIfEmpty(country);
         if (region is not null) poi.Region = NullIfEmpty(region);
-        // TRIP-INVALIDATE-01 (Story 3.2, AC6 — resolves the Epic-2 retro A5 defer):
-        // detect a genuine coordinate change so the POI's cached legs can be
-        // invalidated after the save (parity with the in-app coordinate-change hook).
-        // A supplied-but-identical value is NOT a change.
+        // Detect genuine coordinate change to invalidate cached legs (supplied-but-identical is not a change).
         var coordsChanged = (latitude is not null && latitude != poi.Latitude)
             || (longitude is not null && longitude != poi.Longitude);
         if (latitude is not null) poi.Latitude = latitude;
         if (longitude is not null) poi.Longitude = longitude;
         if (rating is not null) poi.Rating = rating;
 
-        // Download+validate the photo (if any) BEFORE persisting field edits, so a
-        // bad URL fails before anything changes. The image is WRITTEN only after
-        // field validation/save succeeds, so an invalid sibling field can neither
-        // orphan an image nor silently drop the existing photo (the "" clear case).
+        // Validate image URL before persisting to prevent orphans; write image only after save succeeds.
         var changeImage = imageUrl is not null;
         DownloadedImage? image = changeImage
             ? await ImageDownloadHelper.DownloadAsync(httpFactory, imageUrl, ct) // null => clear ("")
@@ -180,9 +164,7 @@ public static class PoiWriteTools
 
         await poiService.UpdatePoiAsync(poi, ct);
 
-        // TRIP-INVALIDATE-01 (A5): an agent-driven coordinate change invalidates the
-        // POI's cached RouteSegment legs (both directions, all non-Manual modes); the
-        // background compute refills them on the next trigger — same as the in-app hook.
+        // Coordinate changes invalidate cached RouteSegment legs; background compute refills them.
         if (coordsChanged)
         {
             await routeSegmentInvalidation.InvalidateForPoiAsync(poiId, ct);

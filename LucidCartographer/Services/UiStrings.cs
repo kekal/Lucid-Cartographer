@@ -1,8 +1,7 @@
 namespace LucidCartographer.Services;
 
 /// <summary>
-/// Centralized UI string constants for future i18n support.
-/// Replace with resource files (.resx) or IStringLocalizer when localizing.
+/// Centralized UI string constants.
 /// </summary>
 public static class UiStrings
 {
@@ -64,56 +63,44 @@ public static class UiStrings
     public const string TripViewToggleAria = "Toggle Trip View — order the visible places into a trip";
     public const string TripViewEnabledAnnouncement = "Trip View on. Places are ordered as a trip.";
     public const string TripViewDisabledAnnouncement = "Trip View off. Showing the plain collection.";
-    // [TRIP-GATE-01] Announced when Trip View turns itself off because the
-    // collection dropped below the two-placeable-stop minimum (e.g. a stop was
-    // removed or lost its coordinates). Honest, factual — no hype, never silent.
+    // Announced when Trip View disables itself if fewer than two placeable stops remain.
     public const string TripViewAutoDisabledAnnouncement =
         "Trip View off — fewer than two placeable stops remain.";
     // {0} = stop number; used as the order badge's screen-reader label.
     public const string StopOrderBadgeAria = "Stop {0}";
 
-    // Trip View — stop-list panel (Story 1.3). The dwell + timeline values are
-    // inert placeholders here ("—"); the real values arrive in Epic 2.
+    // Trip View — stop-list panel
     public const string TripStopList = "Trip stops";
     public const string TripStopListAria = "Trip stop list, in travel order";
     // {0} = stop count; announced via the panel's aria-live region.
     public const string TripStopCountAria = "{0} stop trip";
     public const string TripStopListEmpty = "No placeable stops yet.";
-    // Story 1.2 (FR-2): the wide trip-table row Actions — Focus on map + Open in
-    // Google Maps ONLY. {0} = POI name for the per-row accessible name; the title
-    // is the short shared label. Mirrors PoiTable's intent, routed through UiStrings.
+    // Wide trip-table row Actions: Focus on map + Open in Google Maps. {0} = POI name.
     public const string TripFocusOnMap = "Focus on map";
     public const string TripFocusOnMapAria = "Focus map on {0}";
     public const string TripOpenInGoogleMaps = "Open in Google Maps";
     public const string TripOpenInGoogleMapsAria = "Open {0} in Google Maps";
-    // Story 1.2: enrichment-state icon titles for the Name column (mirrors PoiTable's
-    // mapping — error/red, location_on/muted, hourglass_empty/amber).
+    // Enrichment-state icon titles for the Name column (error/red, location_on/muted, hourglass_empty/amber).
     public const string TripEnrichmentFailed = "Enrichment failed — paste a Google Maps URL";
     public const string TripEnrichmentEnriched = "Enriched";
     public const string TripEnrichmentWaiting = "Waiting for enrichment";
     // {0} = this stop's number, {1} = total stops. Row-level screen-reader label.
     public const string TripStopBadgeAria = "Stop {0} of {1}";
-    // TRIP-DWELL-01 (Story 2.5): the dwell-minutes input on each stop row. {0} = the
-    // stop's POI name, giving the input a per-stop accessible name. The placeholder
-    // hints the unit on an empty field (the old "—" placeholder string is superseded).
+    // Dwell-minutes input on each stop row. {0} = the stop's POI name.
     public const string TripDwellPlaceholder = "min";
-    // Story 4.4 (FR-30): the desktop dwell control is a native HH:MM duration picker
-    // (<input type="time">), so its hint reads "hh:mm" instead of "min". Mobile keeps
-    // the minutes input (deferred mirror) and its "min" placeholder above.
+    // Desktop dwell control uses native HH:MM duration picker; mobile keeps minutes input.
     public const string TripDwellHhmmPlaceholder = "hh:mm";
     public const string TripDwellAria = "Dwell time in minutes at {0}";
     public const string TripTimelinePlaceholder = "—";
-    public const string TripTimelineAria = "Arrival time (computed in a later step)";
+    public const string TripTimelineAria = "Arrival time";
 
-    // Trip View — list ↔ map selection sync (Story 1.4). {0} = stop number,
-    // {1} = POI name; announced via the panel's aria-live region on selection.
+    // Trip View — list ↔ map selection sync. {0} = stop number, {1} = POI name; announced via aria-live.
     public const string TripStopSelectedAnnouncement = "Selected stop {0}: {1}";
     // Selectable stop-row accessible name. {0} = stop number, {1} = total stops,
     // {2} = POI name.
     public const string TripStopRowAria = "Stop {0} of {1}: {2}";
 
-    // Trip View — stop reorder (Story 1.5). {0} = POI name. The move-control
-    // aria-labels and the aria-live announcement after every successful move.
+    // Trip View — stop reorder. {0} = POI name for the aria-labels and post-move announcement.
     public const string TripMoveStopUp = "Move {0} up";
     public const string TripMoveStopDown = "Move {0} down";
     // {0} = POI name, {1} = new stop number, {2} = total stops.
@@ -121,10 +108,8 @@ public static class UiStrings
     // Drag-handle accessible name. {0} = POI name.
     public const string TripDragHandle = "Drag to reorder {0}";
 
-    // Trip View — Start/Finish designation (Story 1.7, [TRIP-STARTFINISH-05]).
-    // Set/unset control labels ({0} = POI name), the distinct badge/marker
-    // accessible names, and the aria-live announcements for designation and
-    // roundtrip ↔ open-path shape transitions.
+    // Trip View — Start/Finish designation. Set/unset control labels ({0} = POI name),
+    // badge/marker accessible names, and aria-live announcements.
     public const string TripSetAsStart = "Set {0} as start";
     public const string TripSetAsFinish = "Set {0} as finish";
     public const string TripUnsetStart = "Unset {0} as start";
@@ -136,33 +121,23 @@ public static class UiStrings
     // {0} = POI name. Map-marker accessible name/title for the pinned roles.
     public const string TripStartMarkerAria = "Start: {0}";
     public const string TripFinishMarkerAria = "Finish: {0}";
-    // {0} = POI name. Announced after a Start designation / when it is cleared.
+    // {0} = POI name. Announced after a Start designation or when it is cleared.
     public const string TripStartSetAnnouncement = "{0} set as start — stop 1";
     public const string TripStartClearedAnnouncement = "Start cleared";
-    // Shape announcements: clearing the Finish restores the Roundtrip; a
-    // distinct Finish ({0} = POI name) opens the path.
+    // Shape announcements: clearing the Finish restores the Roundtrip; a distinct Finish opens the path.
     public const string TripRoundtripAnnounce = "Roundtrip — returns to start";
     public const string TripOpenPathAnnounce = "Open path — ends at {0}";
 
-    // Trip View — routing-data attribution (Story 4.2, [TRIP-OSRM-02], NFR8).
-    // Displayed on the map's attribution control (in addition to the base OSM tile
-    // attribution) only when an OSM-based routing provider (OSRM) is active. Factual,
-    // licence-honest copy (UX-DR11) — names the routing engine and the OSM/ODbL data
-    // licence, no hype.
+    // Trip View — routing-data attribution. Shown on map attribution when OSM-based routing (OSRM) is active.
     public const string TripRoutingAttributionOsm =
         "Routing &copy; OSRM &middot; Map data &copy; OpenStreetMap contributors (ODbL)";
 
-    // Trip View — unplaceable stops (Story 1.6, [TRIP-PLACE-05]). Honest,
-    // factual, provenance-aware copy (UX-DR11): the POI is kept in the
-    // collection, excluded from the route — never silently dropped (UX-DR10).
+    // Trip View — unplaceable stops. POI kept in collection, excluded from route.
     public const string TripStopNotPlaceable = "Not placeable";
     public const string TripStopNotPlaceableDetail = "Not placeable — no coordinates. Kept in the collection, excluded from the route.";
     public const string TripStopNotPlaceableAria = "Not placeable: this stop has no coordinates and is excluded from the route, but kept in the collection.";
 
-    // Trip View — per-leg travel time + Fidelity badge (Story 2.1,
-    // [TRIP-TRAVELTIME-01]). Times/distances are formatted at the UI edge only
-    // (canonical seconds/meters in the VM). "—" marks an as-yet-uncomputed leg
-    // or a partial total (no false precision).
+    // Trip View — per-leg travel time + Fidelity badge. Times/distances formatted at UI edge; "—" marks uncomputed legs.
     public const string TripLegTimeUnknown = "—";
     // {0} = formatted travel time (e.g. "1h 20m"). Per-leg time accessible name.
     public const string TripLegTravelTimeAria = "Travel time {0}";
@@ -174,10 +149,7 @@ public static class UiStrings
     public const string TripFidelityManual = "Manual";
     // {0} = the fidelity word. Badge accessible name conveying provenance.
     public const string TripFidelityAria = "Provenance: {0}";
-    // Self-explaining fidelity badge tooltips (Story 2.3, FR-7/UX-DR9). Plain-language
-    // explanation used for BOTH the badge title and aria-label (parity, NFR7), so the
-    // hover text and the AT announcement say the same thing — never the circular
-    // "Provenance: Estimated". The visible badge text stays the short word above.
+    // Fidelity badge tooltips: plain-language explanation for both title and aria-label (parity).
     public const string TripFidelityEstimatedTooltip = "Estimated — straight-line approximation, not road distance";
     public const string TripFidelityMeasuredTooltip = "Measured — real road route.";
     public const string TripFidelityManualTooltip = "Manual — you entered this time.";
@@ -187,117 +159,71 @@ public static class UiStrings
     // Trip total travel time. {0} = formatted total; the label introduces the value.
     public const string TripTotalTravelTimeLabel = "Total travel time";
     public const string TripTotalTravelTimeAria = "Total travel time {0}";
-    // TRIP-RECOMPUTE-01 (Story 2.4, AC4/UX-DR9): the explicit "Recompute travel
-    // times" control in the trip header area (both surfaces). Visible label + the
-    // accessible name; on-demand only — invalidates the eligible cached legs and
-    // re-requests them (never the user's Manual entries, never a Measured row).
+    // Explicit "Recompute travel times" control; invalidates eligible cached legs and re-requests them.
     public const string TripRecomputeLabel = "Recompute travel times";
     public const string TripRecomputeAria = "Recompute travel times";
-    // TRIP-TSP-01 (Story 3.1, AR-6): the explicit "Sort in Traveling Salesman order"
-    // control in the trip header area (both surfaces). Visible label + accessible
-    // name; on-demand only — reorders the placeable Stops into an efficient loop and
-    // never fires automatically. {0} = stop count for the post-sort announcement.
+    // Explicit "Sort in Traveling Salesman order" control; reorders placeable stops into an efficient loop. {0} = stop count.
     public const string TripSortTspLabel = "Sort in Traveling Salesman order";
     public const string TripSortTspAria = "Sort stops in Traveling Salesman order";
     public const string TripSortTspAnnouncement = "Stops sorted into travel order ({0} stops)";
-    // UI-edge duration/distance format patterns (TravelTimeFormatting). Kept here
-    // so the unit words ("h"/"m"/"km") and the sub-minute/zero tokens are localizable
-    // rather than hardcoded at the conversion site. {0}/{1} = numeric parts.
-    // FR-16: the minute unit reads "min" (not "m") to disambiguate from distance
-    // meters ("m"). Hours stay "h"; distance meters stay "m". Shared layer — both
-    // desktop and mobile render "min".
+    // UI-edge duration/distance format patterns. Unit words and sub-minute/zero tokens are localizable.
+    // Minute unit reads "min" (not "m") to disambiguate from distance meters.
     public const string TripDurationHoursMinutes = "{0}h {1} min";
     public const string TripDurationMinutes = "{0} min";
     public const string TripDurationSubMinute = "<1 min";
     public const string TripDurationZero = "0 min";
     public const string TripDistanceKilometers = "{0:0.#} km";
     public const string TripDistanceMeters = "{0:0} m";
-    // Accessible name for the leg-time slot of a stop that has NO departing leg
-    // (the last stop of an open path, or an unplaceable row). Distinct from the
-    // "computing" state — there is simply no hop to time here.
+    // Accessible name for the leg-time slot of a stop with NO departing leg (last stop of open path or unplaceable row).
     public const string TripLegNoTravelTimeAria = "No travel time";
 
-    // TRIP-DEGRADE-01 (Story 2.3, AC2 / UX-DR10/UX-DR11): the honest approximate
-    // note shown in the trip header/panel area (an aria-live status region, warn/
-    // muted tone — never error-red) when any leg fell back to a straight-line
-    // estimate because the routing engine was unreachable. A normal Mock-Estimated
-    // trip (the shipping default) never shows this.
+    // Honest approximate note shown when routing engine was unreachable; only on fallback trips, not on shipping default.
     public const string TripApproximateEstimatesNote =
         "Couldn't reach the routing engine — showing straight-line estimates.";
 
-    // Story 2.4 (FR-8/10, RD11 / UX-DR5/DR9): the quiet contextual note on a default
-    // deployment (no measured provider configured) explaining why every leg is a
-    // straight-line Estimated and recommending the optional OSRM path to measured road
-    // times. Distinct from TripApproximateEstimatesNote (the engine-unreachable
-    // fallback). The link points to the operator docs (docs/osrm.md) — guidance only;
-    // this PRD does not stand up or configure OSRM (Non-Goal).
+    // Contextual note on default deployment (no measured provider configured) explaining why all legs are estimates.
     public const string TripMockEstimateNote =
         "All times are straight-line estimates. Enable OSRM for measured road times.";
     public const string TripMockEstimateOsrmLink = "How to enable OSRM";
     public const string TripMockEstimateOsrmHref = "docs/osrm.md";
 
-    // Trip View — travel-mode selector (Story 2.2, TRIP-TRAVELMODE-01). Segment
-    // labels + the radiogroup's accessible name. The active segment is styled
-    // primary; the choice is per-trip (persisted to PoiCollection.TravelMode).
+    // Trip View — travel-mode selector. Segment labels + radiogroup accessible name; per-trip choice.
     public const string TripTravelModeSelectorAria = "Travel mode";
     public const string TripTravelModeAnyAir = "Any/Air";
     public const string TripTravelModeDrive = "Drive";
     public const string TripTravelModeWalk = "Walk";
     public const string TripTravelModeCycle = "Cycle";
 
-    // Trip View — per-leg mode pill (Story 3.4, TRIP-LEGMODE-01, FR-19/UX-DR3/DR11).
-    // The pill on each leg connector shows the leg's mode (reusing the mode names
-    // above) or, when undefined/Any-Air, a neutral "Any — set mode" outline pill (NOT
-    // an error tone). The pill opens a menu of the four modes; {0} = the leg's origin
-    // stop name for the per-leg accessible names + title.
+    // Trip View — per-leg mode pill. Shows leg's mode or "Any — set mode" outline pill (not error tone). {0} = origin stop name.
     public const string TripLegModeAnySetMode = "Any — set mode";
     public const string TripLegModePillAria = "Travel mode for the leg departing {0}";
     public const string TripLegModePillTitle = "Set the travel mode for the leg departing {0}";
     public const string TripLegModeMenuAria = "Choose travel mode for the leg departing {0}";
 
-    // Trip View — bulk leg-mode selector (TRIP-BULKMODE-01). A header control that
-    // assigns one travel mode to ALL legs at once, with an overwrite toggle (default
-    // off = fill only the undefined Any/Air legs). Reuses the four mode names above.
+    // Trip View — bulk leg-mode selector. Assigns one travel mode to ALL legs; overwrite toggle (default = fill undefined legs only).
     public const string TripBulkModeLabel = "Set mode for all…";
     public const string TripBulkModeAria = "Set travel mode for all legs";
     public const string TripBulkModeMenuAria = "Choose a travel mode to apply to all legs";
     public const string TripBulkModeOverwriteLabel = "Overwrite legs that already have a mode";
     public const string TripBulkModeOverwriteAria = "Overwrite legs that already have a mode";
 
-    // Trip View — manual Any/Air leg time (Story 2.2, TRIP-MANUAL-01). The numeric
-    // minutes input shown only on Any/Air legs; entering a value carries
-    // Fidelity.Manual and overrides the placeholder. {0} = POI name of the leg's
-    // origin stop, giving the input a per-leg accessible name.
+    // Trip View — manual Any/Air leg time. Numeric minutes input for Any/Air legs; entering a value carries Fidelity.Manual. {0} = origin stop name.
     public const string TripManualMinutesPlaceholder = "min";
     public const string TripManualMinutesAria = "Manual travel time in minutes for the leg departing {0}";
-    // Story 3.5 (UX-DR6): the click-to-edit affordance on the connector's travel time,
-    // available on ANY leg (ground or Any/Air). Clicking the time opens the inline minutes
-    // input. {0} = the leg's origin stop name.
+    // Click-to-edit affordance on connector's travel time (available on ANY leg). {0} = origin stop name.
     public const string TripLegEditTimeAria = "Edit travel time for the leg departing {0}";
-    // Story 1.3 (NFR7): the inter-row leg connector's reset (↺) affordance — a real,
-    // focusable button that reverts a Manual leg override back to the computed time.
-    // Rendered only on a Manual leg; hidden at rest, revealed on hover/focus. {0} =
-    // the leg's origin stop name, giving the button a per-leg accessible name.
+    // Inter-row leg connector's reset (↺) affordance: reverts a Manual leg override back to the computed time. {{0}} = origin stop name.
     public const string TripLegResetManualAria = "Reset manual travel time for the leg departing {0}";
 
-    // TRIP-TIMELINE-01 (Story 2.6): the honest itinerary timeline. Per-stop arrival =
-    // a relative cumulative offset (always) + a wall-clock time (only with a TripStartTime),
-    // qualified by the lowest fidelity summed up to it. The em-dash marks a genuinely
-    // unknown arrival (an upstream leg's duration was unknown — never guess). All copy is
-    // honest and culture-formatted at the UI edge only.
+    // Trip View — itinerary timeline. Per-stop arrival = relative cumulative offset + optional wall-clock time + lowest fidelity.
+    // Em-dash marks genuinely unknown arrival; all copy is culture-formatted at UI edge only.
     // {0} = the formatted relative offset (e.g. "+2h 15m"). The offset is always shown.
     public const string TripTimelineOffset = "+{0}";
     // {0:HH:mm} = the wall-clock arrival; shown only when a TripStartTime is set.
     public const string TripTimelineWallClock = "{0:HH:mm}";
-    // Story 4.2 (FR-27, UX-DR12): a wall-clock arrival on a LATER calendar day than the
-    // trip start shows its DATE alongside the time. {0:d} = the locale short date (via
-    // CultureInfo.CurrentCulture, so the date component order follows the locale — NO
-    // hard-coded MM/dd). The TIME uses {1:HH:mm} to stay consistent with the same-day
-    // TripTimelineWallClock above (one 24h clock format across the whole timeline,
-    // rather than locale 12h/24h drift between same-day and later-day rows).
+    // Wall-clock arrival on a LATER calendar day shows its DATE alongside the time. {{0:d}} = locale short date, {{1:HH:mm}} = time (24h format).
     public const string TripTimelineWallClockWithDate = "{0:d} {1:HH:mm}";
-    // {0} = the wall-clock arrival, {1} = the qualifier word (e.g. "Estimated"). Renders
-    // an estimated arrival honestly: "~14:10 · Estimated". {0} alone for a clean arrival.
+    // {{0}} = the wall-clock arrival, {{1}} = the qualifier word (e.g. "Estimated"). Renders "~14:10 · Estimated" for estimated arrivals.
     public const string TripTimelineEstimatedPrefix = "~{0}";
     public const string TripTimelineQualified = "{0} · {1}";
     // The unknown-arrival marker (an upstream leg's duration was unknown).
@@ -305,41 +231,35 @@ public static class UiStrings
     // Per-stop arrival accessible name. {0} = the arrival text (offset and/or wall-clock,
     // qualified, or the unknown marker).
     public const string TripTimelineArrivalAria = "Arrival {0}";
-    // The finish/return readout at the end of the list. Label + the {0} = arrival text.
+    // The finish/return readout at the end of the list. Label + {{0}} = arrival text.
     public const string TripTimelineFinishLabel = "Return to start";
     public const string TripTimelineFinishOpenLabel = "Finish";
     public const string TripTimelineFinishAria = "Trip ends at {0}";
-    // The TripStartTime input (header). Label + accessible name; null ⇒ relative offsets only.
+    // Trip start time input (header). Label + accessible name; null means relative offsets only.
     public const string TripStartTimeLabel = "Start time";
     public const string TripStartTimeAria = "Trip start time (wall-clock)";
-    // The time-budget input (header). Label + accessible name; minutes.
-    // (Mobile — the deferred mirror — still uses these raw-minutes strings.)
+    // Time-budget input (header). Label + accessible name; minutes. Mobile still uses these raw-minutes strings.
     public const string TripBudgetLabel = "Time budget";
     public const string TripBudgetAria = "Time budget in minutes";
     public const string TripBudgetPlaceholder = "min";
-    // The soft (amber, never red) overrun flag, shown only when the KNOWN total exceeds
-    // the set budget. Honest, factual — a soft warning, not an error.
+    // Soft (amber, never red) overrun flag, shown only when the KNOWN total exceeds the set budget.
     public const string TripBudgetOverrunLabel = "Over budget";
     public const string TripBudgetOverrunAria = "The trip total exceeds the time budget";
 
-    // Story 4.3 (FR-28/29, TRIP-SCHEDULE-01, UX-DR8): the "Time limit" rename. The
-    // desktop control offers TWO ways to set the canonical TimeBudgetMinutes: an HH:MM
-    // duration (≤24h) and a finish-by deadline (any horizon, >24h). The label/aria/
-    // placeholder below replace the old "Time budget" copy on the desktop surface; the
-    // overrun chip reads "Over limit". (Mobile keeps the TripBudget* strings above.)
+    // "Time limit" rename for desktop. Offers two ways to set canonical TimeBudgetMinutes: HH:MM duration (≤24h) and finish-by deadline (any horizon).
+    // Label/aria/placeholder below replace old "Time budget" copy on desktop; overrun chip reads "Over limit".
     public const string TripTimeLimitLabel = "Time limit";
     public const string TripTimeLimitAria = "Time limit as a duration (HH:MM)";
     public const string TripTimeLimitPlaceholder = "hh:mm";
-    // Trip stops compaction: aria/title for the shared DurationInput ▲▼ steppers.
+    // Aria/title for the shared DurationInput ▲▼ steppers (Trip stops compaction).
     public const string TripDurationStepUpAria = "Increase duration";
     public const string TripDurationStepDownAria = "Decrease duration";
-    // Story 4.3 (FR-29): the finish-by deadline alternative (a TIME GOAL, computed once
-    // into minutes — distinct from the Finish STOP of Story 4.5). Requires a start.
+    // Finish-by deadline alternative (a TIME GOAL, computed once into minutes; distinct from Finish STOP). Requires a start.
     public const string TripFinishByLabel = "Finish by";
     public const string TripFinishByAria = "Finish-by deadline (date and time); requires a start time";
     // Shown when no start time is set: the deadline input needs a start to compute against.
     public const string TripFinishByNeedsStartHint = "Set a start time to use a finish-by deadline";
-    // The soft (amber, never red) over-limit flag — the Story 4.3 rename of the overrun chip.
+    // Soft (amber, never red) over-limit flag (rename of the overrun chip).
     public const string TripOverLimitLabel = "Over limit";
     public const string TripOverLimitAria = "The trip total exceeds the time limit";
 

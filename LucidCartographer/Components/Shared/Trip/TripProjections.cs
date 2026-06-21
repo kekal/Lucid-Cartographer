@@ -3,7 +3,7 @@ namespace LucidCartographer.Components.Shared.Trip;
 /// <summary>
 /// Which surface initiated a Trip stop selection. Drives the directional sync
 /// follow-up: a <see cref="List"/> selection pans the map to the marker; a
-/// <see cref="Map"/> selection scrolls the stop row into view (TRIP-SELECT-01).
+/// <see cref="Map"/> selection scrolls the stop row into view.
 /// </summary>
 public enum TripSelectionSource
 {
@@ -12,8 +12,7 @@ public enum TripSelectionSource
 }
 
 /// <summary>
-/// The Start/Finish role a stop holds in the Trip (Story 1.7,
-/// [TRIP-STARTFINISH-01]). Derived per-stop by <see cref="TripViewModel.StopRole"/>
+/// The Start/Finish role a stop holds in the Trip. Derived per-stop by <see cref="TripViewModel.StopRole"/>
 /// from the collection's <c>StartPoiId</c>/<c>FinishPoiId</c>; both surfaces use
 /// it to pick the badge/marker glyph and the set/unset control state.
 /// </summary>
@@ -24,25 +23,20 @@ public enum TripStopRole
     Finish,
 }
 
-// TRIP-LEG-01: legs are straight skeletons computed on the fly by TripViewModel
-// from the seeded Stop Order. The geometry (FromLat..ToLon) is never persisted.
-// TRIP-TRAVELTIME-01 (Epic 2): the travel-time fields below ARE read back from
-// the persisted RouteSegment cache when a row exists for the leg's
-// (FromPoiId, ToPoiId, collection TravelMode) key — null until the background
-// service has computed it (render "—" + computing). The line-solidity =
-// geometric-fidelity rule still keys off IsMeasured (Measured fidelity only);
-// the haversine Mock yields Estimated, so legs stay dashed + muted for now.
+// Legs are straight skeletons computed on the fly by TripViewModel from the Stop Order.
+// The geometry (FromLat..ToLon) is never persisted. Travel-time fields are read from
+// the persisted RouteSegment cache when a row exists for the leg's (FromPoiId, ToPoiId,
+// TravelMode) key — null until computed by the background service. Line-solidity
+// (geometric-fidelity rule) keys off IsMeasured; the haversine Mock yields Estimated.
 
 /// <summary>
 /// One straight connecting leg between two consecutive placeable stops (or the
 /// closing leg back to the Start on a Roundtrip).
 /// <para>
-/// TRIP-TRAVELTIME-01: <see cref="DurationSeconds"/> (canonical seconds),
-/// <see cref="DistanceMeters"/> (canonical meters) and <see cref="Fidelity"/>
-/// are populated from the RouteSegment cache; all three are <c>null</c> when no
-/// cache row exists yet (not-yet-computed ⇒ the UI renders an em-dash + computing
-/// state). <see cref="IsMeasured"/> is derived: true only when
-/// <see cref="Fidelity"/> equals <see cref="Data.Entities.Fidelity.Measured"/>.
+/// <see cref="DurationSeconds"/> (seconds), <see cref="DistanceMeters"/> (meters) and
+/// <see cref="Fidelity"/> are populated from the RouteSegment cache; all three are
+/// <c>null</c> when no cache row exists yet. <see cref="IsMeasured"/> is derived: true
+/// only when <see cref="Fidelity"/> equals <see cref="Data.Entities.Fidelity.Measured"/>.
 /// </para>
 /// </summary>
 public sealed record TripLeg(
@@ -56,34 +50,26 @@ public sealed record TripLeg(
     int? DurationSeconds = null,
     double? DistanceMeters = null,
     string? Fidelity = null,
-    // TRIP-DEGRADE-01 (Story 2.3): true when this leg's backing RouteSegment was
-    // produced by the provider-down straight-line fallback (Source ==
-    // TravelTimeSource.EstimatedFallback). Drives
-    // TripViewModel.IsShowingApproximateEstimates and the honest "showing
-    // straight-line estimates" note — distinct from a normally-Estimated Mock leg.
+    // True when this leg's backing RouteSegment was produced by the provider-down
+    // straight-line fallback (Source == TravelTimeSource.EstimatedFallback).
+    // Drives IsShowingApproximateEstimates — distinct from a normally-Estimated leg.
     bool IsFallback = false,
-    // TRIP-OSRM-02 (Story 4.2): the measured road geometry as an encoded polyline,
-    // precision 5 (the encoding Story 4.1's OsrmTravelTimeProvider produces via
-    // geometries=polyline — TRIP-OSRM-01). null/empty = no road geometry is known
-    // (Estimated / Manual / Placeholder / Air, or a cache row with no row yet) ⇒ the
-    // map draws a straight dashed + muted connector. Only a Measured leg carries it;
-    // its presence (not IsMeasured alone) is what makes the line render solid/road-
-    // shaped. Carried verbatim from RouteSegment.GeometryPolyline; decoded JS-side.
+    // Measured road geometry as an encoded polyline (precision 5, from OsrmTravelTimeProvider).
+    // Null/empty = no road geometry known (Estimated/Manual/Placeholder/Air or cache not
+    // yet computed) ⇒ map draws straight dashed connector. Only Measured legs carry it;
+    // its presence (not IsMeasured alone) makes the line render solid. Decoded JS-side.
     string? GeometryPolyline = null,
-    // TRIP-LEGMODE-01 (Story 3.2, FR-19): this leg's own travel mode — the From-stop's
-    // OutgoingTravelMode (one of TravelMode.All; a null OutgoingTravelMode is normalized
-    // to AnyAir here so there is one single "Any/Air" state, never a null sentinel). The
-    // leg's cache row is looked up by its own (From, To, Mode) key, NOT one trip-wide
-    // mode (TRIP-CACHE-01). An Any/Air leg has no ground cache row (never auto-computed,
-    // FR-21) ⇒ DurationSeconds null ⇒ "—". Ground modes (Walk/Drive/Cycle) auto-compute.
+    // This leg's own travel mode — the From-stop's OutgoingTravelMode. A null value is
+    // normalized to AnyAir (one single "Any/Air" state, never null). Cache lookup is by
+    // (From, To, Mode) key, not trip-wide mode. Any/Air legs have no ground cache row
+    // ⇒ null DurationSeconds ⇒ "—". Ground modes (Walk/Drive/Cycle) auto-compute.
     string Mode = Data.Entities.TravelMode.AnyAir);
 
 /// <summary>
 /// One ordered, placeable stop projected for the stop-list panel and the
-/// numbered map markers. <see cref="OrderIndex"/> is 1-based (AR-11).
+/// numbered map markers. <see cref="OrderIndex"/> is 1-based.
 /// <see cref="IsStart"/>/<see cref="IsFinish"/> reflect the collection's
-/// explicit Start/Finish designation (read-only here; the controls that change
-/// them belong to Story 1.7).
+/// explicit Start/Finish designation (read-only here).
 /// </summary>
 public sealed record TripStop(
     int OrderIndex,
@@ -93,42 +79,25 @@ public sealed record TripStop(
     double Lon,
     bool IsStart,
     bool IsFinish,
-    // TRIP-LEGMODE-01 (Story 3.2): the membership's per-leg OutgoingTravelMode — the
-    // mode of the leg LEAVING this stop toward the next in Stop Order. One of
-    // TravelMode.All or null (null ≡ AnyAir). Read from PoiCollectionItem.OutgoingTravelMode
-    // in ReadStopsAndRowsAsync and consumed by BuildLegs to set each leg's Mode and pick
-    // its (From, To, Mode) cache key. Defaulted so existing TripStop constructions (tests
-    // that build stops by hand) keep compiling with a null (≡ AnyAir) outgoing mode.
+    // The mode of the leg leaving this stop toward the next. One of TravelMode.All or
+    // null (null ≡ AnyAir). Read from PoiCollectionItem.OutgoingTravelMode and consumed
+    // by BuildLegs to set each leg's Mode and pick its cache key.
     string? OutgoingTravelMode = null);
 
 /// <summary>
 /// One stop-list row over the FULL trip membership — placeable stops and
-/// unplaceable POIs alike (an unplaceable POI is never silently dropped from
-/// the list; UX-DR10). [TRIP-PLACE-04][TRIP-ORDER-UNPLACE-01]
+/// unplaceable POIs alike (never silently dropped from the list).
 /// <see cref="DisplayOrder"/> is the user-facing routed Stop Order, computed
 /// over the placeable subset only: contiguous 1..M for placeable rows, and
 /// <c>null</c> for unplaceable rows (which render the "Not placeable"
 /// treatment instead of an order badge, so the presented numbering never shows
 /// a gap). The stored <c>OrderIndex</c> (owned by TripOrderingService) is not
-/// affected — this is presentation state only. The row components render this
-/// state verbatim; the placeability decision is made in TripViewModel.
+/// affected — this is presentation state only.
 /// <para>
-/// TRIP-DWELL-01 (Story 2.5): <see cref="DwellMinutes"/> carries the per-membership
-/// dwell time in canonical minutes (<c>null</c> = unset, contributes zero) read from
-/// <c>PoiCollectionItem.DwellMinutes</c>. Present on placeable and unplaceable rows
-/// alike; presentation only — the timeline that consumes it is Story 2.6.
-/// </para>
-/// <para>
-/// Story 1.2 (wide trip-scoped table, FR-2): the Name column + Actions need a few
-/// more presentation fields read from the already-loaded <c>Poi</c> in the membership
-/// read — pure projection, no new ctor dependency. <see cref="Address"/> backs the
-/// muted address sub-line (only rendered when present); <see cref="IsEnriched"/> /
-/// <see cref="EnrichmentNeedsManualUrl"/> pick the enrichment-state icon (mirroring
-/// PoiTable's mapping); <see cref="GoogleMapsUrl"/> is the resolved
-/// <see cref="PoiUrlHelper.GetGoogleMapsUrl"/> result for the "Open in Google Maps"
-/// anchor (computed in the projection so the component carries no Poi/helper logic,
-/// NFR1). Carried on every row; the unplaceable-row treatment ignores the action/icon
-/// fields (it renders the "Not placeable" marker instead).
+/// <see cref="DwellMinutes"/> carries the per-membership dwell time in minutes
+/// (<c>null</c> = unset). <see cref="Address"/>, <see cref="IsEnriched"/>,
+/// <see cref="EnrichmentNeedsManualUrl"/>, and <see cref="GoogleMapsUrl"/> are
+/// presentation fields read from the already-loaded <c>Poi</c> in the membership read.
 /// </para>
 /// </summary>
 public sealed record TripStopRow(

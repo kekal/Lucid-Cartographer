@@ -1,7 +1,6 @@
 @inject IJSRuntime Js
 
-@* Mobile "More" tab: account summary, appearance (light/dark theme for the
-   mobile UI), about, and sign out. *@
+@* Mobile "More" tab with account summary, appearance (theme), about, and sign out. *@
 <div class="m-app">
     <div class="screen scroll">
         <div class="app-header" style="padding-top:calc(12px + var(--safe-top))">
@@ -34,10 +33,7 @@
                     <div class="sub">Mobile UI appearance</div>
                 </div>
                 <div class="trailing">
-                    @* H04 (Wave 7): drop role="radiogroup" — WAI-ARIA APG requires
-                       arrow-key roving tabindex which we don't implement. aria-pressed
-                       on a <button> is the correct semantic for these toggles; Tab
-                       cycles between them in source order. *@
+                    @* aria-pressed on buttons (not role="radiogroup") for proper a11y: Tab cycles in source order, no arrow-key roving needed. *@
                     <div class="segmented" style="width:140px" aria-label="Theme">
                         <button type="button" class="@(_theme == "light" ? "active" : "")"
                                 aria-pressed="@(_theme == "light" ? "true" : "false")"

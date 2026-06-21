@@ -18,10 +18,7 @@ public class GoogleMapsListScraper(
     // 10-min timeout and concurrency=1 meant for headless scrapes.
     private readonly SemaphoreSlim _fetchListsSemaphore = new(1, 1);
 
-    // HIGH-07: Concurrency, retry, and timeout are now enforced by the
-    // "scraper" Polly resilience pipeline registered in Program.cs
-    // (ConcurrencyLimiter(permits=1) + Retry + Timeout). This replaces
-    // the previous static SemaphoreSlim + manual timeout plumbing.
+    // Concurrency, retry, and timeout enforced by the "scraper" Polly resilience pipeline.
     private readonly ResiliencePipeline _pipeline = pipelineProvider.GetPipeline("scraper");
 
     private static readonly string[] AllowedUrlPrefixes =
@@ -38,7 +35,6 @@ public class GoogleMapsListScraper(
 
     public async Task<ScrapeResult> ScrapeAsync(string listUrl, Action<int>? onProgress = null, CancellationToken cancellationToken = default)
     {
-        // URL validation: prevent SSRF
         if (string.IsNullOrWhiteSpace(listUrl))
         {
             throw new ArgumentException("List URL must not be empty.", nameof(listUrl));
@@ -50,12 +46,8 @@ public class GoogleMapsListScraper(
             throw new ArgumentException("URL must be a Google Maps URL (https://www.google.com/maps/... or https://maps.app.goo.gl/...).", nameof(listUrl));
         }
 
-        // Polly "scraper" pipeline enforces: single-flight (permit=1),
-        // retry (2 attempts with jittered backoff), and a 10-minute
-        // per-attempt timeout. Upstream callers should catch
-        // Polly.RateLimiting.RateLimiterRejectedException if they want
-        // to surface a "scraper busy" message; previously this was
-        // TimeoutException("Timed out waiting for scraper availability…").
+        // Polly pipeline enforces single-flight concurrency with retry and timeout.
+        // Callers may catch RateLimiterRejectedException to surface "scraper busy" errors.
         try
         {
             return await _pipeline.ExecuteAsync(
@@ -69,9 +61,6 @@ public class GoogleMapsListScraper(
         }
     }
 
-    // The persistent profile is now owned by the shared browser session; these
-    // delegate so the scraper's public surface (used by the Data Sources VM)
-    // stays stable.
     public bool HasBrowserProfile => session.HasProfile;
 
     public Task ResetBrowserProfileAsync(CancellationToken cancellationToken = default)
@@ -149,8 +138,7 @@ public class GoogleMapsListScraper(
             }", new object[] { labels, preferSelector! });
     }
 
-    /// <summary>Log the current page URL + its top buttons/headings — so an
-    /// unexpected page (e.g. a mobile "open in app" wall) is visible in the logs.</summary>
+    /// <summary>Log page URL and top buttons/headings for debugging unexpected pages.</summary>
     private async Task DumpPageAsync(IPage page, string reason)
     {
         try
@@ -169,8 +157,7 @@ public class GoogleMapsListScraper(
         }
     }
 
-    /// <summary>Dismiss the mobile-web "open/continue in app" interstitial or banner
-    /// so it doesn't intercept taps. Best-effort across EN/RU label variants.</summary>
+    /// <summary>Dismiss mobile "open in app" interstitials across EN/RU variants.</summary>
     private async Task DismissAppInterstitialAsync(IPage page)
     {
         var dismissed = await ClickByLabelAsync(page,
@@ -184,12 +171,7 @@ public class GoogleMapsListScraper(
         }
     }
 
-    /// <summary>
-    /// Deterministically open the mobile "Your places → Saved" panel: navigate to
-    /// maps (hl=en), dismiss consent/app-interstitial, then hamburger Menu → Your
-    /// places → Saved. Used both initially and to RE-open between per-list clicks
-    /// (GoBack / URL-restore don't reliably return to the saved-list rows).
-    /// </summary>
+    /// <summary>Deterministically open the mobile Saved tab via full menu nav (GoBack/URL-restore unreliable).</summary>
     private async Task OpenSavedTabAsync(IPage page, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -227,23 +209,16 @@ public class GoogleMapsListScraper(
                 "sign in, then try Fetch My Lists again.");
         }
 
-        // Extract saved-list rows from the mobile Saved tab (topology, not classes).
         var listsJson = await page.EvaluateAsync<System.Text.Json.JsonElement>(
             GoogleMapsScraperScripts.DiscoverSavedListsMobile);
 
-        // Parse the discovered cards (name + count, no URLs yet). The list of
-        // NAMES is our stable work-list; the per-row data-savedlist-idx is only
-        // valid for the CURRENT DOM and must be re-resolved by name on each pass.
+        // Re-resolve by name on each pass — DOM indices are only valid for current state.
         var discovered = ParseDiscoveredLists(listsJson);
 
         logger.LogInformation("Discovered {Count} saved list cards, clicking each to capture URLs", discovered.Count);
 
-        // Click-through: click each card, capture the navigated URL, re-open the tab.
         var results = new List<SavedListInfo>();
         var savedPanelUrl = page.Url;
-
-        // Tags reflecting the CURRENT (freshly re-tagged) Saved-tab DOM. Starts as
-        // the initial discovery and is replaced after every OpenSavedTabAsync.
         var currentTags = discovered;
 
         foreach (var (_, cardName, cardCount) in discovered)
@@ -251,10 +226,7 @@ public class GoogleMapsListScraper(
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                // F7: never trust the initial positional index across re-opens.
-                // Re-resolve the row to click by NAME against the CURRENT DOM tags;
-                // if Google reordered the rows, this still clicks the right list,
-                // so the captured URL can never be paired with the wrong name.
+                // Re-resolve by name — positional indices change across re-opens.
                 var match = currentTags.FirstOrDefault(t => string.Equals(t.Name, cardName, StringComparison.Ordinal));
                 if (match.Name is null)
                 {
@@ -291,9 +263,6 @@ public class GoogleMapsListScraper(
                     logger.LogWarning("Card '{Name}' click did not navigate, skipping", cardName);
                 }
 
-                // Re-open the Saved tab via the full menu nav (GoBack / URL-restore
-                // don't reliably return to the saved-list rows), then re-tag so the
-                // next iteration re-resolves its target against the fresh DOM.
                 cancellationToken.ThrowIfCancellationRequested();
                 await OpenSavedTabAsync(page, cancellationToken);
                 var retagJson = await page.EvaluateAsync<System.Text.Json.JsonElement>(GoogleMapsScraperScripts.DiscoverSavedListsMobile);
@@ -310,15 +279,10 @@ public class GoogleMapsListScraper(
         }
 
         logger.LogInformation("Discovered {Count} saved lists with URLs", results.Count);
-
-        // Page is closed by the caller; the shared context + profile persist.
         return results;
     }
 
-    /// <summary>Parse the <c>DiscoverSavedListsMobile</c> result into
-    /// <c>(idx, name, count)</c> rows, keeping only entries with a usable name and
-    /// a current DOM index. The <c>idx</c> is only valid for the DOM state that
-    /// produced it, so callers must re-parse after every re-tag.</summary>
+    /// <summary>Parse saved-list rows; indices are only valid for current DOM state.</summary>
     private static List<(int Idx, string Name, int? Count)> ParseDiscoveredLists(System.Text.Json.JsonElement arr)
     {
         var parsed = new List<(int Idx, string Name, int? Count)>();
@@ -343,32 +307,20 @@ public class GoogleMapsListScraper(
     {
         logger.LogInformation("Starting scrape of {Url}", trimmedUrl);
 
-        // Serialise against the exporter / Fetch My Lists — all drive the single
-        // shared browser. Scrapes are already single-flight via the Polly
-        // "scraper" pipeline, so waiting here only blocks cross-feature collisions.
+        // Serialise against other Google browser operations (shared session).
         using var lease = await browserLock.AcquireAsync(cancellationToken);
 
-        // Borrow a page from the shared session. Public shared-list scrapes don't
-        // require a Google login, but using the same session means private/saved
-        // lists work once signed in. Close the page (never the context).
         var page = await session.NewPageAsync(cancellationToken);
 
         try
         {
-            // Navigate to the list URL
             await page.GotoAsync(trimmedUrl, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30000 });
-
-            // Wait for list content to load
             await page.WaitForTimeoutAsync(5000);
-
             logger.LogInformation("Page URL after navigation: {Url}", page.Url);
 
-            // Accept cookies/consent if dialog appears (shared helper).
             await GoogleConsent.DismissAsync(page, logger);
-
             logger.LogInformation("Post-consent URL: {Url}", page.Url);
 
-            // Extract list name from the page header
             string? listName = null;
             try
             {
@@ -393,42 +345,8 @@ public class GoogleMapsListScraper(
                 logger.LogWarning(ex, "Failed to extract list name");
             }
 
-            // === Structure discovery =================================================
-            //
-            // Obfuscated class names (div.BsJqK, div.Nv2PK …) rotate every few months
-            // whenever Google reships the maps UI, and link patterns vary across list
-            // views (some use `/maps/place/` anchors, others use click-handled buttons
-            // with no href at all). CSS overflow isn't reliable either: short lists
-            // fit without overflow, and virtualized panels use `overflow: hidden` with
-            // JS-driven scroll. So we lean on pure DOM topology:
-            //
-            //   A list panel is the div with the highest count of *repeating row*
-            //   children — direct children (or one-layer-nested if the container
-            //   wraps them in a single spacer) that have real height and real text.
-            //
-            // We walk every div, score it by how many card-like children it has,
-            // and pick the winner. Three-or-more card-like children rules out page
-            // chrome (header, footer, single buttons), and we skip any candidate
-            // that's an ancestor of a better one so we pick the *tightest* container.
-            //
-            // The chosen container gets `data-scraper-scroll='1'`; each card gets
-            // `data-scraper-idx='N'`. Everything after this runs in C# against those
-            // stable data attributes.
-            //
-            // Called repeatedly: at startup until the list hydrates, after each
-            // scroll pass (tags newly lazy-rendered cards, leaves existing indices
-            // intact), and after each GoBack from the detail view.
-            // JS source lives in GoogleMapsScraperScripts so it can be unit-tested
-            // against fixture HTML independently of the full scraper pipeline.
-
-            // Initial discovery — wait up to ~30s for the list panel to hydrate.
-            // Consent redirect + lazy rendering can delay the list panel by
-            // several seconds on a cold cache. If we still see nothing after
-            // ~10s, trigger a single Reload() — empirically, the first nav
-            // post-consent sometimes lands on a half-rendered `/@/` shell
-            // where the list data payload never gets parsed into cards, but
-            // a cheap reload picks up the correct state because the cookie
-            // jar and URL are already canonical by then.
+            // Discover list panel via DOM topology (class names are obfuscated/rotating).
+            // Tags stable data attributes for all downstream operations.
             (int total, bool scrollFound, int divsExamined, string? diag) discovery = (0, false, 0, null);
             var reloadAttempted = false;
             for (var attempt = 0; attempt < 30; attempt++)
@@ -453,7 +371,7 @@ public class GoogleMapsListScraper(
                             Timeout = 15000
                         });
                     }
-                    catch (TimeoutException) { /* best effort */ }
+                    catch (TimeoutException) { }
                 }
                 await page.WaitForTimeoutAsync(1000);
             }
@@ -472,7 +390,6 @@ public class GoogleMapsListScraper(
                     "Discovered {Count} initial list items (examined {Divs} divs)",
                     discovery.total, discovery.divsExamined);
 
-                // DIAG: dump first card's structure so we can spot place-id attrs
                 try
                 {
                     var dump = await page.EvaluateAsync<string>(@"
@@ -492,8 +409,7 @@ public class GoogleMapsListScraper(
                 catch (Exception ex) { logger.LogWarning(ex, "DIAG dump failed"); }
             }
 
-            // Scroll loop — drives lazy-loaded cards into the DOM, re-tags each
-            // pass, terminates when the tagged count stops growing for 3 rounds.
+            // Scroll to load lazy-rendered cards; terminate after 3 stable rounds.
             if (discovery.total > 0)
             {
                 var scrollContainer = page.Locator("[data-scraper-scroll='1']").First;
@@ -527,16 +443,7 @@ public class GoogleMapsListScraper(
                 }
             }
 
-            // Fast-path harvest: read every tagged card's visible data in one
-            // JS round-trip. All card-level metadata (name, rating, category,
-            // description, image URL) comes from this single pass — we do NOT
-            // re-read the DOM per item. For each card we then try the fast
-            // path: if the card embeds a place anchor whose href contains
-            // `@lat,lon,…`, we parse coords directly. Otherwise the card is
-            // an anchor-less `<button jsaction>` (common on personal / shared
-            // lists) and we fall back to a click-through just to navigate the
-            // URL bar, read the coords, and go back. Address / website / phone
-            // are filled later by PoiEnrichmentBackgroundService.
+            // Harvest all card metadata in one JS round-trip; fallback to click-through for coordinates if needed.
             var harvestJson = await page.EvaluateAsync<System.Text.Json.JsonElement>(GoogleMapsScraperScripts.HarvestAll);
             var cards = harvestJson.EnumerateArray().ToList();
             var totalItems = cards.Count;
@@ -566,22 +473,12 @@ public class GoogleMapsListScraper(
                     continue;
                 }
 
-                // Fast path: href may already contain coordinates.
                 (double lat, double lon)? coords = null;
                 if (!string.IsNullOrEmpty(href))
                 {
                     coords = ExtractCoordinates(href);
                 }
 
-                // Click-through fallback: when the harvested href isn't a
-                // canonical /maps/place/ URL — either the card had no anchor
-                // (common on personal / shared lists with `<button jsaction>`
-                // tiles) or the JS selector matched a generic maps link
-                // (e.g. an `/@lat,lon,17z` viewport anchor) — click the card to
-                // navigate to the place page, read the URL (which embeds the
-                // place ID + coords), then go back to the list. Without this
-                // upgrade the row would be saved with only viewport coords and
-                // enrichment couldn't resolve the right place later.
                 var hrefIsPlaceUrl = !string.IsNullOrEmpty(href) && href.Contains("/maps/place/");
                 if (!hrefIsPlaceUrl)
                 {
@@ -593,7 +490,6 @@ public class GoogleMapsListScraper(
                         if (await cardEl.IsVisibleAsync())
                         {
                             await cardEl.ClickAsync();
-                            // Wait for URL to transition to /maps/place/
                             for (var w = 0; w < 40; w++)
                             {
                                 var u = page.Url;
@@ -606,9 +502,7 @@ public class GoogleMapsListScraper(
                                 }
                                 await page.WaitForTimeoutAsync(300);
                             }
-                            // Navigate back to the list
                             await page.GoBackAsync(new PageGoBackOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 15000 });
-                            // Wait for the list to re-render
                             await page.WaitForTimeoutAsync(1000);
                         }
                     }
@@ -623,7 +517,6 @@ public class GoogleMapsListScraper(
                     logger.LogInformation("[{Idx}/{Total}] '{Name}' — no coords after click-through, deferred to enrichment", i + 1, totalItems, name);
                 }
 
-                // Rating (text → double)
                 double? rating = null;
                 if (card.TryGetProperty("rating", out var rEl) && rEl.ValueKind == System.Text.Json.JsonValueKind.String)
                 {
@@ -633,7 +526,6 @@ public class GoogleMapsListScraper(
                     }
                 }
 
-                // Review count (raw text → digits → int)
                 int? reviewCount = null;
                 if (card.TryGetProperty("reviewCount", out var rcEl) && rcEl.ValueKind == System.Text.Json.JsonValueKind.String)
                 {
@@ -647,13 +539,7 @@ public class GoogleMapsListScraper(
                 var category = card.TryGetProperty("category", out var cEl) && cEl.ValueKind == System.Text.Json.JsonValueKind.String ? cEl.GetString() : null;
                 var description = card.TryGetProperty("description", out var dEl) && dEl.ValueKind == System.Text.Json.JsonValueKind.String ? dEl.GetString() : null;
 
-                // Image: upsize the thumbnail URL (`…=w92-h92-k-no` → `…=w1024`)
-                // and download the bytes now, while the signed `gps-cs-s` token
-                // is still fresh. Google blocks cross-origin hotlinking and the
-                // token expires in minutes, so persisting only the URL is useless.
-                // APIRequest carries session cookies and bypasses the anti-hotlink
-                // check; bytes land on the Poi entity and are served from
-                // /api/poi-image/{id}.
+                // Fetch image bytes now — signed token expires in minutes; download before returning from scraper.
                 string? imageUrl = null;
                 byte[]? imageData = null;
                 string? imageContentType = null;
@@ -685,8 +571,6 @@ public class GoogleMapsListScraper(
                     }
                 }
 
-                // NULL coords when href had none — enrichment service will
-                // fill real lat/lon via a name-based search.
                 var lat = coords?.lat;
                 var lon = coords?.lon;
                 results.Add(new ImportedPoi(
@@ -694,8 +578,7 @@ public class GoogleMapsListScraper(
                     Latitude: lat,
                     Longitude: lon,
                     GoogleMapsUrl: href,
-                    // Address / Website / Phone deliberately null — filled later
-                    // by PoiEnrichmentBackgroundService via the place URL.
+                    // Address/Website/Phone filled later by PoiEnrichmentBackgroundService.
                     Address: null,
                     Category: category,
                     Description: description,
@@ -729,18 +612,14 @@ public class GoogleMapsListScraper(
                 }
                 return (total, scrollFound, divsExamined, diag);
             }
-        } // end try
+        }
         finally
         {
-            // Close the borrowed page only; the shared context + profile persist.
             try { await page.CloseAsync(); } catch (Exception ex) { logger.LogDebug(ex, "Error closing scrape page"); }
         }
     }
 
-    /// <summary>
-    /// IE-14: Delegates to shared PoiUrlHelper.ExtractCoordinatesFromUrl to eliminate
-    /// duplicated @/ coordinate parsing logic.
-    /// </summary>
+    /// <summary>Extract @lat,lon coordinates from a Google Maps URL.</summary>
     private static (double lat, double lon)? ExtractCoordinates(string url)
         => PoiUrlHelper.ExtractCoordinatesFromUrl(url);
 }

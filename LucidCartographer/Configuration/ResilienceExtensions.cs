@@ -48,9 +48,8 @@ public static class ResilienceExtensions
                 .AddTimeout(TimeSpan.FromMinutes(2));
         });
 
-        // TRIP-TRAVELTIME-01: per-leg travel-time provider calls. Same retry +
-        // timeout shape as "enrichment"; the haversine Mock never fails, but a
-        // real routing provider (Epic 4) gets transient-fault handling for free.
+        // Per-leg travel-time provider calls with same retry + timeout shape as
+        // "enrichment"; a real routing provider gets transient-fault handling.
         services.AddResiliencePipeline("travel-time", pipeline =>
         {
             pipeline

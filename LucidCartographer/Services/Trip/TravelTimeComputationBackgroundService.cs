@@ -9,19 +9,11 @@ using Polly.Registry;
 namespace LucidCartographer.Services.Trip;
 
 /// <summary>
-/// TRIP-TRAVELTIME-01: off-circuit (re)computation of per-leg travel time (AR-5),
-/// mirroring <c>PoiEnrichmentBackgroundService</c>. The loop blocks on
-/// <see cref="TravelTimeTrigger.WaitAsync"/>; on each wake it loads every
-/// Trip-View-enabled collection's ordered, placeable stops, forms the directional
-/// leg pairs (consecutive k→k+1, plus the closing leg back to the Start on a
-/// Roundtrip — the same shape as <c>TripViewModel.BuildLegs</c>), calls the active
-/// provider through the Polly "travel-time" pipeline for each pair lacking a cache
-/// row, and upserts the result into <see cref="RouteSegment"/> under the shared
-/// <see cref="SqliteWriteLock"/>.
-///
-/// SCOPE: write-on-compute + read-back only. Cache invalidation / recompute on
-/// coord/mode/provider change (Story 2.4) is OUT of scope — a leg is computed iff
-/// no cache row exists yet for its (FromPoiId, ToPoiId, TravelMode) key.
+/// Off-circuit (re)computation of per-leg travel time, mirroring <c>PoiEnrichmentBackgroundService</c>.
+/// Loads Trip-View-enabled collections' ordered placeable stops, forms directional leg pairs
+/// (k→k+1, plus closing leg back to start on Roundtrip), calls the provider for uncached pairs,
+/// and upserts results into <see cref="RouteSegment"/> under <see cref="SqliteWriteLock"/>.
+/// Computes only if no cache row exists yet for the (FromPoiId, ToPoiId, TravelMode) key.
 /// </summary>
 public sealed class TravelTimeComputationBackgroundService(
     IDbContextFactory<AppDbContext> factory,
@@ -46,8 +38,6 @@ public sealed class TravelTimeComputationBackgroundService(
             try
             {
                 await ProcessOnceAsync(stoppingToken);
-                // Sleep until the idle timeout fires OR the VM signals that a
-                // Trip turned on / projections rebuilt with missing cache rows.
                 await trigger.WaitAsync(_idlePoll, stoppingToken);
             }
             catch (OperationCanceledException) { break; }
@@ -96,18 +86,9 @@ public sealed class TravelTimeComputationBackgroundService(
             }
             catch (Exception ex)
             {
-                // TRIP-DEGRADE-01 (Story 2.3, AC1/AC3): the active provider failed
-                // for this leg (unreachable / no route). Rather than leave it blank
-                // or rethrow out of the loop, substitute the shared haversine
-                // Estimated value and stamp Source = EstimatedFallback so the VM can
-                // surface the honest "straight-line estimates" note. The loop
-                // continues to the next leg — one bad leg never fails the pass.
+                // Provider failed (unreachable/no route): fall back to haversine estimate instead of failing the loop.
                 result = EstimatedTravelTime.Compute(leg.From, leg.To, leg.TravelMode, options.Value);
                 source = TravelTimeSource.EstimatedFallback;
-
-                // NFR6: log a WARNING naming the leg + the resulting (degraded)
-                // fidelity, distinct from the success path, so SM-3 can count
-                // degraded legs.
                 logger.LogWarning(ex,
                     "Travel-time provider failed for leg {From}->{To} ({Mode}); degraded to {Fidelity} via straight-line fallback",
                     leg.From.PoiId, leg.To.PoiId, leg.TravelMode, result.Fidelity);
@@ -120,12 +101,10 @@ public sealed class TravelTimeComputationBackgroundService(
     }
 
     /// <summary>
-    /// TRIP-LEGMODE-01 (Story 3.2): reads every Trip-View-enabled collection's ordered,
-    /// placeable stops and returns the directional leg pairs that (a) travel under a
-    /// GROUND mode (Walk / Drive / Cycle) and (b) have no <see cref="RouteSegment"/> cache
-    /// row yet under their OWN <c>(From, To, Mode)</c> key. Each leg's mode is the
-    /// From-stop's <c>OutgoingTravelMode</c> (null ≡ AnyAir), NOT the collection's trip-wide
-    /// <c>TravelMode</c>. AnyAir/null legs are NEVER enqueued / never auto-estimated (FR-21).
+    /// Reads Trip-View-enabled collections' ordered placeable stops and returns directional leg pairs
+    /// that travel under GROUND mode (Walk/Drive/Cycle) and lack a cache row. Each leg uses the
+    /// From-stop's <c>OutgoingTravelMode</c> (null = AnyAir), not the collection's trip-wide mode.
+    /// AnyAir legs are never enqueued or auto-estimated.
     /// </summary>
     private async Task<List<PendingLeg>> LoadPendingLegsAsync(CancellationToken ct)
     {
@@ -142,10 +121,8 @@ public sealed class TravelTimeComputationBackgroundService(
             return [];
         }
 
-        // Existing cache keys so we never recompute a leg that already has a row
-        // (invalidation is Story 2.4). Tuple set keyed (From, To, Mode). This
-        // already covers TRIP-MANUAL-01 (Story 2.2): a manually-entered leg is just a
-        // RouteSegment row, so its key is "present" here and the leg is never re-queued.
+        // Existing cache keys; avoids recomputing legs already cached. Manually-entered legs
+        // are just RouteSegment rows, so they're present here and never re-queued.
         var existing = await db.RouteSegments
             .AsNoTracking()
             .Select(r => new { r.FromPoiId, r.ToPoiId, r.TravelMode })
@@ -165,8 +142,7 @@ public sealed class TravelTimeComputationBackgroundService(
                 .Select(ci => new { ci.PoiId, ci.OrderIndex, ci.OutgoingTravelMode, ci.Poi.Latitude, ci.Poi.Longitude })
                 .ToListAsync(ct);
 
-            // TRIP-LEGMODE-01: carry each From-stop's outgoing mode (null ≡ AnyAir)
-            // alongside its endpoint so the per-leg mode drives enqueue + cache key.
+            // Carry each From-stop's outgoing mode (null = AnyAir) to drive enqueue and cache key.
             var stops = members
                 .Where(m => m.OrderIndex > 0 && StopPlaceability.IsPlaceable(m.Latitude, m.Longitude))
                 .OrderBy(m => m.OrderIndex)
@@ -177,8 +153,7 @@ public sealed class TravelTimeComputationBackgroundService(
 
             foreach (var (from, to, mode) in DirectionalPairs(stops, c.FinishPoiId))
             {
-                // FR-21 / TRIP-LEGMODE-01: only GROUND legs (Walk/Drive/Cycle) auto-compute;
-                // AnyAir (incl. null) legs are never enqueued / never auto-estimated.
+                // Only GROUND legs (Walk/Drive/Cycle) auto-compute; AnyAir legs are never enqueued.
                 if (!IsGroundMode(mode))
                 {
                     continue;
@@ -197,19 +172,13 @@ public sealed class TravelTimeComputationBackgroundService(
         return pending;
     }
 
-    /// <summary>
-    /// TRIP-LEGMODE-01 (FR-21): true for the ground modes that auto-compute
-    /// (Walk / Drive / Cycle). AnyAir (incl. null, already normalized to AnyAir) is
-    /// excluded — those legs are never auto-estimated.
-    /// </summary>
+    /// <summary>True for ground modes that auto-compute (Walk/Drive/Cycle); AnyAir is excluded.</summary>
     private static bool IsGroundMode(string mode) =>
         mode is TravelMode.Walk or TravelMode.Drive or TravelMode.Cycle;
 
     /// <summary>
-    /// The directional leg pairs for an ordered stop list, mirroring
-    /// <c>TripViewModel.BuildLegs</c>: consecutive k→k+1, plus the closing leg
-    /// from the last stop back to the first on a Roundtrip (no distinct Finish). Each
-    /// pair carries the FROM-stop's per-leg mode (TRIP-LEGMODE-01).
+    /// Directional leg pairs for an ordered stop list: consecutive k→k+1, plus closing leg
+    /// from last stop back to first on Roundtrip (no distinct Finish). Mirrors <c>TripViewModel.BuildLegs</c>.
     /// </summary>
     private static IEnumerable<(TravelEndpoint From, TravelEndpoint To, string Mode)> DirectionalPairs(
         IReadOnlyList<PendingStop> stops, int? finishPoiId)
@@ -229,8 +198,7 @@ public sealed class TravelTimeComputationBackgroundService(
             && stops.Any(s => s.Endpoint.PoiId == fid);
         if (!finishIsDistinctStop)
         {
-            // The closing leg leaves the LAST stop ⇒ its From-stop is stops[^1],
-            // so the closing leg's mode is the last stop's OutgoingTravelMode.
+            // Closing leg uses last stop's outgoing mode.
             yield return (stops[^1].Endpoint, stops[0].Endpoint, stops[^1].OutgoingTravelMode);
         }
     }
@@ -239,11 +207,8 @@ public sealed class TravelTimeComputationBackgroundService(
     private readonly record struct PendingStop(TravelEndpoint Endpoint, string OutgoingTravelMode);
 
     /// <summary>
-    /// Upserts one computed leg into the cache under the write lock. Idempotent:
-    /// an existing row for the key is updated in place (no duplicate inserted).
-    /// Internal so the Manual/Measured no-downgrade guard can be driven directly in
-    /// tests (the production loop never re-queues an existing key, so the guard is
-    /// otherwise unreachable until Story 2.4's recompute path).
+    /// Upserts one computed leg into the cache under the write lock. Idempotent: existing rows
+    /// are updated in place. Internal so the Manual/Measured no-downgrade guard can be tested directly.
     /// </summary>
     internal async Task UpsertAsync(PendingLeg leg, TravelLegResult result, string source, CancellationToken ct)
     {
@@ -255,18 +220,7 @@ public sealed class TravelTimeComputationBackgroundService(
                  && r.TravelMode == leg.TravelMode,
             ct);
 
-        // TRIP-MANUAL-01 (Story 2.2, AC6): never overwrite a user's manual entry.
-        // LoadPendingLegsAsync already skips any pair that has a row, so a compute
-        // pass should not reach here for a Manual leg — but this explicit guard
-        // makes the protection defensive against a future recompute path (Story
-        // 2.4) that might re-queue an existing key. A Manual row is changed/cleared
-        // only by the user (TripViewModel.Set/ClearManualLegTimeAsync).
-        //
-        // TRIP-DEGRADE-01 (Story 2.3, AC5): a degraded straight-line estimate must
-        // never DOWNGRADE a higher-fidelity Measured row. Measured arrives in Epic
-        // 4; this is a defensive guard so a later recompute/fallback can't replace
-        // a real measured time with an approximation. (A fallback only ever fills a
-        // leg that would otherwise be blank/failed.)
+        // Never overwrite Manual or Measured rows (user-entered or higher-fidelity data).
         if (existing is not null && existing.Fidelity is Fidelity.Manual or Fidelity.Measured)
         {
             return;

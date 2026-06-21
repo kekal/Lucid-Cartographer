@@ -4,8 +4,6 @@ namespace LucidCartographer.Services.Browser;
 
 /// <summary>
 /// Single source of truth for dismissing Google's cookie/consent interstitial.
-/// Previously this exact block was copy-pasted into the exporter, the scraper
-/// (twice) and the enricher (review finding #9); they now all call here.
 /// </summary>
 public static class GoogleConsent
 {

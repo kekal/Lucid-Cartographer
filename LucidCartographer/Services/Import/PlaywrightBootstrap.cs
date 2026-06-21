@@ -1,18 +1,8 @@
 namespace LucidCartographer.Services.Import;
 
 /// <summary>
-/// Process-wide bootstrap of the Playwright browser binaries so the app
-/// and the integration tests work out-of-the-box on a clean machine
-/// without the user having to invoke <c>playwright install</c> manually.
-///
-/// Called by <see cref="GoogleMapsListScraper"/> before launching
-/// Chromium and by the test harness (IntegrationTestBase) before
-/// <see cref="Microsoft.Playwright.Playwright.CreateAsync"/>.
-///
-/// Playwright's install command is idempotent and fast when browsers are
-/// already present, so running it once per process is cheap. The result
-/// is cached in a static flag behind a SemaphoreSlim so concurrent
-/// callers don't race the installer.
+/// Process-wide bootstrap of Playwright browser binaries. Cached in a static
+/// flag behind SemaphoreSlim so concurrent callers don't race the installer.
 /// </summary>
 public static class PlaywrightBootstrap
 {

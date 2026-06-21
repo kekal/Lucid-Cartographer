@@ -4,10 +4,8 @@ using Microsoft.Extensions.Hosting;
 namespace LucidCartographer.Services.Export;
 
 /// <summary>
-/// Single-consumer hosted service that drains <see cref="ExportJobQueue"/> and
-/// runs each export with the host's <c>stoppingToken</c> — so a long headful
-/// export is cancellable on shutdown and never pins the shared Coravel queue.
-/// One job at a time (serialised), matching the headful browser's single-flight.
+/// Single-consumer service that drains <see cref="ExportJobQueue"/>, serialized one job at a time,
+/// cancellable on shutdown and never pinning the shared Coravel queue.
 /// </summary>
 public sealed class ExportBackgroundService(
     ExportJobQueue queue,
@@ -40,7 +38,6 @@ public sealed class ExportBackgroundService(
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            // Normal shutdown.
         }
     }
 }

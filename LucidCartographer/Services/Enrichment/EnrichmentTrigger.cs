@@ -12,9 +12,7 @@ namespace LucidCartographer.Services.Enrichment;
 /// </summary>
 public class EnrichmentTrigger
 {
-    // Bounded(1) + DropWrite collapses a burst of signals into exactly
-    // one wake-up, matching the original SemaphoreSlim(0,1) + swallowed
-    // SemaphoreFullException behavior.
+    // Bounded(1) + DropWrite collapses bursts of signals into a single wake-up.
     private readonly Channel<Unit> _channel = Channel.CreateBounded<Unit>(
         new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
 

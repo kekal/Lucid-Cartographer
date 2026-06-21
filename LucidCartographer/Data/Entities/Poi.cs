@@ -35,11 +35,7 @@ public class Poi
 
     public string? ImageUrl { get; set; }
 
-    // Binary image data is stored in a separate PoiImage table so that
-    // default Poi queries don't drag BLOBs across the wire. This nav
-    // property is NOT auto-loaded — include it explicitly only when
-    // serving /api/poi-image/{id}. The presence of the image for a POI
-    // should be inferred from ImageUrl, not from this nav.
+    // Binary data in separate table; infer presence from ImageUrl, not this nav.
     public PoiImage? Image { get; set; }
 
     public string? Country { get; set; }
@@ -49,25 +45,14 @@ public class Poi
     public DateTime AddedDate { get; set; }
 
     /// <summary>
-    /// Pure data state: true once the background enrichment service has
-    /// run detail-page extraction to completion for this POI (either it
-    /// found place data, or it ran cleanly but found none — see
-    /// <see cref="EnrichmentNeedsManualUrl"/>). This is NOT a queue
-    /// signal — whether the worker should process a row is governed
-    /// solely by <see cref="EnrichmentRequested"/>. A freshly created
-    /// or imported POI starts false; it only becomes true when an
-    /// enrichment attempt completes.
+    /// True after an enrichment attempt completes (regardless of outcome).
+    /// Unlike <see cref="EnrichmentRequested"/>, this is not a queue signal.
     /// </summary>
     public bool IsEnriched { get; set; }
 
     /// <summary>
-    /// Explicit enrichment-queue signal. True means the background
-    /// enrichment service should process this row. Set by the import
-    /// pipeline, the MCP enrich tools, the re-enrich service methods,
-    /// and startup revive. Cleared by the worker on every terminal
-    /// outcome (success, soft-fail/needs-manual-url, or reaching the
-    /// retry cap); kept true across a retryable failure. Creating a POI
-    /// does NOT set this — creation is decoupled from enrichment.
+    /// Queue signal for the background enrichment service. Cleared on terminal
+    /// outcomes; creation does not set this (decoupled from enrichment).
     /// </summary>
     public bool EnrichmentRequested { get; set; }
 
@@ -83,12 +68,8 @@ public class Poi
     public DateTime? LastEnrichmentAttemptAt { get; set; }
 
     /// <summary>
-    /// True when the BG service ran without errors but the place panel
-    /// produced no useful data (typical SERP / no-unique-match outcome).
-    /// Retrying with the same query won't help, so the row is removed
-    /// from the queue and the UI prompts the user for a manual Google
-    /// Maps URL via the EnrichFallback dialog. Cleared on the next
-    /// successful enrichment or when the user supplies a URL.
+    /// True when enrichment ran but found no useful data; retry won't help.
+    /// Cleared on successful enrichment or when user supplies a URL.
     /// </summary>
     public bool EnrichmentNeedsManualUrl { get; set; }
 

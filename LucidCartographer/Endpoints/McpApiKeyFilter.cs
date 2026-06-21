@@ -23,15 +23,13 @@ public sealed class McpApiKeyFilter(IConfiguration configuration, ILogger<McpApi
     {
         var http = context.HttpContext;
 
-        // 1. Local machine / LAN — trusted, no credential needed, unless the bypass
-        //    is disabled (Production), where RFC1918 peers are the proxy/tunnel.
+        // Local machine / LAN: trusted unless bypass disabled (Production mode treats RFC1918 as proxies).
         var allowLocalBypass = configuration.GetValue("Mcp:AllowLocalNetworkBypass", true);
         if (allowLocalBypass && AuthRouteGuardExtensions.IsLocalNetwork(http.Connection.RemoteIpAddress))
         {
             return await next(context);
         }
 
-        // 2. Static API key. Env var MCP_API_KEY wins, then the Mcp:ApiKey config.
         var configuredKey = Environment.GetEnvironmentVariable("MCP_API_KEY");
         if (string.IsNullOrEmpty(configuredKey))
         {
@@ -46,16 +44,12 @@ public sealed class McpApiKeyFilter(IConfiguration configuration, ILogger<McpApi
             }
         }
 
-        // 3. OAuth bearer token, validated in-process by the OpenIddict frontdoor.
-        //    Skipped cleanly when the frontdoor is disabled (scheme not registered)
-        //    or in unit tests (no request services).
+        // OAuth bearer token validated by OpenIddict; skipped if disabled or in unit tests.
         if (await TryAuthenticateOAuthAsync(http))
         {
             return await next(context);
         }
 
-        // 4. Unauthorized. Point OAuth-capable clients at the protected-resource
-        //    metadata so they can discover the authorization server and sign in.
         logger.LogWarning(
             "Rejected MCP request from {RemoteIp}: no LAN bypass, API key, or OAuth token.",
             http.Connection.RemoteIpAddress);
@@ -86,8 +80,7 @@ public sealed class McpApiKeyFilter(IConfiguration configuration, ILogger<McpApi
             return true;
         }
 
-        // Diagnostics: distinguish "client sent no token" (token exchange likely
-        // failed upstream) from "token present but rejected" (and why).
+        // Distinguish "no token" (upstream exchange failed) from "token rejected" for diagnostics.
         if (hasBearer)
         {
             logger.LogWarning(

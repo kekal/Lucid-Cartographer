@@ -4,25 +4,13 @@ using Microsoft.JSInterop;
 namespace LucidCartographer.Services;
 
 /// <summary>
-/// DTO for POI data passed to the JavaScript map interop layer (REVIEW-21).
-/// Documents the JS interop contract explicitly.
+/// DTO for POI data passed to the JavaScript map interop layer.
 /// </summary>
 public record MarkerDto(int Id, string Name, double Latitude, double Longitude, string? Address, string? GoogleMapsUrl);
 
 /// <summary>
-/// DTO for one Trip View connecting leg passed to the JS interop layer. Carries
-/// the endpoint coordinates + fidelity flag the polyline needs (the POI ids the
-/// ViewModel-side <c>TripLeg</c> holds are not relevant to the draw) plus the
-/// optional measured road geometry. Property names serialize to camelCase to match
-/// leafletInterop.drawTripLegs.
-/// <para>
-/// TRIP-OSRM-02 (Story 4.2): <see cref="GeometryPolyline"/> is the measured leg's
-/// road shape as an encoded polyline (precision 5, the encoding Story 4.1 produces —
-/// TRIP-OSRM-01); <c>null</c>/empty when no road geometry is known. The JS side
-/// decodes it and draws a solid, full-weight road line; with no geometry it draws the
-/// straight dashed + muted connector. Solidity keys off geometry presence, not
-/// <see cref="IsMeasured"/> alone.
-/// </para>
+/// DTO for a Trip leg: endpoint coordinates, measured flag, and optional encoded road geometry.
+/// <c>GeometryPolyline</c> (when present) keys the JS render logic: solid line for measured routes, dashed for straight connectors.
 /// </summary>
 public record TripLegDto(
     double FromLat, double FromLon, double ToLat, double ToLon, bool IsMeasured, string? GeometryPolyline = null);
@@ -30,13 +18,8 @@ public record TripLegDto(
 public class LeafletMapService(IJSRuntime js) : IMapService, IAsyncDisposable
 {
     private DotNetObjectReference<LeafletMapService>? _dotnetRef;
-    // REVIEW-11: Thread-safe disposed flag using Interlocked
     private int _disposed;
-    // Tracks whether the JS-side map was ever created. The service is scoped, so
-    // an instance is constructed for every request (including the static prerender
-    // pass that never reaches OnAfterRenderAsync). Gating DisposeAsync on this
-    // prevents JS interop calls during prerender scope teardown, which would throw
-    // "JavaScript interop calls cannot be issued at this time".
+    // Guards JS cleanup: prevent interop calls during prerender scope teardown (would throw "JavaScript interop calls cannot be issued at this time").
     private int _initialized;
 
     public Func<int, Task>? OnMarkerClicked { get; set; }
@@ -44,7 +27,6 @@ public class LeafletMapService(IJSRuntime js) : IMapService, IAsyncDisposable
 
     public async Task InitMapAsync(string elementId)
     {
-        // Dispose existing ref to prevent GC handle leak on re-init
         _dotnetRef?.Dispose();
         _dotnetRef = DotNetObjectReference.Create(this);
         Interlocked.Exchange(ref _initialized, 1);
@@ -53,8 +35,7 @@ public class LeafletMapService(IJSRuntime js) : IMapService, IAsyncDisposable
 
     public async Task ShowCollectionAsync(int collectionId, List<Poi> pois, string color)
     {
-        // REVIEW-21: Named DTO instead of anonymous type.
-        // Unlocated POIs (NULL coords) have nothing to render; filter them out here.
+        // Filter unlocated POIs (null coords) before rendering.
         var dtos = pois
             .Where(p => p is { Latitude: not null, Longitude: not null })
             .Select(p => new MarkerDto(p.Id, p.Name, p.Latitude!.Value, p.Longitude!.Value, p.Address, p.GoogleMapsUrl))
@@ -74,16 +55,7 @@ public class LeafletMapService(IJSRuntime js) : IMapService, IAsyncDisposable
 
     public async Task SetLabelsVisibleAsync(bool visible) => await InvokeJsVoidAsync("leafletInterop.setLabelsVisible", visible);
 
-    // [TRIP-PLACE-02] Trip markers and legs only ever receive the PLACEABLE
-    // subset: StopOrders/OrderedLegs are projected by TripViewModel through the
-    // canonical StopPlaceability predicate (and the base collection markers are
-    // already coordinate-filtered by PoiService), so a null-coordinate POI can
-    // never reach this interop — no marker, no leg endpoint, and the loop is
-    // built over consecutive placeable stops so it is never severed.
-    // TRIP-STARTFINISH-06: the optional roles mark the pinned Start/Finish
-    // markers (distinct glyph/ring + accessible name); null clears them JS-side.
     public async Task SetStopOrdersAsync(IReadOnlyDictionary<int, int>? orders, TripMarkerRolesDto? roles = null) =>
-        // Pass an empty object (not null) so the JS side can clear unconditionally.
         await InvokeJsVoidAsync("leafletInterop.setStopOrders", orders ?? new Dictionary<int, int>(), roles);
 
     public async Task DrawTripLegsAsync(IReadOnlyList<TripLegDto> legs, bool isRoundtrip = false) =>
@@ -91,16 +63,9 @@ public class LeafletMapService(IJSRuntime js) : IMapService, IAsyncDisposable
 
     public async Task ClearTripAsync() => await InvokeJsVoidAsync("leafletInterop.clearTripLegs");
 
-    // TRIP-OSRM-02 (Story 4.2, AC4): add the active OSM-based routing provider's
-    // OSM/ODbL attribution to Leaflet's attribution control (on top of the base OSM
-    // tile attribution), or remove the prior routing attribution when html is null
-    // (the default Mock declares none). One call covers both surfaces — desktop and
-    // mobile share the single LeafletMap.
     public async Task SetRoutingAttributionAsync(string? html) =>
         await InvokeJsVoidAsync("leafletInterop.setRoutingAttribution", html);
 
-    // TRIP-SELECT-04: list ↔ map selection sync. Pass the int? straight through —
-    // a null clears the emphasis JS-side.
     public async Task EmphasizeStopAsync(int? poiId) => await InvokeJsVoidAsync("leafletInterop.emphasizeStop", poiId);
 
     public async Task PanToStopAsync(int poiId) => await InvokeJsVoidAsync("leafletInterop.panToStop", poiId);
@@ -131,20 +96,14 @@ public class LeafletMapService(IJSRuntime js) : IMapService, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        // REVIEW-22: GC.SuppressFinalize per IAsyncDisposable pattern
         GC.SuppressFinalize(this);
 
-        // REVIEW-11: Thread-safe dispose using Interlocked
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
         {
             return;
         }
 
-        // Only attempt JS cleanup if the map was actually initialised on the JS
-        // side. Without this guard, the static prerender pass — which constructs
-        // the scoped service but never reaches OnAfterRenderAsync — would try to
-        // invoke JS during scope disposal and throw InvalidOperationException
-        // ("JavaScript interop calls cannot be issued at this time").
+        // Skip JS cleanup if map was never initialized (guards against prerender teardown exceptions).
         if (Volatile.Read(ref _initialized) == 0)
         {
             _dotnetRef?.Dispose();
@@ -152,15 +111,13 @@ public class LeafletMapService(IJSRuntime js) : IMapService, IAsyncDisposable
             return;
         }
 
-        // Clean up the JS-side map instance
         try
         {
             await js.InvokeVoidAsync("leafletInterop.destroyMap");
         }
         catch (Exception ex) when (IsCircuitGone(ex))
         {
-            // Circuit disconnected or interop unavailable during teardown.
-            // Browser-side lifecycle handles final cleanup.
+            // Interop unavailable during disconnect/dispose.
         }
 
         _dotnetRef?.Dispose();
@@ -183,8 +140,7 @@ public class LeafletMapService(IJSRuntime js) : IMapService, IAsyncDisposable
         }
         catch (Exception ex) when (IsCircuitGone(ex))
         {
-            // Interop unavailable during disconnect/dispose/prerender.
-            // Post-prerender interactive pass will re-issue calls as needed.
+            // Interop unavailable; will retry on next interactive pass.
         }
     }
 

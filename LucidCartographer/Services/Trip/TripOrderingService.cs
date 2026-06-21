@@ -5,11 +5,9 @@ using Microsoft.EntityFrameworkCore;
 namespace LucidCartographer.Services.Trip;
 
 /// <summary>
-/// Sole writer of <see cref="PoiCollectionItem.OrderIndex"/>. Every order
-/// change loads the collection's membership rows tracked, computes the desired
-/// 1-based contiguous arrangement, and commits through the one
-/// <see cref="SetOrderAsync"/> method under the shared <see cref="SqliteWriteLock"/>
-/// so a concurrent enrichment / dedup write never collides.
+/// Sole writer of <see cref="PoiCollectionItem.OrderIndex"/> and <see cref="PoiCollectionItem.OutgoingTravelMode"/>.
+/// All order changes commit through <see cref="SetOrderAsync"/> under <see cref="SqliteWriteLock"/> to prevent
+/// collisions with concurrent enrichment / dedup writes.
 /// </summary>
 public sealed class TripOrderingService(
     IDbContextFactory<AppDbContext> factory,
@@ -20,13 +18,9 @@ public sealed class TripOrderingService(
     public async Task<bool> HasOrderAsync(int collectionId, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
-        // The null-coordinate check is inlined here (and in GetStopOrderAsync)
-        // only because EF must translate it to SQL; the rule is the canonical
-        // StopPlaceability predicate ([TRIP-PLACE-01]) — keep them in lockstep.
-        // Defensive: only a placeable item counts as "ordered". Guards against a
-        // backfill/migration that numbered non-placeable rows — otherwise such
-        // rows would make a never-properly-seeded collection report as ordered
-        // and skip the seed path. [Review][Patch]
+        // Null-coordinate check inlined here (and in GetStopOrderAsync) because EF must
+        // translate it to SQL; keep in lockstep with StopPlaceability canonical predicate.
+        // Only placeable items count as ordered to guard against stray OrderIndex on non-placeable rows.
         return await db.PoiCollectionItems
             .AnyAsync(ci => ci.PoiCollectionId == collectionId && ci.OrderIndex > 0
                 && ci.Poi.Latitude != null && ci.Poi.Longitude != null, ct);
@@ -37,9 +31,7 @@ public sealed class TripOrderingService(
         await using var db = await factory.CreateDbContextAsync(ct);
         var rows = await db.PoiCollectionItems
             .AsNoTracking()
-            // Only placeable, ordered items are Stops — a non-placeable row with a
-            // stray OrderIndex (e.g. from a backfill) must never surface as a badge.
-            // [Review][Patch]
+            // Only placeable, ordered items are Stops; non-placeable rows with stray OrderIndex must be filtered out.
             .Where(ci => ci.PoiCollectionId == collectionId && ci.OrderIndex > 0
                 && ci.Poi.Latitude != null && ci.Poi.Longitude != null)
             .Select(ci => new { ci.PoiId, ci.OrderIndex })
@@ -57,9 +49,7 @@ public sealed class TripOrderingService(
             .Select(ci => new { ci.PoiId, ci.OrderIndex, ci.Poi.Latitude, ci.Poi.Longitude })
             .ToListAsync(ct);
 
-        // [TRIP-PLACE-03] The routing candidate set is the placeable subset only,
-        // filtered through the one canonical predicate. Unplaceable stops (null
-        // lat OR null lon) never enter any all-pairs computation.
+        // Filter through canonical predicate: unplaceable stops (null lat OR lon) never enter routing computation.
         return rows
             .Where(r => StopPlaceability.IsPlaceable(r.Latitude, r.Longitude))
             .Select(r => new PlaceableStop(r.PoiId, r.OrderIndex, r.Latitude!.Value, r.Longitude!.Value))
@@ -70,8 +60,7 @@ public sealed class TripOrderingService(
     {
         var rows = await ReadAsync(collectionId, ct);
 
-        // TRIP-ORDER-01: 1-based contiguous seed by AddedDate asc, tie-broken by
-        // PoiId asc. Only placeable items become Stops; non-placeable reset to 0.
+        // Seed 1-based contiguous order by AddedDate asc, tie-broken by PoiId asc; non-placeable stay 0.
         var desired = new Dictionary<int, int>(rows.Count);
         var index = 1;
         foreach (var row in rows.Where(r => r.Placeable)
@@ -114,10 +103,9 @@ public sealed class TripOrderingService(
 
     public async Task SortTravelingSalesmanAsync(int collectionId, CancellationToken ct = default)
     {
-        // TRIP-TSP-01 (AR-6/D5): build the on-demand matrix over the placeable Stops
-        // (reusing the shared cache), run NN + 2-opt, then commit through the SAME
-        // Renumber + SetOrderAsync the seed/reorder/designation paths use (AR-11 single
-        // writer). Fewer than two placeable Stops ⇒ nothing to sort.
+        // Build matrix over placeable Stops (using shared cache), run NN + 2-opt, commit through
+        // the same Renumber + SetOrderAsync as seed/reorder/designation (sole writer pattern).
+        // Fewer than two placeable Stops ⇒ nothing to sort.
         var matrix = await distanceMatrix.BuildAsync(collectionId, ct);
         if (matrix is null || matrix.Stops.Count < 2)
         {
@@ -152,13 +140,9 @@ public sealed class TripOrderingService(
         var solved = TspSolver.Solve(matrix.DurationSeconds, n, startIndex, finishIndex, roundtrip);
         var solvedCost = TspSolver.TourCost(solved, matrix.DurationSeconds, roundtrip);
 
-        // AC4 never-worse guard: keep the optimized tour only when it is strictly
-        // better; otherwise retain the current order. The result is therefore always
-        // ≤ the pre-sort total — never worse — regardless of matrix shape.
+        // Keep optimized tour only if strictly better; otherwise retain current order (never-worse guard).
         var chosen = solvedCost < preCost - 1e-6 ? solved : identity;
 
-        // Map the chosen index permutation back to the tracked ItemRows, then run it
-        // through the shared pin arrangement (Start→1 / Finish→N) and the one writer.
         var rows = await ReadAsync(collectionId, ct);
         var rowByPoiId = rows.ToDictionary(r => r.PoiId);
         var orderedRows = chosen
@@ -185,10 +169,8 @@ public sealed class TripOrderingService(
     {
         ArgumentNullException.ThrowIfNull(orderedPoiIds);
 
-        // TRIP-MCP-01 (AR-11 single writer): an externally-supplied full order. The
-        // valid input is EXACTLY the current placeable Stop set — validate before
-        // touching the order so an agent mistake fails loudly rather than silently
-        // dropping or duplicating a Stop.
+        // Externally-supplied full order must be EXACTLY the current placeable Stop set;
+        // validate before touching order to fail loudly on agent mistakes.
         var rows = await ReadAsync(collectionId, ct);
         var stops = rows.Where(r => r.Placeable && r.Order > 0).ToList();
         var stopIds = stops.Select(r => r.PoiId).ToHashSet();
@@ -218,9 +200,7 @@ public sealed class TripOrderingService(
 
     public async Task SetDwellMinutesAsync(int collectionId, int poiId, int? minutes, CancellationToken ct = default)
     {
-        // TRIP-DWELL-01: validated dwell persist shared by the UI and MCP. Out-of-range
-        // is a silent no-op (the caller pre-validates / surfaces UX), mirroring the
-        // former VM behavior.
+        // Out-of-range is silent no-op (caller pre-validates); shared by UI and MCP.
         if (minutes is < 0 or > MaxDwellMinutes)
         {
             return;
@@ -252,10 +232,7 @@ public sealed class TripOrderingService(
 
     public async Task SetOutgoingTravelModeAsync(int collectionId, int fromPoiId, string? mode, CancellationToken ct = default)
     {
-        // TRIP-LEGMODE-01 (Story 3.4): the sole dedicated writer of a single leg's
-        // mode. Validate UP FRONT — null (≡ AnyAir) is allowed, otherwise the value
-        // must be one of TravelMode.All; an unknown mode is a hard error (the MCP
-        // tool in Story 3.6 surfaces it as a tool error, the UI never sends one).
+        // Sole writer of a single leg's mode; null (≡ AnyAir) allowed, otherwise must be valid TravelMode.
         if (mode is not null && !TravelMode.IsValid(mode))
         {
             throw new ArgumentException(
@@ -274,9 +251,7 @@ public sealed class TripOrderingService(
 
         membership.OutgoingTravelMode = mode;
 
-        // A single dedicated write under the shared gate (NOT routed through
-        // SetOrderAsync — setting a mode never reorders, so the order-reset rule
-        // does not apply).
+        // Single gated write (not routed through SetOrderAsync — setting mode never reorders).
         await writeLock.Gate.WaitAsync(ct);
         try
         {
@@ -294,9 +269,7 @@ public sealed class TripOrderingService(
     public async Task SetAllOutgoingTravelModesAsync(
         int collectionId, string? mode, bool overwriteExisting, CancellationToken ct = default)
     {
-        // TRIP-BULKMODE-01: bulk assignment of one mode to every leg's From-stop in a
-        // single gated transaction (NFR-5: no per-leg round-trip). Validate up front,
-        // identical rule to the single writer (SetOutgoingTravelModeAsync).
+        // Bulk assignment in single gated transaction; validate up front like SetOutgoingTravelModeAsync.
         if (mode is not null && !TravelMode.IsValid(mode))
         {
             throw new ArgumentException(
@@ -365,8 +338,7 @@ public sealed class TripOrderingService(
             return;
         }
 
-        // Setting a mode never reorders — a single gated write, NOT routed through
-        // SetOrderAsync (the order-reset rule does not apply).
+        // Single gated write (not routed through SetOrderAsync — setting mode never reorders).
         await writeLock.Gate.WaitAsync(ct);
         try
         {
@@ -402,10 +374,8 @@ public sealed class TripOrderingService(
     {
         var rows = await ReadAsync(collectionId, ct);
 
-        // Existing Stops first (by current order), then any placeable item that
-        // has no order yet appended in AddedDate/PoiId order — i.e. new additions
-        // land at the end. Then renumber the whole sequence 1..N (closing any gap
-        // a removal left). Non-placeable items are left untouched (stay 0).
+        // Existing Stops first (by current order), then unordered placeable items in AddedDate/PoiId order.
+        // Renumber whole sequence 1..N; non-placeable stay 0.
         var ordered = rows.Where(r => r.Placeable && r.Order > 0)
             .OrderBy(r => r.Order)
             .ThenBy(r => r.AddedDate)
@@ -427,6 +397,8 @@ public sealed class TripOrderingService(
         // Stop never demotes a pinned Finish out of the last slot.
         var (startPoiId, finishPoiId) = await ReadPinsAsync(collectionId, ct);
         var live = sequence.Select(r => r.PoiId).ToHashSet();
+        // Release orphaned pins: a pin whose POI is no longer a placeable Stop prevents
+        // phantom open path (FinishPoiId is null but BuildLegs draws closing leg from non-Stop).
         var reconciledStart = startPoiId is { } sid && live.Contains(sid) ? startPoiId : null;
         var reconciledFinish = finishPoiId is { } fid && live.Contains(fid) ? finishPoiId : null;
         if (reconciledStart != startPoiId || reconciledFinish != finishPoiId)
@@ -435,17 +407,14 @@ public sealed class TripOrderingService(
         }
 
         var desired = Renumber(ArrangeWithPins(sequence, reconciledStart, reconciledFinish));
-        // A POI that just became Unplaceable may still carry a stale OrderIndex
-        // from when it was a Stop — reset it to 0 ("not a stop"), mirroring
-        // SeedOrderAsync, so the stored order never disagrees with placeability.
+        // Reset stale OrderIndex on POIs that just became Unplaceable to keep stored order in sync with placeability.
         foreach (var row in rows.Where(r => !r.Placeable))
         {
             desired[row.PoiId] = 0;
         }
 
-        // The pin reconcile above may flip the trip shape (e.g. a removed Finish ⇒
-        // roundtrip), appearing/vanishing a closing leg — pass the prior Finish so
-        // SetOrderAsync resets the affected leg's mode (Story 3.3 H1).
+        // Pin reconcile may flip trip shape (removed Finish ⇒ roundtrip); pass prior Finish so
+        // SetOrderAsync resets the affected leg's mode.
         await SetOrderAsync(collectionId, desired, ct, previousShape: (true, finishPoiId));
     }
 
@@ -453,12 +422,8 @@ public sealed class TripOrderingService(
     {
         var rows = await ReadAsync(collectionId, ct);
 
-        // TRIP-ORDER-02 (AR-11 single writer): drag and keyboard both land here
-        // and funnel through the same Renumber + SetOrderAsync the seed/compaction
-        // paths use — no second renumbering routine exists. The current sequence
-        // is the compacted Stop list (placeable, ordered); the move is a single
-        // remove + insert in that sequence followed by a full 1..N renumber, so
-        // the result is contiguous, gap-free and unique by construction.
+        // Drag and keyboard both use shared Renumber + SetOrderAsync; single remove + insert + renumber
+        // ensures contiguous, gap-free, unique result by construction (sole writer pattern).
         var stops = rows.Where(r => r.Placeable && r.Order > 0)
             .OrderBy(r => r.Order)
             .ThenBy(r => r.AddedDate)
@@ -500,8 +465,7 @@ public sealed class TripOrderingService(
         var current = currentIndex + 1;
         if (target == current)
         {
-            // No-op move (own position, or clamped back onto it): short-circuit
-            // before any tracking/SaveChangesAsync so nothing is written (AC-6).
+            // No-op move (clamped back to own position): short-circuit before writing.
             return;
         }
 
@@ -526,13 +490,9 @@ public sealed class TripOrderingService(
     public Task ClearFinishAsync(int collectionId, CancellationToken ct = default) =>
         ClearPinAsync(collectionId, pinIsStart: false, ct);
 
-    // TRIP-STARTFINISH-02 (AR-11 single writer): all four designation paths land
-    // here. The pin fields (StartPoiId/FinishPoiId) are written first, then the
-    // placeable Stop sequence is rebuilt — pinned Start first, interior Stops in
-    // their existing relative order, pinned Finish last — and renumbered through
-    // the SAME Renumber + SetOrderAsync the seed/compaction/reorder paths use, so
-    // the result is contiguous, gap-free and unique 1..N by construction and no
-    // stop can ever hold two Stop Order values.
+    // All four designation paths land here: pins written first, then Stop sequence rebuilt
+    // (pinned Start first, interior Stops in order, pinned Finish last) and renumbered through
+    // shared Renumber + SetOrderAsync, ensuring 1..N contiguous unique result (sole writer pattern).
     private async Task SetPinAsync(int collectionId, int poiId, bool pinIsStart, CancellationToken ct)
     {
         var (startPoiId, finishPoiId) = await ReadPinsAsync(collectionId, ct);
@@ -561,17 +521,14 @@ public sealed class TripOrderingService(
         var target = rows.FirstOrDefault(r => r.PoiId == poiId);
         if (target is null || !target.Placeable || target.Order <= 0)
         {
-            // Absent, unplaceable (OrderIndex 0, excluded from routing) or
-            // unordered — not a Start/Finish candidate ([TRIP-PLACE-01] guard).
+            // Absent, unplaceable, or unordered — not a Start/Finish candidate.
             return;
         }
 
         var newStart = pinIsStart ? poiId : startPoiId;
         var newFinish = pinIsStart ? finishPoiId : poiId;
 
-        // Re-designation releases the old pin implicitly: the prior endpoint is
-        // simply no longer first/last in the rebuilt sequence and renumbers into
-        // an interior slot — no gap, no duplicate.
+        // Re-designation releases old pin implicitly: prior endpoint renumbers into interior slot.
         await WritePinsAsync(collectionId, newStart, newFinish, ct);
         await RenumberWithPinsAsync(collectionId, rows, newStart, newFinish, ct, previousShape: (true, finishPoiId));
     }
@@ -588,20 +545,15 @@ public sealed class TripOrderingService(
         var newFinish = pinIsStart ? finishPoiId : null;
         await WritePinsAsync(collectionId, newStart, newFinish, ct);
 
-        // Clearing a pin never reshuffles the order — the former endpoint stays
-        // where it is, the sequence is already contiguous 1..N. Re-validate
-        // through the same path anyway (idempotent: SetOrderAsync writes nothing
-        // when the desired order equals the stored one).
+        // Clearing a pin never reshuffles — endpoint stays in place. Re-validate through
+        // same path anyway (idempotent: SetOrderAsync writes nothing if desired == stored).
         var rows = await ReadAsync(collectionId, ct);
         await RenumberWithPinsAsync(collectionId, rows, newStart, newFinish, ct, previousShape: (true, finishPoiId));
     }
 
     /// <summary>
-    /// Rebuilds the placeable Stop sequence with the pinned endpoints in their
-    /// slots (Start → 1, Finish → N, interior compacted to fill the middle in
-    /// existing relative order) and commits via the one OrderIndex writer.
-    /// Pins only count when the designated POI actually is a Stop (defensive —
-    /// mirrors ReorderStopAsync).
+    /// Rebuilds placeable Stop sequence with pinned endpoints in slots (Start→1, Finish→N, interior in order)
+    /// and commits via the sole OrderIndex writer. Pins only count when POI is actually a Stop.
     /// </summary>
     private async Task RenumberWithPinsAsync(
         int collectionId, List<ItemRow> rows, int? startPoiId, int? finishPoiId, CancellationToken ct,
@@ -618,12 +570,8 @@ public sealed class TripOrderingService(
     }
 
     /// <summary>
-    /// Arranges an already-ordered Stop sequence with the pinned endpoints in
-    /// their slots: pinned Start first, pinned Finish last, every other Stop in
-    /// its given relative order. A pin whose POI is not in the sequence is simply
-    /// ignored (the caller is responsible for releasing orphaned pins). Shared by
-    /// the reconcile and designation paths so the "Start→1 / Finish→N" rule has a
-    /// single implementation.
+    /// Arranges Stop sequence with pinned endpoints in slots (Start first, Finish last, others in order).
+    /// Pins not in sequence are ignored. Single implementation of "Start→1 / Finish→N" rule shared by reconcile and designation.
     /// </summary>
     private static List<ItemRow> ArrangeWithPins(IReadOnlyList<ItemRow> stopsInOrder, int? startPoiId, int? finishPoiId)
     {
@@ -645,11 +593,8 @@ public sealed class TripOrderingService(
     }
 
     /// <summary>
-    /// Writes StartPoiId/FinishPoiId on the tracked PoiCollection under the
-    /// shared write gate. The Version concurrency token is bumped centrally by
-    /// AppDbContext.SaveChanges for every modified PoiCollection, so a concurrent
-    /// editor of the same collection surfaces as a DbUpdateConcurrencyException
-    /// rather than a silent lost update.
+    /// Writes StartPoiId/FinishPoiId on tracked PoiCollection under shared write gate.
+    /// Version concurrency token prevents silent lost updates from concurrent editors.
     /// </summary>
     private async Task WritePinsAsync(int collectionId, int? startPoiId, int? finishPoiId, CancellationToken ct)
     {
@@ -700,26 +645,11 @@ public sealed class TripOrderingService(
     }
 
     /// <summary>
-    /// The ONE method that writes <see cref="PoiCollectionItem.OrderIndex"/> and
-    /// (Story 3.3, AC1/AC3) the ONLY place <see cref="PoiCollectionItem.OutgoingTravelMode"/>
-    /// is mutated. Applies the desired <c>PoiId → OrderIndex</c> entries to the
-    /// matching tracked rows (items not in the map keep their current OrderIndex),
-    /// then nulls <c>OutgoingTravelMode</c> for exactly the placeable Stops whose
-    /// SUCCESSOR changed between the OLD and NEW order — so an unchanged leg keeps
-    /// its mode and its <c>(From,To,Mode)</c> cache row (TRIP-CACHE-01 / NFR3) while
-    /// a newly-appeared leg resets to null (≡ AnyAir, TRIP-LEGMODE-01). Both the
-    /// OrderIndex change and the mode reset commit atomically in the SAME
-    /// SaveChanges under the shared write gate. No <c>ConfigureAwait(false)</c> —
-    /// Blazor Server's circuit needs the sync context.
+    /// Sole writer of <see cref="PoiCollectionItem.OrderIndex"/> and <see cref="PoiCollectionItem.OutgoingTravelMode"/>.
+    /// Nulls mode for Stops whose successor changed; unchanged legs keep their mode. Both changes commit atomically under write gate.
     /// </summary>
-    // <paramref name="previousShape"/> carries the Finish pin as it was BEFORE this
-    // operation, supplied ONLY by the pin-flip / reconcile paths (which write the new
-    // pin before calling here). When Provided, the OLD successor map is computed under
-    // that prior trip shape and the NEW map under the current (already-written) Finish,
-    // so a roundtrip↔open-path flip correctly resets the appearing/vanishing closing
-    // leg's mode (Story 3.3 H1). The Provided flag is needed because a prior Finish of
-    // null (a roundtrip) is a real, distinct shape — not "not supplied". Other callers
-    // leave it default ⇒ old shape == current shape (a plain reorder, no flip).
+    // <paramref name="previousShape"/> (provided only by pin-flip/reconcile) allows computing the OLD successor map
+    // under prior trip shape, enabling roundtrip↔open-path flips to correctly reset the appearing/vanishing closing leg's mode.
     private async Task SetOrderAsync(
         int collectionId, IReadOnlyDictionary<int, int> desired, CancellationToken ct,
         (bool Provided, int? Finish) previousShape = default)
@@ -749,10 +679,7 @@ public sealed class TripOrderingService(
         int NewOrderOf(PoiCollectionItem ci) =>
             desired.TryGetValue(ci.PoiId, out var o) ? o : ci.OrderIndex;
 
-        // Successor PoiId for each placeable Stop under a given order selector. The
-        // ordered placeable sequence is the Stops with OrderIndex > 0 sorted by that
-        // index; each Stop's successor is the next one in that sequence. The last
-        // Stop's successor is the first Stop on a roundtrip, or none on an open path.
+        // Successor PoiId for each Stop: next one in ordered sequence, or first (roundtrip) / none (open path) for last.
         Dictionary<int, int?> SuccessorMap(Func<PoiCollectionItem, int> orderOf, int? finishForShape)
         {
             var sequence = items
@@ -771,8 +698,7 @@ public sealed class TripOrderingService(
             {
                 var first = sequence[0];
                 var last = sequence[^1];
-                // Mirror BuildLegs: open path only when a distinct Finish resolves to
-                // a real placeable Stop other than the first; otherwise roundtrip.
+                // Open path when distinct Finish resolves to real Stop other than first; otherwise roundtrip.
                 var finishIsDistinctStop = finishForShape is { } fid
                     && fid != first.PoiId
                     && sequence.Any(s => s.PoiId == fid);
@@ -781,7 +707,6 @@ public sealed class TripOrderingService(
 
             return map;
         }
-        _ = startPoiId; // Start pin does not affect successor computation (only Finish does).
 
         // The OLD map uses the prior trip shape (previousFinishPoiId when supplied by a
         // pin-flip path; else the current Finish ⇒ no shape change); the NEW map always
@@ -791,13 +716,8 @@ public sealed class TripOrderingService(
         var oldSucc = SuccessorMap(ci => ci.OrderIndex, oldFinishForShape);
         var newSucc = SuccessorMap(NewOrderOf, finishPoiId);
 
-        // Snapshot the OLD OrderIndex before any mutation so the per-item reset rule
-        // can tell a stop that ALREADY had a leg (old OrderIndex > 0) from one that
-        // is entering the sequence for the first time (old OrderIndex 0 — a seed or
-        // append). A stop with no old leg has no stale leg to reset, so its mode is
-        // left as-is (an appended stop's mode is null by default anyway, so this is a
-        // no-op for the genuine "newly appeared" case while sparing a seed that
-        // pre-carried modes).
+        // Snapshot OLD OrderIndex to distinguish stops with existing legs (oldOrder > 0) from
+        // those entering the sequence for the first time (oldOrder 0). Only existing legs may have stale mode to reset.
         var oldOrders = items.ToDictionary(ci => ci.PoiId, ci => ci.OrderIndex);
 
         var changed = false;
@@ -810,10 +730,8 @@ public sealed class TripOrderingService(
                 changed = true;
             }
 
-            // Reset the leg mode ONLY for placeable Stops that ALREADY had a leg
-            // (old OrderIndex > 0) and whose successor changed (differs, or it lost
-            // its successor by becoming the open-path last stop). Unplaceable items
-            // (no leg) and stops newly entering the sequence are skipped.
+            // Reset mode for placeable Stops with existing legs (oldOrder > 0) whose successor changed.
+            // Unplaceable items and stops entering sequence for first time are skipped.
             if (IsPlaceable(item) && newOrder > 0 && oldOrders.GetValueOrDefault(item.PoiId) > 0)
             {
                 var oldS = oldSucc.GetValueOrDefault(item.PoiId);
@@ -854,9 +772,7 @@ public sealed class TripOrderingService(
             .Select(ci => new { ci.PoiId, ci.Poi.Latitude, ci.Poi.Longitude, ci.Poi.AddedDate, ci.OrderIndex })
             .ToListAsync(ct);
 
-        // [TRIP-PLACE-01] Placeability is decided by the one canonical predicate
-        // (raw coordinates are projected so the check runs in memory, not inlined
-        // into the SQL expression).
+        // Coordinates projected so canonical placeability check runs in memory, not inlined into SQL.
         return rows
             .Select(r => new ItemRow(
                 r.PoiId,

@@ -1,18 +1,10 @@
 @inject IJSRuntime Js
 @implements IAsyncDisposable
 
-@* Full-screen modal that slides in from the right (iOS-style). The parent owns
-   the open/closed state (render this only when open). A back chevron sits in a
-   top bar; optional Trailing content goes on the right.
-
-   H05/H06: carries dialog semantics, takes focus on open, and dismisses on
-   Escape so keyboard / screen-reader users can use the modal at all.
-
-   Mobile back-button: on open we push a sentinel history entry via
-   LucidHistory.push and register this component as the popstate callback.
-   The system / browser Back button closes the modal (top of the stack)
-   instead of navigating away from the app. UI-driven close paths (back
-   chevron, Escape, parent unrender) consume the sentinel via pop(). *@
+@* Slides in from the right (iOS-style). Dialog semantics: takes focus on open,
+   dismisses on Escape. On open pushes a history sentinel via LucidHistory.push so
+   the browser Back button closes the modal instead of navigating away; UI-driven
+   close paths (back chevron, Escape, unrender) consume the sentinel via pop(). *@
 <div class="modal-screen m-slide-in" @ref="_root" tabindex="-1"
      role="dialog" aria-modal="true" aria-labelledby="@_titleId"
      @onkeydown="OnRootKeyDownAsync">
@@ -84,9 +76,7 @@
     [JSInvokable]
     public Task OnBackPopped()
     {
-        // The browser Back button already removed our history entry. Just
-        // close the modal — do NOT call pop() here, the stack entry was
-        // already taken off in the JS popstate handler.
+        // Browser already removed history entry; don't call pop() again.
         _historyRegistered = false;
         return OnClose.InvokeAsync();
     }

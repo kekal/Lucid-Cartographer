@@ -3,15 +3,11 @@ using Microsoft.Extensions.Options;
 namespace LucidCartographer.Services.Operations;
 
 /// <summary>
-/// Drives whole-database deduplication off the request thread. Runs one pass
-/// shortly after startup, then again on every <see cref="DedupTrigger"/>
-/// signal (fired when an enrichment batch drains) or, failing that, once per
-/// <see cref="DeduplicationOptions.IntervalMinutes"/> as a safety net against
-/// races and changes the enrichment worker can't observe.
-///
-/// <see cref="IPoiDeduplicationService"/> is request-scoped (it shares the
-/// scoped <see cref="IPoiMatcher"/>), so each pass resolves it from a fresh
-/// DI scope rather than capturing one for the lifetime of the host.
+/// Runs whole-database deduplication off the request thread: once at startup, then triggered
+/// by <see cref="DedupTrigger"/> (fired when enrichment batches drain) or at regular
+/// <see cref="DeduplicationOptions.IntervalMinutes"/> intervals as a safety net.
+/// Resolves <see cref="IPoiDeduplicationService"/> from a fresh DI scope per pass
+/// since it is request-scoped.
 /// </summary>
 public sealed class PoiDeduplicationBackgroundService(
     IServiceScopeFactory scopeFactory,

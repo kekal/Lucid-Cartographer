@@ -1,59 +1,42 @@
 namespace LucidCartographer.Services.Trip;
 
 /// <summary>
-/// TRIP-OSRM-01 (Story 4.1): tunables for the optional self-hosted OSRM
-/// travel-time provider, bound from the <c>TravelTime:Osrm</c> section of
-/// appsettings.json. Mirrors <see cref="TravelTimeOptions"/> conventions
-/// (sealed, mutable settable props, sensible defaults).
-///
-/// PER-PROFILE base URLs (AR-3): an <c>osrm-routed</c> backend process serves
-/// exactly the ONE profile its extract was built with — a single base URL cannot
-/// serve car + foot + bike. So Drive/Walk/Cycle each carry their own optional URL
-/// (Drive→car, Walk→foot, Cycle→bike). A mode whose URL is left empty/unset is
-/// treated as "no coverage": the provider throws for that mode and the existing
-/// background-service degradation branch substitutes a straight-line Estimated
-/// value (TRIP-DEGRADE-01, AC3).
-///
-/// NFR7: OSRM is self-hosted, so Stop coordinates never leave the deployment —
-/// there is no third-party out-call and therefore no egress-consent guard is
-/// required for this provider.
+/// Tunables for the optional self-hosted OSRM travel-time provider, bound from the
+/// <c>TravelTime:Osrm</c> section of appsettings.json. Each mode (Drive, Walk, Cycle)
+/// has its own base URL because <c>osrm-routed</c> serves exactly one profile per instance.
+/// Empty/unset URLs indicate no coverage; the background service falls back to haversine
+/// Estimated. OSRM is self-hosted, so coordinates never egress.
 /// </summary>
 public sealed class OsrmOptions
 {
     /// <summary>
-    /// Base URL of the OSRM <c>car</c>-profile backend (Drive mode), e.g.
-    /// <c>http://osrm-car:5000</c>. Empty/null ⇒ Drive has no OSRM coverage and
-    /// degrades to the haversine Estimated fallback (AC3).
+    /// Base URL of the OSRM <c>car</c>-profile backend (Drive mode), e.g. <c>http://osrm-car:5000</c>.
+    /// Empty/null ⇒ Drive degrades to haversine Estimated.
     /// </summary>
     public string? DriveBaseUrl { get; set; }
 
     /// <summary>
-    /// Base URL of the OSRM <c>foot</c>-profile backend (Walk mode). Empty/null ⇒
-    /// Walk degrades to the haversine Estimated fallback (AC3).
+    /// Base URL of the OSRM <c>foot</c>-profile backend (Walk mode).
+    /// Empty/null ⇒ Walk degrades to haversine Estimated.
     /// </summary>
     public string? WalkBaseUrl { get; set; }
 
     /// <summary>
-    /// Base URL of the OSRM <c>bike</c>-profile backend (Cycle mode). Empty/null ⇒
-    /// Cycle degrades to the haversine Estimated fallback (AC3).
+    /// Base URL of the OSRM <c>bike</c>-profile backend (Cycle mode).
+    /// Empty/null ⇒ Cycle degrades to haversine Estimated.
     /// </summary>
     public string? CycleBaseUrl { get; set; }
 
     /// <summary>
-    /// Per-request HTTP timeout in seconds for an OSRM <c>/route</c> call. A
-    /// timeout surfaces as a thrown exception that the background-service catch
-    /// degrades to Estimated (AC3). Default: 10.
+    /// Per-request HTTP timeout in seconds for an OSRM <c>/route</c> call.
+    /// Timeout exceptions degrade to Estimated. Default: 10.
     /// </summary>
     public int RequestTimeoutSeconds { get; set; } = 10;
 
     /// <summary>
-    /// Geometry encoding precision. The provider requests
-    /// <c>geometries=polyline</c> (OSRM's encoded-polyline, precision 5) and
-    /// stores that string verbatim in <see cref="Data.Entities.RouteSegment.GeometryPolyline"/>.
-    /// Story 4.2's decoder MUST use the same precision. TRIP-OSRM-01: deliberate,
-    /// documented deviation from AR-3's literal <c>geometries=geojson</c> — same
-    /// road geometry, a far more compact storage shape that matches the field name
-    /// and decodes natively in Leaflet. Default: 5.
+    /// Geometry encoding precision. The provider requests <c>geometries=polyline</c> (precision 5)
+    /// and stores it verbatim in <see cref="Data.Entities.RouteSegment.GeometryPolyline"/>.
+    /// The decoder MUST use the same precision. More compact than GeoJSON; decodes natively in Leaflet. Default: 5.
     /// </summary>
     public int GeometryPrecision { get; set; } = 5;
 

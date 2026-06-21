@@ -1,9 +1,7 @@
 @using LucidCartographer.Components.Pages
 @using LucidCartographer.Data.Entities
 
-@* Mobile Data Sources screen. Presentational: drives the shared
-   DataSourcesPageViewModel passed by the page. Import + collection-detail
-   flows open as full-screen push modals. *@
+@* Presentational component driving the shared DataSourcesPageViewModel; Import and Collection-detail flows open as full-screen push modals. *@
 <div class="m-app">
     <div class="screen scroll">
         <div class="app-header" style="padding-top:calc(12px + var(--safe-top))">
@@ -55,7 +53,7 @@
             <div class="list">
                 @foreach (var c in Vm.Collections)
                 {
-                    @* H07: promote the row to a real <button> for keyboard + AT access. *@
+                    @* Rendered as <button> for keyboard + screen-reader access. *@
                     <button class="row" type="button" @key="c.Id" @onclick="() => OpenCollection(c)">
                         <div class="avatar" style="@($"background:{c.Color};border-radius:12px")">
                             <span class="ms filled" style="font-size:18px" aria-hidden="true">folder</span>
@@ -92,7 +90,6 @@
 
     <MobileTabBar />
 
-    @* ---------------- Import modal ---------------- *@
     @if (_activeImport is not null)
     {
         <MobileModalScreen Title="@ImportTitle()" OnClose="CloseImport">
@@ -160,7 +157,6 @@
                 }
                 else
                 {
-                    @* file / takeout *@
                     @if (_activeImport == "takeout")
                     {
                         <div style="padding:14px;border-radius:12px;background:var(--secondary-soft);margin-bottom:14px;font-size:13px;color:var(--text-2)">
@@ -187,7 +183,6 @@
         </MobileModalScreen>
     }
 
-    @* ---------------- Collection detail modal ---------------- *@
     @if (_activeCollection is { } col)
     {
         <MobileModalScreen Title="@col.Name" OnClose="CloseCollection">
@@ -334,8 +329,7 @@
         _renameValue = "";
         _addUrl = "";
         _confirmDelete = false;
-        // Clear any stale modal error/success carried over from a previous
-        // collection's add-POI / rename attempts.
+        // Clear stale add-POI/rename errors/success from previous collection interactions.
         Vm.CloseAddPoi();
         Vm.CloseRename();
     }

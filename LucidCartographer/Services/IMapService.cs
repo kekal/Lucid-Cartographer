@@ -9,11 +9,7 @@ public record MapBounds(double South, double West, double North, double East)
 }
 
 /// <summary>
-/// TRIP-STARTFINISH-06: Start/Finish marker-role DTO for the JS interop layer.
-/// Carries which POI markers render the distinct Start/Finish glyph/ring and the
-/// localized accessible names (the glyph alone is meaningless to a screen
-/// reader, so the marker badge gets a role/aria-label/title). Serializes to
-/// camelCase to match leafletInterop.setStopOrders.
+/// Start/Finish marker-role DTO for the JS interop layer. Carries which POI markers render the distinct Start/Finish glyph/ring and localized accessible names.
 /// </summary>
 public record TripMarkerRolesDto(int? StartPoiId, int? FinishPoiId, string StartAria, string FinishAria);
 
@@ -34,9 +30,7 @@ public interface IMapService
     /// Apply Trip View Stop Order badges to markers. When <paramref name="orders"/>
     /// has entries, the matching POI markers render their Stop number; passing
     /// null or an empty map reverts every marker to its plain dot.
-    /// <paramref name="roles"/> (TRIP-STARTFINISH-06) marks the pinned Start and
-    /// Finish markers with their distinct glyph/ring and accessible name; null
-    /// clears any prior role marking.
+    /// <paramref name="roles"/> marks the pinned Start and Finish markers with their distinct glyph/ring and accessible name; null clears any prior role marking.
     /// </summary>
     Task SetStopOrdersAsync(IReadOnlyDictionary<int, int>? orders, TripMarkerRolesDto? roles = null);
 
@@ -46,9 +40,7 @@ public interface IMapService
     /// Roundtrip closing leg. Replaces only the prior trip-leg layer; an empty
     /// list clears it. The numbered Stop markers are applied separately via
     /// <see cref="SetStopOrdersAsync"/>. <paramref name="isRoundtrip"/>
-    /// (TRIP-STARTFINISH-06) flags the Roundtrip shape so the interop can tag the
-    /// closing leg; the leg list itself already carries N legs (roundtrip) or
-    /// N−1 (open path) as computed by the ViewModel.
+    /// flags the Roundtrip shape so the interop can tag the closing leg.
     /// </summary>
     Task DrawTripLegsAsync(IReadOnlyList<TripLegDto> legs, bool isRoundtrip = false);
 
@@ -56,12 +48,9 @@ public interface IMapService
     Task ClearTripAsync();
 
     /// <summary>
-    /// TRIP-OSRM-02 (Story 4.2, AC4, NFR8): set the routing-data attribution on the
-    /// map's attribution control. When <paramref name="html"/> is non-null (an
+    /// Set the routing-data attribution on the map's attribution control. When <paramref name="html"/> is non-null (an
     /// OSM-based routing provider such as OSRM is active) the OSM/ODbL routing
-    /// attribution is added on top of the base OSM tile attribution; when null (the
-    /// default Mock declares none) any prior routing attribution is removed. One call
-    /// covers both surfaces — desktop and mobile share the single Leaflet map.
+    /// attribution is added on top of the base OSM tile attribution; when null any prior routing attribution is removed.
     /// </summary>
     Task SetRoutingAttributionAsync(string? html);
 
@@ -80,7 +69,7 @@ public interface IMapService
     Task PanToStopAsync(int poiId);
 
     /// <summary>
-    /// CRIT-04: Destroy the JS-side map object to prevent memory leaks on navigation.
+    /// Destroy the JS-side map object to prevent memory leaks on navigation.
     /// </summary>
     Task DestroyMapAsync();
 
@@ -89,7 +78,6 @@ public interface IMapService
 
     /// <summary>
     /// Callback invoked when a map marker is clicked. The int parameter is the POI ID.
-    /// Replaces the previous event Action&lt;int&gt; to avoid interface event coupling (REVIEW-12).
     /// </summary>
     Func<int, Task>? OnMarkerClicked { get; set; }
 

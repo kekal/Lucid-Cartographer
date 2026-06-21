@@ -21,15 +21,9 @@ public sealed record ImportJobStatus(
 }
 
 /// <summary>
-/// Singleton Rx bus the UI subscribes to for background-import lifecycle
-/// updates. The invocable publishes; Blazor pages observe via
-/// <see cref="Changes"/>, which replays the latest value on subscribe
-/// (BehaviorSubject semantics, matching <c>EnrichmentProgressService</c>).
-///
-/// Deliberately tiny — real progress during import is not reported,
-/// because the library author mandate is "rely on enrichment progress
-/// for live feedback, don't reinvent". This service only carries
-/// lifecycle transitions (queued → running → completed/failed).
+/// Singleton Rx bus for background-import lifecycle updates. <see cref="Changes"/> replays
+/// the latest value on subscribe (BehaviorSubject). Carries only lifecycle transitions
+/// (queued → running → completed/failed); real-time progress is reported separately.
 /// </summary>
 public sealed class ImportJobStatusService
 {

@@ -6,9 +6,7 @@ using NetTopologySuite.IO;
 namespace LucidCartographer.Services.Export;
 
 /// <summary>
-/// GPX exporter backed by NetTopologySuite.IO.GPX. Writes a GPX 1.1
-/// document with one <c>&lt;wpt&gt;</c> per POI. Skips POIs without
-/// coordinates (the GPX spec requires lat/lon on every waypoint).
+/// GPX exporter that skips POIs without coordinates (GPX requires lat/lon on every waypoint).
 /// </summary>
 public class GpxExporter : IFileExporter
 {

@@ -18,8 +18,7 @@ public static class ColorNames
     };
 
     /// <summary>
-    /// Returns a human-readable color name for the given hex code.
-    /// Falls back to the hex code itself if not in the palette.
+    /// Returns a human-readable color name, or the hex code itself if not in the palette.
     /// </summary>
     public static string GetName(string hexColor) => HexToName.TryGetValue(hexColor, out var name) ? name : hexColor;
 }

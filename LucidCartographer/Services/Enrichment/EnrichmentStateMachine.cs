@@ -60,7 +60,6 @@ internal static class EnrichmentStateMachine
                 poi.EnrichmentFailureCount++;
                 if (poi.EnrichmentFailureCount >= maxRetries)
                 {
-                    // Give up — leave the queue. IsEnriched stays false.
                     poi.EnrichmentRequested = false;
                 }
                 break;

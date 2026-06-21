@@ -1,14 +1,8 @@
 @inherits LayoutComponentBase
 @inject ILogger<MainLayout> Logger
 
-@* This layout renders in the static SSR scope (only the page islands and
-   explicitly-marked components like EnrichmentStatus are interactive). The
-   desktop/mobile switch for the *chrome* is therefore done with CSS media
-   queries: the top header hides under 768px and the bottom tab bar appears.
-   The structurally-different *page content* is branched at render time inside
-   the interactive pages via ViewportService. *@
+@* Static SSR layout; desktop/mobile chrome via CSS media queries; page content branched via ViewportService. *@
 <div class="h-full flex flex-col overflow-hidden">
-    @* Top Header — hidden on phone widths *@
     <header class="m-desktop-header bg-white/80 backdrop-blur-md shadow-sm flex justify-between items-center px-6 h-16 flex-shrink-0 z-50">
         <div class="flex items-center gap-8">
             <h1 class="text-xl font-extrabold tracking-tight font-headline text-on-surface">@UiStrings.AppTitle</h1>
@@ -31,21 +25,17 @@
             </nav>
         </div>
         <div class="flex items-center gap-3">
-            @* Live background-enrichment counter — interactive island inside
-               the otherwise static layout. Hides itself when queue is empty. *@
+            @* Interactive island (EnrichmentStatus) inside static layout. *@
             <EnrichmentStatus />
-            @* Search form with client-side debounce *@
             <form id="search-form" action="/" method="get" class="relative" role="search">
                 <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-base" aria-hidden="true">search</span>
                 <input type="text" name="search" id="search-input" placeholder="@UiStrings.SearchPois" aria-label="@UiStrings.SearchPois"
                        class="pl-9 pr-4 py-1.5 rounded-full bg-surface-container-low text-sm text-on-surface placeholder:text-outline focus:ring-2 focus:ring-primary focus:bg-white transition-colors w-48 focus:w-64" />
             </form>
-            @* Google session: sign in the shared browser used for Fetch My Lists / export. *@
             <a href="/google-session" class="p-2 rounded-full hover:bg-surface-container-low transition-colors"
                aria-label="Google session" title="Google session (sign-in for Fetch My Lists / export)">
                 <span class="material-symbols-outlined text-on-surface-variant">account_circle</span>
             </a>
-            @* LOW-03: Logout link with JS confirmation *@
             <a href="/logout" class="p-2 rounded-full hover:bg-surface-container-low transition-colors"
                aria-label="@UiStrings.Logout"
                onclick="return confirm('Are you sure you want to log out?');">
@@ -54,7 +44,6 @@
         </div>
     </header>
 
-    @* Content Area — CRIT-04: Wrap @Body in ErrorBoundary *@
     <main class="flex-1 overflow-auto min-h-0" aria-live="polite">
         <ErrorBoundary @ref="_errorBoundary">
             <ChildContent>
@@ -78,13 +67,10 @@
     </main>
 </div>
 
-@* Search: submits on Enter only (GET form default behavior). *@
-
 @code {
     private ErrorBoundary? _errorBoundary;
     private bool _errorLogged;
 
-    // LOW-10: Log the exception from ErrorBoundary so it is not silently swallowed
     private void LogError(Exception ex)
     {
         if (!_errorLogged)

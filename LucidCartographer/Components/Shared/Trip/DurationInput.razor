@@ -2,15 +2,9 @@
 @using LucidCartographer.Services
 @using LucidCartographer.Services.Trip
 
-@* Trip stops compaction: a reusable HH:MM duration control shared by the dwell,
-   time-limit, and per-leg movement inputs. A masked text field that shows the canonical
-   MINUTES as an uncapped "HH:MM" (no AM/PM, no 24h cap) plus ▲▼ steppers — each click
-   ±Step minutes, Shift+click ±ShiftStep (clamped to [0, Max]). ArrowUp/ArrowDown on the
-   field mirror the steppers, so keyboard users never need the buttons. No JS interop:
-   ShiftKey is read straight off the Blazor mouse/keyboard event. Conversion is
-   centralized in TravelTimeFormatting.FormatHhmm/TryParseHhmm; the owner keeps canonical
-   minutes (NFR2). Presentational — it raises ValueChanged only. stopPropagation so
-   editing never selects/reorders a trip row (the 2.2 selection lesson). *@
+@* Reusable HH:MM duration control: uncapped text field plus ▲▼ steppers (±Step/ShiftStep).
+   ArrowUp/ArrowDown mirror the steppers. Conversion centralized in TravelTimeFormatting.
+   stopPropagation prevents editing from selecting/reordering the parent row. *@
 
 <span class="inline-flex items-stretch rounded border border-surface-container-high bg-surface-container-low overflow-hidden @ContainerClass">
     <input type="text" inputmode="numeric" maxlength="8"
@@ -90,15 +84,11 @@
     private Dictionary<string, object> ExtraAttrs =>
         AutoFocus ? new Dictionary<string, object> { ["autofocus"] = true } : new();
 
-    // Re-key for the input: bumping this on every committed edit forces Blazor to recreate
-    // the element with the canonical @Display, so a rejected entry ("90"), a clamped entry,
-    // or a re-typed same value never leaves stale text in the DOM (the controlled-input
-    // gotcha — Blazor's diff won't rewrite an unchanged value attribute).
+    // Bump on every committed edit to force Blazor to recreate the input element with @Display,
+    // avoiding the controlled-input gotcha where unchanged value attributes aren't rewritten.
     private int _rev;
 
-    // Typed entry: a valid HH:MM persists clamped minutes; blank clears to null; an
-    // unparseable value is ignored (no write). The _rev bump then snaps the field back to
-    // the last good @Display regardless of which branch ran.
+    // _rev bump forces the field to snap back to the last valid @Display value.
     private async Task OnTextChangedAsync(ChangeEventArgs e)
     {
         var text = e.Value?.ToString();

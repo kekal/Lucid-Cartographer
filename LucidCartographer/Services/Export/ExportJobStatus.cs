@@ -22,12 +22,8 @@ public sealed record ExportJobStatus(
 }
 
 /// <summary>
-/// Singleton Rx bus the UI subscribes to for background Saved-List export
-/// lifecycle + per-place progress. The invocable publishes; Blazor pages observe
-/// via <see cref="Changes"/>, which replays the latest value on subscribe
-/// (BehaviorSubject semantics, matching <c>ImportJobStatusService</c>). Unlike
-/// import, export DOES carry coarse progress (place k/N) because a full
-/// collection can take tens of minutes.
+/// Singleton Rx bus for export job status lifecycle and per-place progress.
+/// Changes replays the latest value on subscribe (BehaviorSubject semantics).
 /// </summary>
 public sealed class ExportJobStatusService
 {

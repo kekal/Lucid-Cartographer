@@ -8,12 +8,10 @@
     <link rel="icon" href="favicon.png" />
     <link rel="manifest" href="manifest.json" />
     <link rel="stylesheet" href="css/tailwind.css" />
-    <!-- ARCH-HIGH-07: Google Fonts loaded from CDN — lower risk than JS CDNs since CSS cannot
-         execute code. SRI hashes are impractical here because Google Fonts serves different
-         CSS per user-agent. TODO: Self-host fonts for full CDN independence if needed. -->
+    <!-- Google Fonts loaded from CDN — lower risk than JS CDNs since CSS cannot execute code. -->
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
-    <!-- ARCH-HIGH-07: Self-hosted Leaflet 1.9.4 (previously loaded from unpkg CDN) -->
+    <!-- Self-hosted Leaflet 1.9.4 -->
     <link rel="stylesheet" href="lib/leaflet/leaflet.css" />
     <script src="lib/leaflet/leaflet.js"></script>
     <link rel="stylesheet" href="css/base.css?v=3" />
@@ -26,7 +24,7 @@
 </head>
 <body class="font-body text-on-surface bg-surface">
     <Routes />
-    <!-- MED-08: downloadFile moved into leafletInterop.js to eliminate inline scripts (improves CSP) -->
+    <!-- downloadFile in leafletInterop.js to eliminate inline scripts (improves CSP) -->
     <script src="js/leafletInterop.js?v=18"></script>
     <script src="js/viewport.js?v=2"></script>
     <script src="js/history.js?v=1"></script>

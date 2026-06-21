@@ -9,9 +9,7 @@ using SharpKml.Engine;
 namespace LucidCartographer.Services.Export;
 
 /// <summary>
-/// KML exporter backed by SharpKml. Builds the typed DOM and lets the
-/// library handle XML serialization, namespacing, and escaping. Skips
-/// POIs with missing coordinates — KML <c>&lt;Point&gt;</c> requires them.
+/// KML exporter that skips POIs with missing coordinates (KML <c>&lt;Point&gt;</c> requires them).
 /// </summary>
 public class KmlExporter : IFileExporter
 {
@@ -80,10 +78,7 @@ public class KmlExporter : IFileExporter
     }
 
     /// <summary>
-    /// Builds the HTML balloon body for a placemark. KML's
-    /// <c>&lt;description&gt;</c> renders as HTML in Earth / Maps
-    /// popups; we build it with <see cref="XElement"/> so attribute and
-    /// text escaping is handled by the framework instead of by hand.
+    /// Builds the HTML balloon body for a placemark using <see cref="XElement"/> for automatic escaping.
     /// </summary>
     private static string BuildDescription(Poi poi)
     {

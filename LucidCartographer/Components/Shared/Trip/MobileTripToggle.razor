@@ -1,10 +1,7 @@
 @using LucidCartographer.Components.Shared.Trip
 @implements IDisposable
 
-@* Mobile Trip View toggle. Same semantics as the desktop TripToggle
-   (aria-pressed + aria-live announcement) on the mobile render path; ≥44px
-   touch target. Lives in the bottom-panel results header. Available when a
-   single collection has ≥1 placeable POI; absent for an empty collection. *@
+@* Mobile Trip View toggle; semantics mirror desktop TripToggle (aria-pressed + aria-live announcement). Gated on single collection with ≥1 placeable POI. *@
 
 @if (Vm.IsToggleAvailable)
 {

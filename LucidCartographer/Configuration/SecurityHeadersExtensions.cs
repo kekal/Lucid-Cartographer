@@ -4,9 +4,8 @@ public static class SecurityHeadersExtensions
 {
     /// <summary>
     /// Adds CSP, X-Content-Type-Options, X-Frame-Options, Referrer-Policy.
-    /// ARCH-CRIT-04: Tightened CSP — removed 'unsafe-eval', specified CDN domains explicitly.
-    /// 'unsafe-inline' for script-src is required by Blazor Server — its SignalR bootstrapper
-    /// injects inline scripts that cannot use nonces/hashes with the current Blazor runtime.
+    /// 'unsafe-inline' for script-src is required by Blazor Server's SignalR bootstrapper,
+    /// which injects inline scripts that cannot use nonces/hashes with the current runtime.
     /// </summary>
     public static IApplicationBuilder UseSecurityHeaders(this IApplicationBuilder app)
     {

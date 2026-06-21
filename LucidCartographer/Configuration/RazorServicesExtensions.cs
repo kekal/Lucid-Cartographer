@@ -9,7 +9,6 @@ public static class RazorServicesExtensions
         services.AddRazorComponents()
             .AddInteractiveServerComponents();
 
-        // MED-04: Response compression for Blazor SignalR and static files
         services.AddResponseCompression(opts =>
         {
             opts.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(

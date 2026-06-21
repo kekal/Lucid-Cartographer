@@ -65,9 +65,7 @@ public static class AuthRouteGuardExtensions
     }
 
     /// <summary>
-    /// True when the address is loopback or in an RFC 1918 private range.
-    /// Exposed internally so the MCP endpoint filter reuses the exact same
-    /// definition of "local" rather than duplicating the byte checks.
+    /// Returns true when the address is loopback or in an RFC 1918 private range.
     /// </summary>
     internal static bool IsLocalNetwork(IPAddress? address)
     {
@@ -88,9 +86,7 @@ public static class AuthRouteGuardExtensions
 
         if (address.AddressFamily == AddressFamily.InterNetwork)
         {
-            // Loopback (127.0.0.0/8) is already handled above by
-            // IPAddress.IsLoopback; the remaining clauses cover RFC 1918
-            // private ranges only.
+            // Remaining clauses cover RFC 1918 private ranges only.
             var bytes = address.GetAddressBytes();
             return bytes[0] == 10
                    || (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)

@@ -4,8 +4,7 @@ using LucidCartographer.Endpoints;
 using LucidCartographer.Services;
 using LucidCartographer.Services.Diagnostics;
 
-// Diagnostic console tee — defaults under the app's bin directory so the path
-// is portable across machines. Override via SCRAPE_DIAG_LOG env var if needed.
+// Diagnostic console tee: portable path by default; override via SCRAPE_DIAG_LOG.
 DiagnosticLogging.TeeConsoleToFile(
     Environment.GetEnvironmentVariable("SCRAPE_DIAG_LOG")
         ?? Path.Combine(AppContext.BaseDirectory, "scrape-diag.log"));
@@ -32,7 +31,7 @@ builder.Services
 
 var app = builder.Build();
 
-// ARCH-LOW-07: Log unobserved task exceptions instead of letting them crash the process
+// Log unobserved task exceptions to prevent process crashes.
 TaskScheduler.UnobservedTaskException += (_, e) =>
 {
     var logger = app.Services.GetService<ILogger<Program>>();
@@ -49,20 +48,16 @@ app.UseForwardedHeaders();
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
-    // HSTS: instruct browsers to only connect over HTTPS. Safe behind the
-    // TLS-terminating proxy (Cloudflare / Zero Trust) since the edge is HTTPS.
+    // HSTS: instruct browsers to only connect over HTTPS.
     app.UseHsts();
-    // ARCH-HIGH-05: Defense-in-depth — UseHttpsRedirection ensures
-    // direct-access requests are also redirected even though Cloudflare
-    // already terminates TLS at the edge.
+    // Defense-in-depth: redirect direct-access requests to HTTPS.
     app.UseHttpsRedirection();
 }
 
 app.UseSecurityHeaders();
 
-// ARCH-HIGH-06: Response compression placed AFTER security headers to avoid BREACH issues.
-// Skipped in Development so `dotnet watch` browser-refresh / BrowserLink can inject
-// their hot-reload script into uncompressed HTML responses.
+// Response compression placed AFTER security headers to avoid BREACH issues.
+// Skipped in Development for BrowserLink hot-reload compatibility.
 if (!app.Environment.IsDevelopment())
 {
     app.UseResponseCompression();
@@ -79,20 +74,17 @@ app.UseAntiforgery();
 app.UseRateLimiter();
 app.UseStaticFiles();
 
-app.MapHealthChecks("/health"); // MED-01
+app.MapHealthChecks("/health");
 app.MapAuthEndpoints();
 app.MapOAuthEndpoints();
 app.MapPoiImageEndpoints();
-app.MapDocsEndpoints(); // /docs/osrm.md — the Trip View "How to enable OSRM" link
+app.MapDocsEndpoints(); // Includes /docs/osrm.md for Trip View OSRM setup instructions.
 
-// Same-origin noVNC proxy for the Google sign-in remote view (Docker/Linux only;
-// no-op unless Browser:RemoteView:Enabled). Behind the cookie-auth route guard.
+// noVNC proxy for Google sign-in remote view; Docker/Linux only; gated by cookie auth.
 app.MapNoVncProxy();
 
-// MCP endpoint for external agents (Claude Code). DisableAntiforgery because the
-// JSON-RPC POSTs carry no antiforgery token; McpApiKeyFilter enforces auth
-// (loopback/LAN bypass, else MCP_API_KEY). /mcp is exempt from UseLanBypassOrAuth's
-// cookie redirect (see AuthRouteGuardExtensions).
+// MCP endpoint for external agents. No antiforgery (JSON-RPC); McpApiKeyFilter enforces auth.
+// Exempt from UseLanBypassOrAuth cookie redirect; see AuthRouteGuardExtensions.
 app.MapMcp("/mcp")
     .DisableAntiforgery()
     .AddEndpointFilter<IEndpointConventionBuilder, McpApiKeyFilter>();

@@ -32,11 +32,8 @@ public sealed class MapPageViewModel(
     public event Action? StateChanged;
 
     /// <summary>
-    /// Set by the host component to its <c>InvokeAsync</c> so the VM can
-    /// marshal background-thread callbacks (Rx, JS interop) onto the
-    /// renderer's synchronization context. JS interop calls fail outside
-    /// the renderer thread in Blazor Server; this hook is mandatory before
-    /// <see cref="InitializeAsync"/> is invoked.
+    /// Marshals background-thread callbacks (Rx, JS interop) onto the renderer's synchronization context.
+    /// JS interop calls fail outside the renderer thread in Blazor Server; this hook is mandatory before InitializeAsync.
     /// </summary>
     public Func<Func<Task>, Task> RendererDispatch { get; set; } = f => f();
 
@@ -52,9 +49,8 @@ public sealed class MapPageViewModel(
     public Func<Task>? MembershipChanged { get; set; }
 
     /// <summary>
-    /// The single collection a Trip can be scoped to: the lone visible collection
-    /// when exactly one is visible and no search is active; otherwise null
-    /// (per-collection Trip state is only coherent against one collection).
+    /// The lone visible collection when exactly one is visible and no search is active; otherwise null.
+    /// Per-collection Trip state is only coherent against one collection.
     /// </summary>
     public int? SingleVisibleCollectionId
     {
@@ -73,21 +69,14 @@ public sealed class MapPageViewModel(
     public int PlaceablePoiCount => FilteredPois.Count(p => p is { Latitude: not null, Longitude: not null });
 
     /// <summary>
-    /// Placeable (lat+lon present) POIs in the single visible collection's FULL
-    /// membership — viewport-INDEPENDENT — and drives the Trip toggle's ≥1 gate.
-    /// Trip View shows the whole collection regardless of map pan/zoom, so the
-    /// gate must too: a pan that empties the viewport never hides the toggle.
-    /// Zero when no single collection is in scope (multi-collection or search) so
-    /// the gate stays closed exactly as before. <see cref="VisiblePois"/> is the
-    /// lone visible collection's members when <see cref="SingleVisibleCollectionId"/>
-    /// is set; <see cref="FilteredPois"/> is its viewport subset.
+    /// Placeable POIs in the single visible collection's full membership (viewport-independent).
+    /// Drives Trip toggle gate: Trip View shows whole collection regardless of pan/zoom, so gate must too.
+    /// Zero when no single collection in scope (multi-collection or search) to keep gate closed.
     /// </summary>
     public int CollectionPlaceablePoiCount =>
         SingleVisibleCollectionId is null
             ? 0
             : VisiblePois.Count(p => p is { Latitude: not null, Longitude: not null });
-
-    // --- State ---
 
     public IReadOnlyList<PoiCollection> Collections { get; private set; } = [];
     public List<CollectionDisplayState> CollectionStates { get; private set; } = [];
@@ -97,9 +86,6 @@ public sealed class MapPageViewModel(
     public Dictionary<int, IReadOnlyList<int>> PoiCollectionMemberships { get; private set; } = new();
     public Dictionary<int, int> PoiCollectionIds { get; private set; } = new();
     public int? SelectedPoiId { get; private set; }
-    // Only set while a search is active ("Search: <query>"); shown as a chip
-    // override in PoiTable. Collection visibility no longer sets it — the list
-    // is the union of all visible collections, never a single selected one.
     public string? SelectedCollectionName { get; private set; }
     public Poi? SelectedPoi { get; private set; }
     public bool IsLoading { get; private set; } = true;
@@ -112,13 +98,8 @@ public sealed class MapPageViewModel(
     /// <summary>When true, every map marker shows a permanent POI-name label.</summary>
     public bool ShowPoiLabels { get; private set; }
 
-    // Set when the user clicks Enrich; cleared after the BG queue drains and
-    // we either confirm success or open the fallback dialog. Used to scope
-    // the post-enrichment "did it work?" check to the POI the user asked about.
     private int? _pendingEnrichPoiId;
     public Poi? EnrichFallbackPoi { get; private set; }
-
-    // --- Lifecycle ---
 
     public async Task InitializeAsync()
     {
@@ -126,10 +107,6 @@ public sealed class MapPageViewModel(
         CollectionStates = Collections.Select(c => new CollectionDisplayState(c)).ToList();
         IsLoading = false;
 
-        // Refresh the map + list when the background enrichment service
-        // flips Pois from placeholder (0,0) coords to real ones. Without
-        // this, the user has to toggle collection visibility to see new
-        // rows show up.
         _enrichmentSubscription = enrichmentProgress.Changes
             .Skip(1)
             .Subscribe(remaining => OnEnrichmentChanged(remaining));
@@ -137,16 +114,10 @@ public sealed class MapPageViewModel(
         Notify();
     }
 
-    /// <summary>
-    /// Component must call this after `_leafletMap.WaitForInitAsync()` so the
-    /// VM can interact with the live JS map instance.
-    /// </summary>
+    /// <summary>Call after map WaitForInitAsync so the VM can interact with the live JS instance.</summary>
     public void AttachMap(LeafletMap map) => _map = map;
 
-    /// <summary>
-    /// Component calls this once after the splitter is wired. Triggers initial
-    /// map population (search results or visible collections).
-    /// </summary>
+    /// <summary>Triggers initial map population after splitter is wired.</summary>
     public async Task OnMapInitializedAsync()
     {
         if (PreviousSearchQuery != null)
@@ -160,11 +131,7 @@ public sealed class MapPageViewModel(
         PendingSearchMapUpdate = false;
     }
 
-    /// <summary>
-    /// Component calls this from <c>OnParametersSetAsync</c>; reads the
-    /// current URI from <see cref="NavigationManager"/> and handles
-    /// <c>?search=…</c> queries.
-    /// </summary>
+    /// <summary>Reads URI from NavigationManager and handles ?search=… queries.</summary>
     public async Task OnNavigationChangedAsync()
     {
         var uri = navigation.ToAbsoluteUri(navigation.Uri);
@@ -194,10 +161,7 @@ public sealed class MapPageViewModel(
         }
     }
 
-    /// <summary>
-    /// Component calls this from <c>OnAfterRenderAsync</c> when
-    /// <see cref="PendingSearchMapUpdate"/> is true and the map is ready.
-    /// </summary>
+    /// <summary>Updates map when PendingSearchMapUpdate is true and map is ready.</summary>
     public async Task ResolvePendingSearchMapUpdateAsync()
     {
         PendingSearchMapUpdate = false;
@@ -207,7 +171,6 @@ public sealed class MapPageViewModel(
         }
         else
         {
-            // Search cleared — restore collection view
             if (_map is not null)
             {
                 await _map.HideCollectionAsync(SearchLayerId);
@@ -219,10 +182,8 @@ public sealed class MapPageViewModel(
 
     private void OnEnrichmentChanged(int remaining)
     {
-        // Rx fires from a background thread. LoadVisibleCollectionsAsync
-        // makes JS interop calls (LeafletMap.Show/HideCollectionAsync) which
-        // require Blazor Server's renderer dispatcher; marshal there via
-        // the host component's InvokeAsync.
+        // Rx fires from a background thread; LoadVisibleCollectionsAsync makes JS interop calls
+        // which require Blazor Server's renderer dispatcher — marshal via host component's InvokeAsync.
         _ = RendererDispatch(async () =>
         {
             try
@@ -254,13 +215,8 @@ public sealed class MapPageViewModel(
             return;
         }
 
-        // Offer manual URL entry whenever the (re-)enrichment the user just
-        // triggered did not land on a canonical Google place — either the BG
-        // service flagged it, or there is still no /maps/place/ URL on the row.
-        // This makes the enrich button idempotent: press it again to re-search,
-        // and if the place still can't be resolved you get the manual-URL
-        // dialog (this also fires for POIs that already had an address, which
-        // the old EnrichmentNeedsManualUrl-only check skipped).
+        // Offer manual URL entry if enrichment did not land on a canonical Google place.
+        // Makes enrich button idempotent: press again to re-search, fallback dialog if still unresolved.
         var hasCanonicalPlace = !string.IsNullOrEmpty(fresh.GoogleMapsUrl)
                                 && fresh.GoogleMapsUrl.Contains("/maps/place/", StringComparison.OrdinalIgnoreCase);
         if (fresh.EnrichmentNeedsManualUrl || !hasCanonicalPlace)
@@ -275,12 +231,7 @@ public sealed class MapPageViewModel(
         Notify();
     }
 
-    /// <summary>
-    /// Opens the manual-URL dialog directly, skipping the automatic enrichment
-    /// pass. Lets the user paste a Google Maps place URL for a POI whose name
-    /// search is hopeless (ambiguous results, no online presence, etc.) without
-    /// first waiting for the background scraper to fail.
-    /// </summary>
+    /// <summary>Opens manual-URL dialog, skipping automatic enrichment for POIs with hopeless name searches.</summary>
     public async Task OpenManualEnrichAsync(int poiId)
     {
         var poi = await poiService.GetPoiAsync(poiId);
@@ -323,8 +274,6 @@ public sealed class MapPageViewModel(
         return Task.CompletedTask;
     }
 
-    // --- Map population ---
-
     private async Task ShowSearchResultsOnMapAsync()
     {
         if (_map == null)
@@ -355,11 +304,7 @@ public sealed class MapPageViewModel(
         await _map.HideCollectionAsync(SearchLayerId);
 
         var grouped = await poiService.GetVisiblePoisGroupedAsync();
-        // A POI can belong to multiple collections (import "links" existing POIs
-        // via the M:N CollectionPoi join). When more than one of those collections
-        // is visible the same Poi would appear in VisiblePois twice, which would
-        // crash PoiTable with "More than one sibling of element 'tr' has the same
-        // key value". Dedup by Id while flattening.
+        // POI can belong to multiple collections; dedup by Id while flattening to avoid duplicate 'tr' keys.
         var seen = new HashSet<int>();
         var newPois = new List<Poi>();
         foreach (var s in CollectionStates)
@@ -379,8 +324,6 @@ public sealed class MapPageViewModel(
         ApplyViewportFilter();
     }
 
-    // --- Commands (UI events) ---
-
     public async Task HandleVisibilityToggledAsync(int collectionId)
     {
         var s = CollectionStates.FirstOrDefault(c => c.Id == collectionId);
@@ -389,9 +332,6 @@ public sealed class MapPageViewModel(
             return;
         }
 
-        // Persist first; only flip the UI flag once the database
-        // confirms. If the call throws the toggle stays where it was
-        // and the exception bubbles to the calling event handler.
         await poiService.ToggleVisibilityAsync(collectionId);
         s.IsVisible = !s.IsVisible;
         await LoadVisibleCollectionsAsync();
@@ -433,9 +373,6 @@ public sealed class MapPageViewModel(
     {
         if (_map != null)
         {
-            // Show all immediately; the moveend after fitBounds will
-            // re-apply the viewport filter with the new (fitted) bounds,
-            // which will naturally include every visible POI.
             FilteredPois = VisiblePois;
             Notify();
             await _map.FitBoundsAsync();
@@ -538,10 +475,6 @@ public sealed class MapPageViewModel(
         await RefreshAfterMutationAsync();
     }
 
-    // Set a POI's collection membership to exactly the chosen set (the membership
-    // editor behind the row "Move" action), optionally creating and including a
-    // new collection. Adds before removing: removing the POI's last membership
-    // first would orphan it, and RemovePoiFromCollectionAsync deletes orphans.
     public async Task HandleSetMembershipsAsync((int PoiId, IReadOnlyList<int> CollectionIds, string? NewCollectionName) args)
     {
         var target = await ResolveTargetCollectionsAsync(args.CollectionIds, args.NewCollectionName);
@@ -554,8 +487,6 @@ public sealed class MapPageViewModel(
         await RefreshAfterMutationAsync();
     }
 
-    // Batch membership editor: set every selected POI's collections to the same
-    // chosen set (checked adds to all, unchecked removes from all).
     public async Task HandleBatchSetMembershipsAsync((IReadOnlyList<int> PoiIds, IReadOnlyList<int> CollectionIds, string? NewCollectionName) args)
     {
         var target = await ResolveTargetCollectionsAsync(args.CollectionIds, args.NewCollectionName);
@@ -571,9 +502,6 @@ public sealed class MapPageViewModel(
         await RefreshAfterMutationAsync();
     }
 
-    // Resolve the requested collection ids plus an optional new collection into
-    // the final target set, creating the new collection and surfacing it in the
-    // sidebar when requested.
     private async Task<HashSet<int>> ResolveTargetCollectionsAsync(IReadOnlyList<int> collectionIds, string? newCollectionName)
     {
         var target = new HashSet<int>(collectionIds);
@@ -586,9 +514,7 @@ public sealed class MapPageViewModel(
         return target;
     }
 
-    // Diff the POI's current membership against the target: add the missing
-    // collections first, then remove the extras (add-before-remove avoids a
-    // transient orphan that RemovePoiFromCollectionAsync would delete).
+    // Add before remove to avoid transient orphan that RemovePoiFromCollectionAsync would delete.
     private async Task ApplyMembershipAsync(int poiId, HashSet<int> target)
     {
         var current = PoiCollectionMemberships.TryGetValue(poiId, out var m)
@@ -618,8 +544,6 @@ public sealed class MapPageViewModel(
         CollectionStates.Insert(0, new CollectionDisplayState(newCol));
         await RefreshAfterMutationAsync();
     }
-
-    // --- Batch commands (act on a set of selected POIs, then refresh once) ---
 
     public async Task HandleBatchDeleteAsync(IReadOnlyList<int> poiIds)
     {
@@ -675,12 +599,7 @@ public sealed class MapPageViewModel(
         PoiCollectionMemberships = memberships
             .ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<int>)kvp.Value);
 
-        // A POI can belong to several collections. The list row is shown under —
-        // and its marker drawn with the colour of — the *visible* collection it
-        // appears in (see LoadVisibleCollectionsAsync). So when resolving the
-        // single "owning" collection for icon colour and single-collection
-        // delete, prefer a currently-visible membership; only fall back to the
-        // first membership when none of the POI's collections are visible.
+        // Prefer visible membership for icon colour; fall back to first membership if none visible.
         var visibleIds = CollectionStates.Where(c => c.IsVisible).Select(c => c.Id).ToHashSet();
         PoiCollectionIds = memberships
             .Where(kvp => kvp.Value.Count > 0)
@@ -699,8 +618,6 @@ public sealed class MapPageViewModel(
         }
         await LoadVisibleCollectionsAsync();
 
-        // Let the Trip layer append/re-compact its Stop Order now that the
-        // membership (and the filtered set) reflects the mutation.
         if (MembershipChanged is not null)
         {
             await MembershipChanged();

@@ -1,30 +1,15 @@
 @using LucidCartographer.Services.Trip
 
-@* Story 1.3 (FR-3, UX-DR2/DR11) + Story 3.5 (RD7, UX-DR6): the inter-row leg
-   connector. A small, PRESENTATIONAL component (NFR1) that renders ONE compact
-   line on the shared edge between the two stops a leg connects — the ↓ glyph, the
-   travel time, the distance, and the provenance FidelityBadge — plus a reset (↺)
-   affordance that appears only on a Manual leg (hover/focus-revealed) and a
-   CLICK-TO-EDIT manual-minutes field on ANY leg (ground or Any/Air). It raises VM
-   COMMANDS only (Set/ClearManualLegTimeAsync); it never touches services/DB and
-   never mutates DB/VM state (its only local state is the transient editing flag).
-   Inset (left pad) approximates the name column (UX-DR2 [ASSUMPTION]); token-styled
-   surface-container / text-xs, neutral — never an error tone (UX-DR11). *@
+@* Presentational inter-row leg connector: raises only VM commands (Set/ClearManualLegTimeAsync);
+   never touches services/DB or mutates state. Local _editing flag is transient only. *@
 
 <div class="trip-leg-connector group flex items-center gap-2 pl-10 pr-2 py-1 text-xs bg-surface-container border-b border-surface-container">
-    @* Decorative downward glyph — the connector's "between these stops" cue. *@
     <span class="text-on-surface-variant" aria-hidden="true">↓</span>
 
-    @* Story 3.5 (UX-DR6): travel time is CLICK-TO-EDIT on ANY leg. At rest it is a
-       button showing the formatted time (or "—" when uncomputed, styled neutral/muted,
-       NOT an error colour, UX-DR11). Clicking turns it into the inline minutes input.
-       stopPropagation so editing never selects/reorders the row. *@
+    @* Click-to-edit travel time. Shows "—" muted when uncomputed. stopPropagation prevents row reorder. *@
     @if (_editing)
     {
-        @* Story 3.5 / Trip stops compaction: the manual leg time is now the shared HH:MM
-           DurationInput (was a raw-minutes number field) — uncapped, with ▲▼ steppers. It
-           still lives behind the click-to-edit affordance and commits/clears via the same
-           Set/ClearManualLegTimeAsync commands; OnBlur closes the inline editor. *@
+        @* DurationInput (HH:MM format, uncapped with steppers) commits/clears via Set/ClearManualLegTimeAsync; OnBlur closes editor. *@
         <DurationInput Value="ManualLegMinutes(Leg)"
                        ValueChanged="OnManualLegChangedAsync"
                        Max="TripViewModel.MaxManualLegMinutes"
@@ -47,7 +32,6 @@
         </button>
     }
 
-    @* "·" separator, decorative — the distance follows. *@
     <span class="text-on-surface-variant" aria-hidden="true">·</span>
 
     <span class="text-on-surface-variant"
@@ -57,16 +41,9 @@
 
     <FidelityBadge Fidelity="@Leg.Fidelity" />
 
-    @* Story 3.4 (TRIP-LEGMODE-01, FR-19): the per-leg mode pill. Replaces the
-       trip-wide TravelModeSelector — each leg sets its own Walk/Drive/Cycle/Any-Air.
-       Presentational: it raises Vm.SetLegModeAsync only (NFR1). *@
     <LegModePill Leg="Leg" Vm="Vm" />
 
-    @* Reset (↺): a real, focusable button — rendered ONLY for a Manual leg (an
-       existing override to revert). Hidden at rest, revealed on hover/focus
-       (the connector is a `group`; opacity-0 → group-hover / focus-within /
-       focus). Story 3.5 generalises reset to any leg; here it ships only the
-       manual-leg reset that already works. *@
+    @* Reset button: Manual leg only, hidden at rest, revealed on hover/focus (via group classes). *@
     @if (Leg.Fidelity == LucidCartographer.Data.Entities.Fidelity.Manual)
     {
         <button type="button"
@@ -85,41 +62,31 @@
     [Parameter, EditorRequired] public TripLeg Leg { get; set; } = null!;
 
     /// <summary>
-    /// The owning Trip view-model. The connector raises VM COMMANDS only
-    /// (<see cref="TripViewModel.SetManualLegTimeAsync"/> /
-    /// <see cref="TripViewModel.ClearManualLegTimeAsync"/> /
-    /// <see cref="TripViewModel.SetLegModeAsync"/> via the embedded
-    /// <c>LegModePill</c>) and reads the leg's own <see cref="TripLeg.Mode"/> +
-    /// the stop names — it never touches
-    /// services/DB and never mutates its own state (NFR1).
+    /// The owning Trip view-model. The connector raises only VM commands
+    /// (<see cref="TripViewModel.SetManualLegTimeAsync"/>, <see cref="TripViewModel.ClearManualLegTimeAsync"/>,
+    /// and <see cref="TripViewModel.SetLegModeAsync"/> via embedded <c>LegModePill</c>);
+    /// never touches services/DB or mutates its own state.
     /// </summary>
     [Parameter, EditorRequired] public TripViewModel Vm { get; set; } = null!;
 
-    // Story 3.5 (UX-DR6): transient, presentation-only flag — true while the travel
-    // time is being edited inline (the time button was clicked). Not VM/DB state; it
-    // never persists and toggling it raises no command. Click-to-edit on ANY leg.
+    // Transient editing state; never persists and raises no command.
     private bool _editing;
 
     private void StartEditing() => _editing = true;
 
     private void StopEditing() => _editing = false;
 
-    // The leg-origin stop's POI name, used for the manual-input + reset
-    // accessible names (the leg is keyed off its departing stop).
+    // Departing stop name for aria labels.
     private string FromName =>
         Vm.OrderedStops.FirstOrDefault(s => s.PoiId == Leg.FromPoiId)?.Name ?? string.Empty;
 
-    // TRIP-MANUAL-01: the current manual minutes for a Manual leg (seconds÷60), or null
-    // when the leg has no Manual row yet — only a Manual fidelity row pre-fills the input
-    // (a Placeholder/computing leg shows an empty field). Canonical seconds are untouched.
+    // Current manual minutes (seconds÷60) for Manual fidelity legs only; null otherwise.
     private static int? ManualLegMinutes(TripLeg leg) =>
         leg.Fidelity == LucidCartographer.Data.Entities.Fidelity.Manual && leg.DurationSeconds is { } s
             ? s / 60
             : null;
 
-    // TRIP-MANUAL-01: persist the DurationInput's canonical minutes. A committed value
-    // closes the inline editor (back to the click-to-edit button showing the new/auto
-    // time); a null (cleared field) reverts to the Placeholder via the clear command.
+    // Persist minutes: non-null commits via SetManualLegTimeAsync; null reverts via ClearManualLegTimeAsync.
     private async Task OnManualLegChangedAsync(int? minutes)
     {
         _editing = false;
@@ -134,6 +101,5 @@
         }
     }
 
-    // Reset (↺): revert this Manual leg's override — raises the VM clear command.
     private Task OnResetAsync() => Vm.ClearManualLegTimeAsync(Leg.FromPoiId, Leg.ToPoiId);
 }

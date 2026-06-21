@@ -49,12 +49,10 @@
 </div>
 
 @code {
-    // MED-06: Use [SupplyParameterFromQuery] instead of raw HttpContext.Request.Query
     [SupplyParameterFromQuery]
     public string? Error { get; set; }
 
-    // Set by the cookie handler (ReturnUrl) when an endpoint challenges the login,
-    // e.g. the OAuth /connect/authorize flow. Posted back so login redirects there.
+    // Set by the cookie handler when an endpoint challenges the login (e.g., OAuth /connect/authorize flow); posted back to redirect after successful auth.
     [SupplyParameterFromQuery]
     public string? ReturnUrl { get; set; }
 }

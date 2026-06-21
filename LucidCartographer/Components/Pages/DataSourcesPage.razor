@@ -15,16 +15,13 @@
 else
 {
 <div class="p-6 max-w-6xl mx-auto">
-    @* Header *@
     <div class="mb-8">
         <h1 class="sr-only">@UiStrings.DataAndImports</h1>
         <h2 class="text-2xl font-bold font-headline text-on-surface">@UiStrings.DataAndImports</h2>
         <p class="text-on-surface-variant mt-1">@UiStrings.DataAndImportsDesc</p>
     </div>
 
-    @* Import Cards *@
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        @* GPX/KML Upload Card *@
         <div class="bg-surface-container-low rounded-xl p-5 cursor-pointer hover:bg-surface-container transition-colors @(Vm.ActiveCard == "file" ? "ring-2 ring-primary" : "")"
              @onclick='() => Vm.ShowUploadFor("file")'>
             <div class="flex items-center gap-3 mb-3">
@@ -36,7 +33,6 @@ else
             <p class="text-sm text-on-surface-variant">@UiStrings.KmlGpxUploadDesc</p>
         </div>
 
-        @* Google Takeout Card *@
         <div class="bg-surface-container-low rounded-xl p-5 cursor-pointer hover:bg-surface-container transition-colors @(Vm.ActiveCard == "takeout" ? "ring-2 ring-primary" : "")"
              @onclick='() => Vm.ShowUploadFor("takeout")'>
             <div class="flex items-center gap-3 mb-3">
@@ -48,7 +44,6 @@ else
             <p class="text-sm text-on-surface-variant">@UiStrings.GoogleTakeoutDesc</p>
         </div>
 
-        @* Shared List Card *@
         <div class="bg-surface-container-low rounded-xl p-5 cursor-pointer hover:bg-surface-container transition-colors @(Vm.ActiveCard == "shared" ? "ring-2 ring-primary" : "")"
              @onclick='() => Vm.ShowUploadFor("shared")'>
             <div class="flex items-center gap-3 mb-3">
@@ -61,7 +56,7 @@ else
         </div>
     </div>
 
-    @* Upload Area (shown when active) — uses extracted FileUploadPanel *@
+    @* Uses extracted FileUploadPanel component *@
     @if (Vm.ShowUpload)
     {
         <FileUploadPanel Title="@Vm.UploadTitle"
@@ -80,7 +75,6 @@ else
                          ImportResult="Vm.ImportResult"
                          ImportError="@Vm.ImportError"
                          ShowFileInput="@(Vm.ActiveCard != "shared")">
-            @* Card-specific instructions *@
             @switch (Vm.ActiveCard)
             {
                 case "takeout":
@@ -122,7 +116,6 @@ else
         </FileUploadPanel>
     }
 
-    @* Managed Sources Table *@
     <div>
         <div class="flex items-center justify-between mb-4">
             <h3 class="text-lg font-bold font-headline">@UiStrings.ManagedSources</h3>
@@ -260,7 +253,6 @@ else
                 </table>
             </div>
 
-            @* Add POI inline form *@
             @if (Vm.AddPoiCollectionId != null)
             {
                 var targetCol = Vm.Collections.FirstOrDefault(c => c.Id == Vm.AddPoiCollectionId);

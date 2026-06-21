@@ -12,31 +12,16 @@ namespace LucidCartographer.Services.Operations;
 /// </summary>
 public interface IPoiMatcher
 {
-    /// <summary>Default spatial tolerance in meters for proximity matching.</summary>
     const double DefaultToleranceMeters = 100;
 
-    /// <summary>Default threshold for name similarity (0.0 - 1.0). Names with similarity below this are not considered matches.</summary>
     const double DefaultNameSimilarityThreshold = 0.6;
 
-    /// <summary>
-    /// Determines if two POIs represent the same real place — name
-    /// similarity above the threshold AND geographic distance below
-    /// the tolerance. Placeholder (0,0) coordinates always return
-    /// false (wait for enrichment before deciding identity).
-    /// </summary>
+    /// <summary>Matches if name similarity exceeds threshold and distance is below tolerance; placeholder coordinates always return false.</summary>
     bool IsMatch(Poi a, Poi b, double toleranceMeters = DefaultToleranceMeters, double nameSimilarityThreshold = DefaultNameSimilarityThreshold);
 
-    /// <summary>
-    /// Finds the best match for a POI in a collection of candidates.
-    /// Scans all candidates and returns the closest passing match by
-    /// Haversine distance (so ties break toward the nearest row).
-    /// </summary>
+    /// <summary>Returns the closest matching candidate by Haversine distance; ties break to nearest row.</summary>
     Poi? FindMatch(Poi poi, IEnumerable<Poi> candidates, double toleranceMeters = DefaultToleranceMeters, double nameSimilarityThreshold = DefaultNameSimilarityThreshold);
 
-    /// <summary>
-    /// Finds all duplicate groups within a single list using union-find
-    /// for transitive grouping — if A~B and B~C but not A~C, all three
-    /// still end up in the same group. Returns groups of 2+ POIs.
-    /// </summary>
+    /// <summary>Groups transitive duplicates via union-find; returns groups of 2+ POIs (e.g. if A~B and B~C, all three group together).</summary>
     List<List<Poi>> FindDuplicateGroups(List<Poi> pois, double toleranceMeters = DefaultToleranceMeters, double nameSimilarityThreshold = DefaultNameSimilarityThreshold, CancellationToken cancellationToken = default);
 }

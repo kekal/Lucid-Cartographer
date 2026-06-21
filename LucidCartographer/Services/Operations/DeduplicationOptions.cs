@@ -1,9 +1,6 @@
 namespace LucidCartographer.Services.Operations;
 
-/// <summary>
-/// Tunables for the background deduplication pass, bound from the
-/// "Deduplication" section of appsettings.json.
-/// </summary>
+/// <summary>Background deduplication pass configuration from appsettings.json.</summary>
 public sealed class DeduplicationOptions
 {
     /// <summary>
@@ -20,6 +17,5 @@ public sealed class DeduplicationOptions
     /// </summary>
     public int StartupDelaySeconds { get; set; } = 30;
 
-    /// <summary>Set false to disable the background pass entirely.</summary>
     public bool Enabled { get; set; } = true;
 }

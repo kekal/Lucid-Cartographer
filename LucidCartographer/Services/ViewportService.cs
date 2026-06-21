@@ -22,10 +22,7 @@ namespace LucidCartographer.Services;
 public sealed class ViewportService
 {
     /// <summary>
-    /// Widths strictly below this (CSS px) render the mobile UI. 768px is the
-    /// conventional tablet/phone boundary (Tailwind's <c>md</c>), so phones in
-    /// portrait and small tablets get the bottom-tab mobile shell while laptops
-    /// and desktops keep the multi-pane desktop layout.
+    /// Mobile layout breakpoint (768px = Tailwind <c>md</c>).
     /// </summary>
     public const int MobileBreakpointPx = 768;
 
@@ -44,7 +41,6 @@ public sealed class ViewportService
     private const int CookieMobileWidth = 390;
     private const int CookieDesktopWidth = 1280;
 
-    /// <summary>Last width reported by the browser, in CSS pixels.</summary>
     public int Width { get; private set; }
 
     /// <summary>
@@ -61,9 +57,7 @@ public sealed class ViewportService
 
     public ViewportService(IHttpContextAccessor httpContextAccessor)
     {
-        // Cookie seed: read once at construction. HttpContext is null when the
-        // service is resolved outside a request (e.g. bUnit tests), in which
-        // case Initialized stays false and the JS interop path populates it.
+        // HttpContext is null outside a request (e.g. bUnit tests); JS interop populates Initialized in that case.
         var cookie = httpContextAccessor.HttpContext?.Request?.Cookies[CookieName];
         if (cookie == "mobile")
         {

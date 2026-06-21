@@ -96,19 +96,11 @@
     [Parameter] public RenderFragment? ChildContent { get; set; }
     [Parameter] public bool IsImporting { get; set; }
     [Parameter] public string? ImportingFileName { get; set; }
-    /// <summary>
-    /// Optional status line shown next to the spinner while
-    /// <see cref="IsImporting"/> is true. Falls back to
-    /// "Importing {ImportingFileName}..." when null/empty.
-    /// </summary>
+    /// <summary>Optional status line; falls back to "Importing {ImportingFileName}..." when null/empty.</summary>
     [Parameter] public string? StatusMessage { get; set; }
     [Parameter] public ImportResult? ImportResult { get; set; }
     [Parameter] public string? ImportError { get; set; }
-    /// <summary>
-    /// When false, the generic file drag-and-drop zone is hidden. Used by the
-    /// Shared-Google-List flow, which imports via the ScraperPanel child content
-    /// rather than a file upload.
-    /// </summary>
+    /// <summary>When false, hides the file input zone (e.g., in ScraperPanel flows that import via child content).</summary>
     [Parameter] public bool ShowFileInput { get; set; } = true;
 
     private async Task OnCollectionNameChanged()

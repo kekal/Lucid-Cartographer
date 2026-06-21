@@ -1,17 +1,9 @@
 @using LucidCartographer.Data.Entities
 @using LucidCartographer.Services.Trip
 
-@* TRIP-BULKMODE-01: header control that assigns ONE travel mode to ALL legs of the
-   active trip in a single action. A PRESENTATIONAL component (NFR1) — it raises only
-   the VM command Vm.SetAllLegsModeAsync and never touches services/DB or mutates its
-   own persisted state. A small button ("Set mode for all…") opens a popover holding an
-   overwrite checkbox (default OFF = fill only the undefined Any/Air legs) above the four
-   mode choices (Walk / Drive / Cycle / Any-Air). Choosing a mode applies it and closes.
-   It is the REMEDY for uncomputed / Any-Air legs, not a consumer of settled times — so it
-   deliberately does NOT gate on IsAnyLegComputing (that would disable it exactly when an
-   all-Any/Air trip needs it). Only transiently disabled while its own bulk request is in
-   flight (anti-double-submit). stopPropagation so the header never triggers a row
-   interaction. All copy via UiStrings. *@
+@* Presentational bulk-mode selector: raises Vm.SetAllLegsModeAsync only, never mutates state.
+   Does NOT gate on IsAnyLegComputing (must remain enabled for all-Any/Air trips).
+   Disabled only during own request (anti-double-submit). Checkbox default OFF (fill undefined legs only). *@
 
 <div class="relative inline-flex" @onclick:stopPropagation="true" @onkeydown:stopPropagation="true">
     <button type="button"
@@ -29,9 +21,7 @@
 
     @if (_open)
     {
-        @* Popover: overwrite toggle (subordinate, secondary tone) above a separator and
-           the four mode items. role=menu; each mode is a plain menuitem (this is an action,
-           not a persisted radio state — the selector itself holds no current value). *@
+        @* Menu: overwrite toggle above separator and four mode choices (menuitem role, action-based not radio). *@
         <div role="menu"
              aria-label="@UiStrings.TripBulkModeMenuAria"
              class="absolute right-0 top-full z-10 mt-1 min-w-[12rem] rounded-md border border-surface-container-high bg-surface-container-low shadow-md py-1"
@@ -61,9 +51,7 @@
 
 @code {
     /// <summary>
-    /// The owning Trip view-model. The selector raises the single VM command
-    /// <see cref="TripViewModel.SetAllLegsModeAsync"/> only — it never touches services/DB
-    /// and never mutates its own state (NFR1).
+    /// The owning Trip view-model; selector raises only <see cref="TripViewModel.SetAllLegsModeAsync"/>.
     /// </summary>
     [Parameter, EditorRequired] public TripViewModel Vm { get; set; } = null!;
 
@@ -71,8 +59,7 @@
     private bool _overwrite;
     private bool _busy;
 
-    // The four selectable modes with their UiStrings labels (Any-Air last; the
-    // "undefined / manual-only" choice). Mirrors LegModePill's label conventions.
+    // Mirrors LegModePill label conventions.
     private static readonly (string Mode, string Label)[] Modes =
     [
         (TravelMode.Walk, UiStrings.TripTravelModeWalk),
@@ -86,8 +73,7 @@
         _open = !_open;
         if (_open)
         {
-            // Re-assert the non-destructive default on every open so a one-off overwrite
-            // never silently carries into the next assignment (the checkbox is not sticky).
+            // Checkbox defaults to OFF on each open (not sticky across assignments).
             _overwrite = false;
         }
     }
@@ -110,8 +96,7 @@
         }
     }
 
-    // Mode glyphs match LegModePill: undefined/Any-Air uses a NEUTRAL help glyph
-    // (never an error icon). Material Symbols, per the project's icon convention.
+    // Glyphs match LegModePill; undefined/Any-Air uses neutral help icon.
     private static string GlyphFor(string mode) => mode switch
     {
         TravelMode.Walk => "directions_walk",

@@ -13,36 +13,18 @@ public record EnrichedDetails(
     string? ImageUrl)
 {
     /// <summary>
-    /// True only when THIS enrichment pass landed on a canonical Google
-    /// <c>/maps/place/</c> URL — the single trustworthy signal that we actually
-    /// resolved the place. <see cref="GoogleMapsUrl"/> is populated (in
-    /// <see cref="PoiDetailEnricher"/>) exactly when the final URL contains
-    /// <c>/maps/place/</c>, so it is the authoritative gate.
-    ///
-    /// Address / website / phone come from selectors that only exist on the
-    /// place panel, so they cannot be present without a place URL anyway — and
-    /// a photo MUST NOT count on its own: a search-results (SERP) page exposes
-    /// stray <c>googleusercontent.com</c> thumbnails that belong to other
-    /// places (the POI #604 / "PUB 320" bug). Counting a photo alone marked
-    /// such rows "Enriched" with a wrong image and no canonical URL.
+    /// True when the enrichment landed on a canonical <c>/maps/place/</c> URL,
+    /// the sole trustworthy signal of a resolved place. Photos alone can mislead
+    /// (SERP stray thumbnails); this gate prevents false enrichment.
     /// </summary>
     public bool ResolvedPlace => !string.IsNullOrWhiteSpace(GoogleMapsUrl);
 }
 
 /// <summary>
-/// Opens a Google Maps place on a provided Playwright page and reads the
-/// detail panel's address / website / phone, plus coordinates from the URL.
-/// Stateless helper — the caller owns the page lifecycle so we can pool /
-/// parallelize tabs in the background enrichment service.
-///
-/// Two entry points:
-///   - <see cref="EnrichAsync(IPage, string, CancellationToken)"/> — when
-///     we already know the place URL.
-///   - <see cref="EnrichByNameAsync(IPage, string, string?, CancellationToken)"/>
-///     — when the scraper only captured the card name (shared/personal
-///     list cards that have no place anchors). Uses Google Maps' public
-///     search API URL to land on the place, then extracts coords from
-///     the resulting URL.
+/// Opens a Google Maps place and extracts address, website, phone, and
+/// coordinates. Stateless helper for background enrichment with pooled
+/// tabs. Two entry points: EnrichAsync (place URL) and EnrichByNameAsync
+/// (place name or name with hint/viewport).
 /// </summary>
 public static class PoiDetailEnricher
 {
@@ -54,18 +36,11 @@ public static class PoiDetailEnricher
 
     public static Task<EnrichedDetails> EnrichByNameAsync(IPage page, string name, string? hint, double? latitude, double? longitude, CancellationToken ct, ILogger? logger = null)
     {
-        // Appending the hint (category or description first line) helps
-        // disambiguate common names. Example: "Zebra" + "Zabrze, Poland"
-        // lands on the specific place rather than the generic feature.
+        // Hint disambiguates common names (e.g., "Zebra" + "Zabrze, Poland").
         var query = string.IsNullOrWhiteSpace(hint) ? name : $"{name} {hint}";
 
-        // When the POI carries coordinates (KML import, manual pin), use the
-        // path-based search URL with a /@lat,lon,17z viewport suffix instead
-        // of the ?api=1&query= form. Maps then biases the search to that
-        // viewport AND, for a near-unique hit, opens the place panel directly
-        // — which is what the address/website/phone selectors expect. Without
-        // the viewport anchor, ?api=1 lands on a SERP that has no place panel
-        // and all three fields come back empty.
+        // With coords, use /@lat,lon,17z URL to open place panel directly;
+        // without it, ?api=1 lands on SERP with no panel.
         string url;
         if (latitude.HasValue && longitude.HasValue)
         {
@@ -77,8 +52,7 @@ public static class PoiDetailEnricher
         {
             url = "https://www.google.com/maps/search/?api=1&query=" + Uri.EscapeDataString(query);
         }
-        // Pass the bare POI name (not the hint-augmented query) so the
-        // results-list auto-picker matches against the actual place name.
+        // Use bare name (not hint-augmented query) for result auto-picker.
         return EnrichCoreAsync(page, url, searchName: name, ct, logger);
     }
 
@@ -86,33 +60,23 @@ public static class PoiDetailEnricher
     {
         ct.ThrowIfCancellationRequested();
 
-        // DOMContentLoaded, not NetworkIdle: Google Maps keeps background
-        // XHRs going forever and NetworkIdle effectively never fires.
+        // DOMContentLoaded, not NetworkIdle (Maps has infinite background XHRs).
         await page.GotoAsync(navUrl, new PageGotoOptions
         {
             WaitUntil = WaitUntilState.DOMContentLoaded,
             Timeout = 20000
         });
 
-        // Fresh BrowserContexts land on consent.google.com before the
-        // real /maps URL. Click Accept and wait for the redirect to
-        // complete. Shares cookies across enrichment calls, so after
-        // the first successful click the rest skip this branch.
+        // Fresh contexts land on consent.google.com; cookies persist across calls.
         if (page.Url.Contains("consent.google.com"))
         {
             await GoogleConsent.DismissAsync(page, logger);
         }
 
-        // Wait for the URL to transition to the canonical /maps/place/
-        // form — Google redirects the search URL to the matched place.
-        // We also accept an @lat,lon segment as a sign that the map
-        // has focused on the place.
+        // Wait for URL to settle on /maps/place/ with @lat,lon.
         await WaitForPlaceUrlAsync(page, ct);
 
-        // Still on a results list (the search was ambiguous and Google didn't
-        // auto-open a single place). If exactly one result card unambiguously
-        // matches the POI name, navigate to it; otherwise leave the page as-is
-        // so the caller flags a manual-URL fallback.
+        // If still on results list, try to pick the unambiguous match.
         if (searchName is not null && !IsOnPlacePage(page.Url))
         {
             var picked = await TryPickResultUrlAsync(page, searchName, logger);
@@ -137,8 +101,7 @@ public static class PoiDetailEnricher
             }
         }
 
-        // Wait for the detail panel to hydrate enough to expose data-item-id
-        // attributes. 10s upper bound — if nothing shows, fields stay null.
+        // Wait for detail panel to expose data-item-id attributes (10s timeout).
         try
         {
             await page.WaitForSelectorAsync("[data-item-id]", new() { Timeout = 10000 });
@@ -184,10 +147,7 @@ public static class PoiDetailEnricher
             EnrichmentMetrics.RecordSelectorMiss();
         }
 
-        // Only trust a photo when we actually landed on a place page. On a
-        // results (SERP) page the img[src*='googleusercontent.com'] selector
-        // matches a stray thumbnail belonging to some other listing — storing
-        // it gave POI #604 the wrong "PUB 320" menu image.
+        // Only trust photos from place pages; SERP images belong to other listings.
         var imageUrl = finalUrl.Contains("/maps/place/")
             ? await TryExtractImageUrlAsync(page, logger)
             : null;
@@ -206,9 +166,7 @@ public static class PoiDetailEnricher
         => url.Contains("/maps/place/") && url.Contains("/@");
 
     /// <summary>
-    /// Polls (up to ~9s) for the URL to settle on the canonical /maps/place/
-    /// form. Google redirects a name search to the matched place; the @lat,lon
-    /// segment confirms the map focused on it.
+    /// Polls for URL to settle on canonical /maps/place/ with @lat,lon.
     /// </summary>
     private static async Task WaitForPlaceUrlAsync(IPage page, CancellationToken ct)
     {
@@ -225,17 +183,14 @@ public static class PoiDetailEnricher
     }
 
     /// <summary>
-    /// Reads the search-results feed and returns the href of the single card
-    /// whose name unambiguously matches <paramref name="searchName"/>, or null
-    /// when there is no result list, no match, or more than one match. Selector
-    /// misses degrade gracefully to null (→ manual fallback).
+    /// Returns the href of the single result card matching <paramref name="searchName"/>,
+    /// or null if no list, no match, or ambiguous. Selector misses degrade gracefully.
     /// </summary>
     private static async Task<string?> TryPickResultUrlAsync(IPage page, string searchName, ILogger? logger)
     {
         try
         {
-            // Result cards in the Maps feed are <a class="hfpxzc"> with the
-            // place name in aria-label and the canonical place URL in href.
+            // Maps result cards: <a class="hfpxzc"> with aria-label and href.
             try
             {
                 await page.WaitForSelectorAsync("a.hfpxzc", new() { Timeout = 4000 });

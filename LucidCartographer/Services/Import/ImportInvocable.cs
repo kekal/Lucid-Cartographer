@@ -4,12 +4,9 @@ using Coravel.Queuing.Interfaces;
 namespace LucidCartographer.Services.Import;
 
 /// <summary>
-/// Coravel invocable that runs a single import job off the request
-/// thread. Coravel resolves this from its own <see cref="IServiceScope"/>
-/// on every queue dequeue, so injecting the scoped
-/// <see cref="IImportOrchestrator"/> directly is safe — we get a fresh
-/// <c>DbContext</c> per job, independent of whichever Blazor circuit
-/// triggered the enqueue (the user may have already navigated away).
+/// Runs a single import job off the request thread. Each Coravel dequeue
+/// creates a fresh <see cref="IServiceScope"/>, so injected scoped services
+/// get their own <c>DbContext</c> per job, independent of the triggering Blazor circuit.
 /// </summary>
 public sealed class ImportInvocable(
     IImportOrchestrator orchestrator,
@@ -46,9 +43,7 @@ public sealed class ImportInvocable(
             }
             else if (Payload.IsSharedList)
             {
-                // Full scrape-then-persist pipeline runs inside the job,
-                // so the user can navigate away during the 20–40s scrape
-                // without killing it with their Blazor circuit.
+                // Scraping runs inside the job so the user can navigate away without killing it.
                 status.Publish(new ImportJobStatus(
                     ImportJobState.Running,
                     "Scraping Google Maps list..."));
@@ -61,10 +56,7 @@ public sealed class ImportInvocable(
 
                 if (scrape.Pois.Count == 0)
                 {
-                    // Error=null so the UI subscription falls back to
-                    // Message (the user-friendly sentence). Using a
-                    // sentinel like "empty scrape" for Error would
-                    // show up as-is in the error block.
+                    // Error=null so UI shows Message (user-friendly) instead of a sentinel value.
                     status.Publish(new ImportJobStatus(
                         ImportJobState.Failed,
                         "No places found. Make sure the URL is a valid Google Maps list."));
@@ -111,7 +103,7 @@ public sealed class ImportInvocable(
         }
         finally
         {
-            // Temp file is owned by the job once enqueued; clean up.
+            // Job owns the temp file; clean up after completion or failure.
             if (Payload.IsFileImport && !string.IsNullOrEmpty(Payload.TempFilePath))
             {
                 try { File.Delete(Payload.TempFilePath); }
@@ -127,9 +119,7 @@ public sealed class ImportInvocable(
 }
 
 /// <summary>
-/// Coravel-backed queue adapter. Thin on purpose — all it does is
-/// translate our library-agnostic <see cref="IImportJobQueue"/> call
-/// into Coravel's <see cref="IQueue.QueueInvocableWithPayload{TInvocable, TPayload}"/>.
+/// Adapts library-agnostic <see cref="IImportJobQueue"/> to Coravel's queue.
 /// </summary>
 public sealed class CoravelImportJobQueue(IQueue queue, ImportJobStatusService status) : IImportJobQueue
 {

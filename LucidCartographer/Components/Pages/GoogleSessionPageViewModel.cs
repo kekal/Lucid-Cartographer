@@ -75,7 +75,7 @@ public sealed class GoogleSessionPageViewModel(
     public async Task OpenSignInAsync()
     {
         IsBusy = true;
-        ShowRemoteView = true; // reveal the live view so the user can complete the login
+        ShowRemoteView = true;
         StatusMessage = "Opening the Google sign-in page…";
         Notify();
         try
@@ -120,15 +120,14 @@ public sealed class GoogleSessionPageViewModel(
 
     public ValueTask DisposeAsync()
     {
-        // The Razor component calls this AND the DI scope disposes the transient
-        // VM, so DisposeAsync runs twice — guard the CTS against double-dispose.
+        // DisposeAsync may be called twice (Razor component + DI scope); guard against double-dispose.
         if (_disposed)
         {
             return ValueTask.CompletedTask;
         }
         _disposed = true;
         try { _cts.Cancel(); }
-        catch (ObjectDisposedException) { /* already disposed */ }
+        catch (ObjectDisposedException) { }
         _cts.Dispose();
         return ValueTask.CompletedTask;
     }

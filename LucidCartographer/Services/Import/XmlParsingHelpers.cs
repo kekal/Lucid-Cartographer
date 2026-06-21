@@ -8,16 +8,8 @@ namespace LucidCartographer.Services.Import;
 /// </summary>
 internal static class XmlParsingHelpers
 {
-    /// <summary>
-    /// Finds a direct child element, trying the namespaced name first,
-    /// then falling back to the local name without namespace.
-    /// </summary>
     public static XElement? FindElement(XElement parent, XNamespace ns, string localName) => parent.Element(ns + localName) ?? parent.Element(localName);
 
-    /// <summary>
-    /// Finds a descendant element, trying the namespaced name first,
-    /// then falling back to the local name without namespace.
-    /// </summary>
     public static XElement? FindDescendant(XElement parent, XNamespace ns, string localName)
     {
         return parent.Descendants(ns + localName).FirstOrDefault()

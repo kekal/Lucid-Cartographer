@@ -1,11 +1,8 @@
 namespace LucidCartographer.Data.Entities;
 
 /// <summary>
-/// String constants for Trip Travel Mode values.
-/// TRIP-SCHEMA-01: persisted as strings (human-readable DB values), mirroring the
-/// <see cref="PoiCategory"/> string-constant precedent rather than an int-backed enum.
-/// The storing properties (PoiCollection.TravelMode, RouteSegment.TravelMode) are typed
-/// <c>string</c> and are restricted to this set by an EF check constraint in AppDbContext.
+/// String constants for Trip Travel Mode values, persisted as strings (human-readable DB values)
+/// and mirrored in <see cref="PoiCategory"/>; stored properties are restricted by EF check constraint in AppDbContext.
 /// </summary>
 public static class TravelMode
 {
@@ -20,8 +17,7 @@ public static class TravelMode
     ];
 
     /// <summary>
-    /// Returns true if the travel mode is one of the allowed values.
-    /// TravelMode is a non-nullable column, so null is treated as invalid.
+    /// Returns true if the travel mode is one of the allowed values; null is invalid.
     /// </summary>
     public static bool IsValid(string? travelMode) =>
         travelMode is not null && All.Contains(travelMode);

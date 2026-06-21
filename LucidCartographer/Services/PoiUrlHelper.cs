@@ -5,9 +5,7 @@ using LucidCartographer.Data.Entities;
 namespace LucidCartographer.Services;
 
 /// <summary>
-/// ARCH-HIGH-03: Shared Google Maps URL helper — replaces duplicated methods in
-/// PoiTable.razor, PoiDetailPane.razor, and OperationsPage.razor.
-/// IE-14: Shared coordinate extraction from Google Maps URLs.
+/// Shared Google Maps URL helper and coordinate extraction utilities.
 /// </summary>
 public static class PoiUrlHelper
 {
@@ -18,10 +16,7 @@ public static class PoiUrlHelper
             return poi.GoogleMapsUrl;
         }
 
-        // Never expose a bare coordinate link (?query=lat,lon) — it just drops a
-        // pin and looks broken. Fall back to a name-based Google Maps search,
-        // which resolves to the real place far more often. Mirrors the query
-        // EnrichFallbackDialog builds for the same purpose.
+        // Name-based search resolves to the real place far more reliably than bare coordinates.
         if (!string.IsNullOrWhiteSpace(poi.Name))
         {
             var query = string.IsNullOrWhiteSpace(poi.Category) ? poi.Name : $"{poi.Name} {poi.Category}";
@@ -31,12 +26,7 @@ public static class PoiUrlHelper
         return "#";
     }
 
-    // The two stable, language-independent place identifiers embedded in a
-    // canonical /maps/place/ URL's data segment:
-    //   !1s0x47045b3f13482675:0xc522afd5119f73c7  → feature id (cell:cid)
-    //   !16s%2Fg%2F1226snj_                        → Knowledge Graph mid (/g/… or /m/…)
-    // Unlike the /maps/place/<Name>/ segment (which is the *localized* display
-    // name and varies by request language), these never change with language.
+    // Language-independent place identifiers: !1s (feature id: 0x…:0x…) and !16s (Knowledge Graph mid: /g/… or /m/…).
     private static readonly Regex FeatureIdRegex =
         new(@"!1s(0x[0-9a-fA-F]+:0x[0-9a-fA-F]+)", RegexOptions.Compiled);
     private static readonly Regex EntityIdTokenRegex =
@@ -141,12 +131,10 @@ public static class PoiUrlHelper
 
     /// <summary>
     /// Extracts coordinates from a Google Maps URL.
-    /// IE-14: Consolidated from GoogleMapsListScraper's duplicated @/ parsing blocks.
-    /// Checks !3d/!4d parameters first, then @/ anywhere in the URL.
+    /// Checks !3d/!4d parameters first, then @/ viewport-center coordinates.
     /// </summary>
     public static (double lat, double lon)? ExtractCoordinatesFromUrl(string url)
     {
-        // Try !3d/!4d parameters first (most reliable)
         var lat3d = ExtractBangParam(url, "!3d");
         var lon4d = ExtractBangParam(url, "!4d");
         if (lat3d.HasValue && lon4d.HasValue)
@@ -154,7 +142,7 @@ public static class PoiUrlHelper
             return (lat3d.Value, lon4d.Value);
         }
 
-        // Try @lat,lon anywhere in the URL (single check, no duplicate /place/ vs non-/place/ paths)
+        // Fallback: @lat,lon viewport-center coordinates.
         var atIdx = url.IndexOf("/@", StringComparison.Ordinal);
         if (atIdx >= 0)
         {

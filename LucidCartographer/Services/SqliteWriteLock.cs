@@ -18,9 +18,7 @@ namespace LucidCartographer.Services;
 public sealed class SqliteWriteLock : IDisposable
 {
     /// <summary>
-    /// The shared write gate. Callers <c>await Gate.WaitAsync(ct)</c>
-    /// before <c>SaveChangesAsync</c> and <c>Gate.Release()</c> in a
-    /// finally block.
+    /// Shared write gate; callers must <c>await WaitAsync(ct)</c> before <c>SaveChangesAsync</c> and <c>Release()</c> in a finally block.
     /// </summary>
     public SemaphoreSlim Gate { get; } = new(1, 1);
 

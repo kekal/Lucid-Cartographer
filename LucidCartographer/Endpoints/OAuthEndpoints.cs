@@ -27,9 +27,7 @@ public static class OAuthEndpoints
 {
     public static IEndpointRouteBuilder MapOAuthEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        // Cast the single-HttpContext handlers to Delegate so they're treated as
-        // route handlers (their Task<IResult> is written to the response) rather
-        // than RequestDelegates (which would discard it) — see ASP0016.
+        // Cast to Delegate so Task<IResult> is written to response, not discarded.
         endpoints.MapMethods("/connect/authorize", ["GET", "POST"], (Delegate)AuthorizeAsync).DisableAntiforgery();
         endpoints.MapPost("/connect/token", (Delegate)ExchangeAsync).DisableAntiforgery();
         endpoints.MapPost("/connect/register", RegisterAsync).DisableAntiforgery();
@@ -85,8 +83,6 @@ public static class OAuthEndpoints
 
         if (request.IsAuthorizationCodeGrantType() || request.IsRefreshTokenGrantType())
         {
-            // The principal (with its claim destinations) is restored from the
-            // authorization code / refresh token; re-issue tokens from it.
             var result = await http.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
             if (result.Principal is null)
             {

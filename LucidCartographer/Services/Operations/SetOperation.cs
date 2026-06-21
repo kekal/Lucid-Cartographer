@@ -2,7 +2,6 @@ namespace LucidCartographer.Services.Operations;
 
 /// <summary>
 /// Set operation types for POI collections.
-/// OPS-R18: Extracted into its own file from SetOperationService.cs.
 /// </summary>
 public enum SetOperation
 {

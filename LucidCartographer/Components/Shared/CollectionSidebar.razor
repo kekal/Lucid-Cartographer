@@ -64,10 +64,7 @@
         }
     }
 
-    // Keyboard: the row is a toggle button, so Enter/Space activates it.
-    // Tab moves between rows natively (each row is tabindex=0) — no custom
-    // arrow-key navigation needed now that the list isn't a single-select
-    // listbox.
+    // Row is a toggle button: Enter/Space activates; Tab navigates between rows natively.
     private async Task HandleKeyDown(KeyboardEventArgs e, int collectionId)
     {
         if (e.Key is "Enter" or " ")

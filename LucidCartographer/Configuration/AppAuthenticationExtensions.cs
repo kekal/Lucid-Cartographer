@@ -21,11 +21,8 @@ public static class AppAuthenticationExtensions
         IConfiguration configuration,
         IHostEnvironment environment)
     {
-        // Persist Data Protection keys to the /data volume. Without this they
-        // land in the ephemeral container filesystem (~/.aspnet/DataProtection-Keys),
-        // so every redeploy regenerates them — invalidating all auth cookies,
-        // antiforgery tokens, and any in-flight OAuth authorization-code state.
-        // A fixed application name keeps the key ring stable across instances.
+        // Persist Data Protection keys to avoid invalidating auth cookies and tokens on redeploy.
+        // Fixed application name keeps the key ring stable across instances.
         var keysDir = Path.Combine(
             DatabaseServicesExtensions.ResolveDataDirectory(configuration, environment),
             "dataprotection-keys");
@@ -50,12 +47,7 @@ public static class AppAuthenticationExtensions
                 }
             }
 
-            // Trusted networks (CIDR), e.g. "172.16.0.0/12" for the Docker bridge
-            // range. Behind a container NAT the immediate peer is a gateway whose
-            // exact IP is hard to predict and can change, so trusting the private
-            // network is more robust than pinning a single proxy IP. Only matters
-            // for which peer may set X-Forwarded-Proto/For; the app is reachable
-            // solely via the tunnel and LAN, so trusting RFC1918 here is safe.
+            // Trust private networks (CIDR) instead of pinning proxy IPs, which change behind container NAT.
             var trustedNetworks = configuration.GetSection("Auth:TrustedNetworks").Get<string[]>() ?? [];
             foreach (var entry in trustedNetworks)
             {
@@ -106,10 +98,7 @@ public static class AppAuthenticationExtensions
             });
         services.AddAuthorization();
 
-        // BCL rate limiter — replaces hand-rolled ConcurrentDictionary counter.
-        // 5 attempts per minute per client IP, partitioned fixed window.
-        // Semantic drift: counts ALL attempts (success + fail), not just failures.
-        // Acceptable for a single-user app — brute-force protection still holds.
+        // Rate limiter counts all attempts (success + fail), not just failures; acceptable for single-user app.
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;

@@ -50,9 +50,8 @@ public class GeoJsonImporter(ILogger<GeoJsonImporter> logger) : IFileImporter
 
     private static IEnumerable<IFeature> ReadFeatures(GeoJsonReader reader, string json)
     {
-        // Accept both FeatureCollection and a single Feature at the root
-        // (matches the previous behaviour). NTS throws JsonException for
-        // anything else — that's the library's diagnostic we want surfaced.
+        // Accept both FeatureCollection and a single Feature at the root;
+        // NTS throws JsonException for anything else — that's the library's diagnostic.
         if (json.Contains("\"FeatureCollection\""))
         {
             return reader.Read<FeatureCollection>(json);

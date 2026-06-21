@@ -1,19 +1,13 @@
 namespace LucidCartographer.Services.Trip;
 
 /// <summary>
-/// TRIP-INVALIDATE-01 (Story 2.4): centralized invalidation of cached
-/// <see cref="Data.Entities.RouteSegment"/> rows. A cached leg becomes stale when
-/// the geometry it was derived from changes (a POI's coordinates move) or when the
-/// user explicitly asks to recompute. Invalidation simply DELETES the stale rows so
-/// the existing background compute path (TRIP-TRAVELTIME-01) refills them on the
-/// next trigger — there is no in-place mutation here.
+/// Centralized invalidation of cached <see cref="Data.Entities.RouteSegment"/> rows.
+/// A cached leg becomes stale when geometry changes (POI coordinates move) or the user
+/// explicitly requests recompute. Invalidation DELETES stale rows; the background compute
+/// path refills them on the next trigger — no in-place mutation.
 ///
-/// Provider dimension: the shipped cache key is
-/// <c>(FromPoiId, ToPoiId, TravelMode)</c> with the provider in the <c>Source</c>
-/// column (AR-1). Epic 2 has exactly one active provider, so a provider change is a
-/// deployment event the operator resolves via the explicit Recompute action — there
-/// is no runtime provider/assumed-speed config-watcher and Provider is never part of
-/// the key.
+/// Cache key: <c>(FromPoiId, ToPoiId, TravelMode)</c> with provider in <c>Source</c> column.
+/// Provider is a deployment-level concern (no runtime config-watcher) and never part of the key.
 ///
 /// Two fidelity rules are load-bearing:
 /// <list type="bullet">

@@ -11,7 +11,7 @@ public class PoiService(
     IRouteSegmentInvalidationService routeSegmentInvalidation,
     ILogger<PoiService> logger) : IPoiService
 {
-    // [REVIEW-5] Regex matches only #RRGGBB (7 chars). MaxLength on entity aligned to 7.
+    // Regex matches only #RRGGBB format; MaxLength on entity aligned to 7.
     private static readonly Regex HexColorRegex = new("^#[0-9a-fA-F]{6}$", RegexOptions.Compiled);
 
     public async Task<IReadOnlyList<PoiCollection>> GetCollectionsAsync(CancellationToken cancellationToken = default)
@@ -22,7 +22,7 @@ public class PoiService(
             .OrderByDescending(c => c.CreatedDate)
             .ToListAsync(cancellationToken);
 
-        // [REVIEW-2] Compute PoiCount from DB instead of relying on denormalized field
+        // Compute PoiCount from DB instead of relying on denormalized field.
         var counts = await db.PoiCollectionItems
             .GroupBy(ci => ci.PoiCollectionId)
             .Select(g => new { CollectionId = g.Key, Count = g.Count() })
@@ -49,20 +49,12 @@ public class PoiService(
     }
 
     /// <summary>
-    /// Returns POIs grouped by visible collection ID using a single joined query.
-    /// [REVIEW-10] Uses projection to load only the fields needed for map markers,
-    /// reducing memory pressure on large datasets.
+    /// Returns POIs grouped by visible collection ID using projection to reduce memory pressure.
     /// </summary>
     public async Task<Dictionary<int, List<Poi>>> GetVisiblePoisGroupedAsync(CancellationToken cancellationToken = default)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        // Visibility = "has coordinates we can plot". The earlier IsEnriched
-        // gate hid file-imported rows whose enrichment failed (KML supplies
-        // coords up front, so they're plottable even without an address);
-        // the user couldn't find them in their collection and had to fall
-        // back to search. Plottable now means lat+lon present, full stop —
-        // pending scrape rows still get filtered out by the NULL-coord check
-        // because the scraper leaves coords null until enrichment fills them.
+        // Visibility means has lat+lon coordinates; pending scrape rows stay hidden until enrichment fills coords.
         var items = await db.PoiCollectionItems
             .AsNoTracking()
             .Where(ci => ci.PoiCollection.IsVisible
@@ -99,17 +91,10 @@ public class PoiService(
     }
 
     /// <summary>
-    /// Updates a POI by loading the existing entity and applying all incoming values.
-    /// EF change tracking generates minimal SQL for only the properties that actually changed.
-    /// [REVIEW-3] Validates Category against known constants.
-    /// [REVIEW-4] Validates coordinates, name, and numeric ranges before persistence.
-    /// [REVIEW-6] Version is NOT copied from the incoming entity; the existing entity's
-    /// Version is preserved so that <see cref="AppDbContext.SetTimestamps"/> can increment
-    /// it correctly for optimistic concurrency. Never copy Version from external sources.
+    /// Updates a POI, applying all incoming values except Version (preserved for optimistic concurrency).
     /// </summary>
     public async Task UpdatePoiAsync(Poi poi, CancellationToken cancellationToken = default)
     {
-        // [REVIEW-4] Validate inputs before touching the DB
         ValidatePoi(poi);
 
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
@@ -120,13 +105,10 @@ public class PoiService(
             throw new InvalidOperationException($"POI {poi.Id} not found");
         }
 
-        // TRIP-INVALIDATE-01 (Story 2.4): capture the pre-edit coordinates so we only
-        // invalidate cached legs when they ACTUALLY change — an unchanged save must
-        // not churn the cache.
+        // Capture old coordinates to invalidate cached legs only on actual coordinate change.
         var oldLatitude = existing.Latitude;
         var oldLongitude = existing.Longitude;
 
-        // Apply all incoming values; Version and AddedDate are intentionally excluded.
         existing.Name = poi.Name;
         existing.Latitude = poi.Latitude;
         existing.Longitude = poi.Longitude;
@@ -145,8 +127,6 @@ public class PoiService(
 
         await db.SaveChangesAsync(cancellationToken);
 
-        // TRIP-INVALIDATE-01 (Story 2.4): coordinates drive every cached leg touching
-        // this POI — invalidate them so they recompute, but only on a real change.
         if (oldLatitude != existing.Latitude || oldLongitude != existing.Longitude)
         {
             await routeSegmentInvalidation.InvalidateForPoiAsync(poi.Id, cancellationToken);
@@ -155,7 +135,6 @@ public class PoiService(
 
     /// <summary>
     /// Creates a new POI and adds it to the specified collection.
-    /// [REVIEW-9] Provides a single place for creation validation and collection assignment.
     /// </summary>
     public async Task<Poi> CreatePoiAsync(Poi poi, int collectionId, CancellationToken cancellationToken = default)
     {
@@ -183,7 +162,6 @@ public class PoiService(
 
     /// <summary>
     /// Adds an existing POI to a collection.
-    /// [REVIEW-9] Validates both entities exist before creating the association.
     /// </summary>
     public async Task AddPoiToCollectionAsync(int poiId, int collectionId, CancellationToken cancellationToken = default)
     {
@@ -217,9 +195,7 @@ public class PoiService(
     }
 
     /// <summary>
-    /// Removes a POI from a specific collection. If the POI becomes orphaned
-    /// (not in any collection), it is deleted.
-    /// [REVIEW-20] Allows curating individual POIs within a collection.
+    /// Removes a POI from a collection; deletes the POI if it becomes orphaned.
     /// </summary>
     public async Task RemovePoiFromCollectionAsync(int poiId, int collectionId, CancellationToken cancellationToken = default)
     {
@@ -235,7 +211,6 @@ public class PoiService(
         db.PoiCollectionItems.Remove(item);
         await db.SaveChangesAsync(cancellationToken);
 
-        // Clean up orphaned POI
         var isOrphaned = !await db.PoiCollectionItems.AnyAsync(ci => ci.PoiId == poiId, cancellationToken);
         if (isOrphaned)
         {
@@ -250,10 +225,6 @@ public class PoiService(
 
     /// <summary>
     /// Deletes a collection and cleans up orphaned POIs in a single transaction.
-    /// [REVIEW-13] Throws InvalidOperationException when collection is not found,
-    /// consistent with other mutation methods.
-    /// [REVIEW-14] Explicit transaction is kept because there are two SaveChangesAsync
-    /// calls, but the try/catch rollback is removed since disposal handles rollback.
     /// </summary>
     public async Task DeleteCollectionAsync(int collectionId, CancellationToken cancellationToken = default)
     {
@@ -270,13 +241,11 @@ public class PoiService(
             throw new InvalidOperationException($"Collection {collectionId} not found");
         }
 
-        // Collect POI IDs that belong to this collection before removal
         var poiIdsInCollection = collection.CollectionItems.Select(ci => ci.PoiId).ToList();
 
         db.PoiCollections.Remove(collection);
         await db.SaveChangesAsync(cancellationToken);
 
-        // Clean up orphaned POIs (not in any remaining collection)
         if (poiIdsInCollection.Any())
         {
             var orphanedPois = await db.Pois
@@ -363,8 +332,7 @@ public class PoiService(
 
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
 
-        // [REVIEW-1] Escape LIKE metacharacters to prevent wildcard abuse.
-        // [REVIEW-15] Removed ToLowerInvariant() -- SQLite LIKE is case-insensitive for ASCII.
+        // Escape LIKE metacharacters to prevent wildcard abuse.
         var escaped = query.Trim()
             .Replace(@"\", @"\\")
             .Replace("%", @"\%")
@@ -381,9 +349,7 @@ public class PoiService(
             .Take(100)
             .ToListAsync(cancellationToken);
 
-        // Search tags via many-to-many join.
-        // Include PoiTags so downstream components (PoiDetailPane) don't
-        // trigger N+1 lazy loads when rendering tag badges.
+        // Search tags via many-to-many join; include PoiTags to avoid N+1 lazy loads.
         var byTags = await db.PoiTags
             .AsNoTracking()
             .Where(pt => pt.Poi.Latitude != null && pt.Poi.Longitude != null
@@ -393,7 +359,6 @@ public class PoiService(
             .Take(100)
             .ToListAsync(cancellationToken);
 
-        // Merge results, deduplicate by Id
         var seen = new HashSet<int>();
         var result = new List<Poi>();
         foreach (var poi in byFields.Concat(byTags))
@@ -536,13 +501,9 @@ public class PoiService(
             logger.LogWarning("ReplacePoiGoogleMapsUrlAsync: POI {PoiId} not found", poiId);
             return;
         }
-        // TRIP-INVALIDATE-01 (Story 2.4): capture coords before clearing so a
-        // previously-placed POI's stale cached legs are invalidated below.
+        // Capture coords before clearing so cached legs are invalidated on actual coordinate change.
         var hadCoords = poi.Latitude is not null || poi.Longitude is not null;
 
-        // Drop the stale coords so the BG service treats this as a fresh
-        // place — otherwise the wrong (lat,lon) would still be on the row
-        // until enrichment overwrote it.
         poi.GoogleMapsUrl = googleMapsUrl.Trim();
         poi.Latitude = null;
         poi.Longitude = null;
@@ -550,13 +511,10 @@ public class PoiService(
         poi.EnrichmentFailureCount = 0;
         poi.LastEnrichmentAttemptAt = null;
         poi.EnrichmentNeedsManualUrl = false;
-        poi.EnrichmentRequested = true; // explicitly enqueue for the BG worker
-        // Keep the current photo until enrichment from the new URL succeeds —
-        // BackfillImageAsync replaces it in place once it has the new bytes.
+        poi.EnrichmentRequested = true;
+        // Keep existing photo; BackfillImageAsync replaces it only on successful enrichment.
         await db.SaveChangesAsync(cancellationToken);
 
-        // TRIP-INVALIDATE-01 (Story 2.4): clearing coordinates is a real change —
-        // the POI's cached non-Manual legs no longer reflect a placed point.
         if (hadCoords)
         {
             await routeSegmentInvalidation.InvalidateForPoiAsync(poiId, cancellationToken);
@@ -582,10 +540,8 @@ public class PoiService(
             poi.IsEnriched = false;
             poi.EnrichmentFailureCount = 0;
             poi.LastEnrichmentAttemptAt = null;
-            poi.EnrichmentRequested = true; // explicitly enqueue for the BG worker
-            // Keep existing photos; BackfillImageAsync replaces each in place
-            // only when a fresh photo is fetched, so a failed re-enrichment
-            // doesn't strip the whole collection's images.
+            poi.EnrichmentRequested = true;
+            // Keep existing photos; failed re-enrichment won't strip collection images.
         }
 
         await db.SaveChangesAsync(cancellationToken);
@@ -606,22 +562,14 @@ public class PoiService(
         poi.EnrichmentFailureCount = 0;
         poi.LastEnrichmentAttemptAt = null;
         poi.EnrichmentNeedsManualUrl = false;
-        poi.EnrichmentRequested = true; // explicitly enqueue for the BG worker
-        // Re-enrichment is idempotent: pressing enrich again means the current
-        // link/result is unsatisfactory, so discard the stored Google Maps URL
-        // and let the BG service run a fresh name search. Coordinates are kept
-        // so that search is still biased to the right area.
+        poi.EnrichmentRequested = true;
+        // Re-enrichment is idempotent: discard Google Maps URL and run fresh search; keep coords and photo.
         poi.GoogleMapsUrl = null;
-        // Keep the existing photo (and ImageUrl) until the BG service fetches a
-        // replacement — BackfillImageAsync swaps it in place only on success, so
-        // a failed re-enrichment no longer wipes a perfectly good photo.
         await db.SaveChangesAsync(cancellationToken);
     }
 
     /// <summary>
     /// Validates a POI entity before persistence.
-    /// [REVIEW-3] Validates Category against PoiCategory.All.
-    /// [REVIEW-4] Validates coordinates, name, and numeric ranges.
     /// </summary>
     private static void ValidatePoi(Poi poi)
     {

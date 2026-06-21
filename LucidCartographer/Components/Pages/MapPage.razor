@@ -10,8 +10,6 @@
 
 <PageTitle>@UiStrings.MapPageTitle</PageTitle>
 
-@* Reports viewport width so this interactive page (and its circuit-scoped
-   ViewportService) can pick the desktop or mobile layout. *@
 <ViewportObserver />
 
 @if (Vm.IsLoading)
@@ -25,10 +23,8 @@
 }
 else if (Viewport.IsMobile)
 {
-    @* ===================== MOBILE: split map + list ===================== *@
     <div class="m-app">
         <div class="screen">
-            @* Search bar (the collections trigger moved to the map FAB stack) *@
             <div class="app-header" style="padding:calc(8px + var(--safe-top)) 14px 8px">
                 <div class="search" style="flex:1;margin:0">
                     <span class="ms" style="color:var(--text-3)" aria-hidden="true">search</span>
@@ -37,7 +33,6 @@ else if (Viewport.IsMobile)
                            @oninput="e => _mobileQuery = e.Value?.ToString() ?? string.Empty" />
                     @if (!string.IsNullOrEmpty(_mobileQuery))
                     {
-                        @* M20: bump from 24x24 to 36x36 to match the standard icon-btn size *@
                         <button class="icon-btn" style="background:transparent" @onclick="() => _mobileQuery = string.Empty"
                                 aria-label="Clear search">
                             <span class="ms" style="font-size:16px" aria-hidden="true">close</span>
@@ -46,23 +41,11 @@ else if (Viewport.IsMobile)
                 </div>
             </div>
 
-            @* Map (top ~46%) *@
             <div style="flex:0 0 46%;position:relative">
                 <LeafletMap @ref="_leafletMap" OnMarkerSelected="OnMarkerSelectedAsync" OnBoundsChanged="Vm.HandleBoundsChanged" />
-                @* Bottom-right of the map. Top-right is occupied by Leaflet's
-                   built-in zoom controls — putting our FABs there hides them
-                   behind +/−. Bottom-right is empty and thumb-friendly.
-                   z-index must clear Leaflet's overlay panes (max 700) — they
-                   are siblings of our FAB stack, so a low value lets the map
-                   tiles paint over us even though we're DOM-on-top. *@
+                @* z-index 1000 clears Leaflet's overlay panes (max 700). *@
                 <div style="position:absolute;bottom:10px;right:10px;display:flex;flex-direction:column;gap:8px;z-index:1000">
-                    @* Locate FAB: click is handled client-side in leafletInterop
-                       (delegated listener on #locate-fab), NOT via @onclick. The
-                       geolocation prompt only appears under transient activation
-                       (synchronously in the tap handler); a Blazor server
-                       round-trip loses it, so the browser denies without ever
-                       prompting. data-loc-error carries the localized failure
-                       text (from UiStrings) for the JS toast. *@
+                    @* Geolocation prompt requires transient activation; delegated JS listener to avoid Blazor round-trip. *@
                     <button class="fab ghost mini" id="locate-fab"
                             data-loc-error="@UiStrings.LocationUnavailable"
                             aria-label="@UiStrings.ShowMyLocation">
@@ -79,12 +62,7 @@ else if (Viewport.IsMobile)
                 </div>
             </div>
 
-            @* Bottom panel — POI list by default, swapped to Collections
-               list when the layers button is pressed, or to the POI detail
-               when a marker / row is selected. The map above stays put;
-               only this lower half changes content. position:relative is
-               required so MobilePoiDetail's .modal-screen (inset:0)
-               positions to the panel, not the whole .m-app. *@
+            @* position:relative required for MobilePoiDetail's .modal-screen to position within the panel. *@
             <div class="m-bottom-panel" style="flex:1;min-height:0;border-top:1px solid var(--separator);display:flex;flex-direction:column;position:relative">
                 @if (Vm.SelectedPoi is { } selected)
                 {
@@ -112,12 +90,7 @@ else if (Viewport.IsMobile)
                         <div class="list">
                             @foreach (var s in Vm.CollectionStates)
                             {
-                                @* The whole row is the visibility toggle (matches the
-                                   desktop CollectionSidebar). Click/Enter/Space toggles
-                                   IsVisible; the eye is now a plain <span> indicator, not
-                                   a nested button. The list of POIs is always the union of
-                                   all visible collections — there is no single "selected"
-                                   collection. *@
+                                @* Row is the visibility toggle; POI list is the union of all visible collections. *@
                                 <div class="row" @key="s.Id" role="button" tabindex="0"
                                      style="cursor:pointer"
                                      aria-pressed="@(s.IsVisible ? "true" : "false")"
@@ -149,7 +122,6 @@ else if (Viewport.IsMobile)
                         @list.Count @(list.Count == 1 ? "place" : "places")
                     </span>
                     <div style="display:flex;align-items:center;gap:2px">
-                        @* Trip View toggle lives in the mobile bottom-panel results region (FR-17, both surfaces). *@
                         <MobileTripToggle Vm="TripVm" />
                         <button class="icon-btn" type="button" style="background:transparent"
                                 @onclick="() => _drawerOpen = true" aria-label="@UiStrings.Collections">
@@ -159,9 +131,6 @@ else if (Viewport.IsMobile)
                 </div>
                 @if (TripVm.IsTripViewEnabled)
                 {
-                    @* Trip View on: the bottom panel shows the ordered stop list
-                       (the header above keeps the toggle, so the user can turn it
-                       back off). Map stays at the ~46% top. *@
                     <MobileTripPanel Vm="TripVm" />
                 }
                 else
@@ -170,13 +139,8 @@ else if (Viewport.IsMobile)
                     <div class="list">
                         @foreach (var p in list)
                         {
-                            @* H07: rows with a nested <button> can't themselves be a <button>
-                               (HTML forbids interactive nesting). Use div role="button" with
-                               tabindex=0 + a keydown handler so the row is keyboard-reachable
-                               while the inner focus-on-map button stays a real button. *@
-                            @* data-poi-id lets leafletInterop.scrollMobileRowIntoView
-                               locate the row when the user closes the detail panel
-                               (we restore the list scrolled to the just-shown POI). *@
+                            @* HTML forbids interactive nesting; div role="button" is keyboard-reachable with keydown handler. *@
+                            @* data-poi-id used by JS to scroll row into view when detail closes. *@
                             <div class="row" @key="p.Id" data-poi-id="@p.Id" role="button" tabindex="0"
                                  @onclick="() => Vm.HandlePoiSelectedAsync(p.Id)"
                                  @onkeydown="e => OnRowKeyDownAsync(e, p.Id)">
@@ -203,12 +167,7 @@ else if (Viewport.IsMobile)
                                             <span class="ms filled" style="font-size:12px;color:#f5a524" aria-hidden="true">star</span>@p.GoogleRating.Value.ToString("F1")
                                         </span>
                                     }
-                                    @* H02 (Wave 7): @onclick:stopPropagation only stops `click` from
-                                       bubbling. When the user tabs to this inner button and presses
-                                       Enter/Space, the browser fires `click` (handled here) AND keydown
-                                       ALSO bubbles to the row's OnRowKeyDownAsync, which then opens the
-                                       POI detail modal — a double-fire that puts the detail on top of
-                                       the focus action. Stop the keydown bubble too. *@
+                                    @* Need @onkeydown:stopPropagation to prevent double-fire when tabbing to this button. *@
                                     <button class="icon-btn" type="button" style="background:transparent;width:32px;height:32px"
                                             @onclick="() => Vm.HandleFocusPoiAsync(p.Id)" @onclick:stopPropagation="true"
                                             @onkeydown:stopPropagation="true"
@@ -245,12 +204,8 @@ else if (Viewport.IsMobile)
 }
 else
 {
-    @* ===================== DESKTOP (unchanged) ===================== *@
     <div class="flex h-full">
-        @* Left Sidebar — Collections (width drag-resizable via _sidebarHandle) *@
-        @* w-60 (=240px, the default SidebarWidth) is kept as a stable hook for
-           integration tests; the inline style below always wins for actual width,
-           so drag-resize is unaffected. *@
+        @* w-60 class is a test hook; inline width style controls actual width. *@
         <div @ref="_sidebarContainer"
              style="width: @(Vm.SidebarWidth)px;"
              class="w-60 flex-shrink-0 bg-surface-container-low flex flex-col min-w-0">
@@ -258,13 +213,10 @@ else
                               OnVisibilityToggled="Vm.HandleVisibilityToggledAsync" />
         </div>
 
-        @* Drag handle — resize the collections sidebar *@
         <div @ref="_sidebarHandle"
              class="flex-shrink-0 w-1.5 bg-surface-container-high hover:bg-primary/30 cursor-col-resize select-none transition-colors"></div>
 
-        @* Center + Bottom *@
         <div class="flex-1 flex flex-col min-w-0">
-            @* Active filter chips *@
             <div class="flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-sm z-10 flex-shrink-0">
                 @foreach (var s in Vm.CollectionStates.Where(c => c.IsVisible))
                 {
@@ -291,7 +243,6 @@ else
                 @if (Vm.CollectionStates.Any(c => c.IsVisible))
                 {
                     <div class="ml-auto flex items-center gap-4">
-                        @* Trip View toggle — desktop filtered-results header region (FR-17, not a menu). *@
                         <TripToggle Vm="TripVm" />
                         <button class="text-sm text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1.5"
                                 @onclick="Vm.FitMapBoundsAsync"
@@ -310,35 +261,25 @@ else
                 }
             </div>
 
-            @* Map *@
             <div style="flex: 1 1 0; min-height: 120px;" class="relative min-h-0">
                 <LeafletMap @ref="_leafletMap" OnMarkerSelected="OnMarkerSelectedAsync" OnBoundsChanged="Vm.HandleBoundsChanged" />
             </div>
 
-            @* Drag handle *@
             <div @ref="_splitterHandle"
                  class="flex-shrink-0 h-1.5 bg-surface-container-high hover:bg-primary/30 cursor-row-resize select-none transition-colors"></div>
 
-            @* Bottom filtered-results region (Story 1.1). Trip View ON takes over
-               this wide region with the TripStopList (replacing — not beside —
-               the PoiTable); OFF restores the plain PoiTable exactly as before.
-               The map + splitter handle above stay intact in both states. *@
+            @* Trip View replaces (not complements) the PoiTable. Map stays intact. *@
             <div @ref="_tableContainer"
                  style="height: @(Vm.TableHeight)px; min-height: 80px; max-height: 70%;"
                  class="flex-shrink-0 bg-white shadow-inner overflow-hidden flex flex-col">
                 @if (TripVm.IsTripViewEnabled)
                 {
-                    @* Story 1.2 (FR-2): the Trip list's "Focus on map" action wires to
-                       the SAME map-focus handler the plain PoiTable uses
-                       (Vm.HandleFocusPoiAsync on MapPageViewModel) for parity. *@
+                    @* Trip list uses the same map-focus handler as PoiTable. *@
                     <TripStopList Vm="TripVm" OnFocusClicked="Vm.HandleFocusPoiAsync" />
                 }
                 else
                 {
-                    @* Story 1.4 (FR-4 / AC2/AC3): the plain Filtered Results list
-                       renders in the SINGLE canonical Stop Order via a pure VM sort
-                       (ordering logic stays in the VM, NFR1). Unchanged default sort
-                       when the collection has no order / multi-collection scope. *@
+                    @* Filtered Results apply the canonical Stop Order via VM sort. *@
                     <PoiTable Pois="TripVm.ApplyCanonicalOrder(Vm.FilteredPois)"
                              SelectedPoiId="Vm.SelectedPoiId"
                              CollectionName="@Vm.SelectedCollectionName"
@@ -360,7 +301,6 @@ else
             </div>
         </div>
 
-        @* Right Detail Pane — parent owns the null check *@
         @if (Vm.SelectedPoi != null)
         {
             <div class="w-80 flex-shrink-0 shadow-lg overflow-hidden border-l border-surface-container-high">
@@ -392,38 +332,27 @@ else
     private DotNetObjectReference<MapPageViewModel>? _selfRef;
     private bool _splitterInited;
 
-    // Mobile-only client-side list filters + collections drawer
     private string _mobileQuery = "";
     private bool _drawerOpen;
 
-    // Set by CloseMobileDetail right before clearing SelectedPoi, so the next
-    // OnAfterRenderAsync (which sees the list back in the DOM) can call the JS
-    // scroll helper and put the user's eye where the detail just closed.
+    @* Set by CloseMobileDetail before clearing SelectedPoi for scroll restoration. *@
     private int? _pendingScrollPoiId;
 
-    // Tracks the last value pushed to leafletInterop.setMobileMode so we only
-    // re-call on actual flips, not on every render.
+    @* Dedup cache for setMobileMode. *@
     private bool? _jsMobileMode;
 
-    // Trip View scope tracking. _tripScopeInit guards the first LoadAsync;
-    // _tripCollectionId is the collection last loaded into TripVm; _pushedStopOrders
-    // is the last Stop Order map pushed to the JS map (so we skip redundant interop).
     private bool _tripScopeInit;
     private int? _tripCollectionId;
     private IReadOnlyDictionary<int, int>? _pushedStopOrders;
-    // TRIP-STARTFINISH-06: last Start/Finish marker roles pushed alongside the
-    // Stop Orders (record equality — dedup like the orders themselves).
+    @* Start/Finish marker roles dedup. *@
     private TripMarkerRolesDto? _pushedMarkerRoles;
-    // Last leg geometry pushed to the JS map (dedup so an unrelated state notify
-    // doesn't re-issue an identical incremental redraw).
+    @* Leg geometry dedup. *@
     private IReadOnlyList<TripLeg>? _pushedLegs;
-    // TRIP-STARTFINISH-06: last roundtrip flag pushed with the legs.
+    @* Roundtrip flag dedup. *@
     private bool? _pushedRoundtrip;
-    // Last selected Stop pushed to the map (emphasis + pan/scroll). -1 is a
-    // "force re-push" sentinel (no real poiId is negative) used on map re-wire.
+    @* -1 sentinel forces re-push on map re-wire. *@
     private int? _pushedSelectedStopId = -1;
-    // Last SelectionTick pushed — lets an idempotent re-select (same poiId, higher
-    // tick) re-run the pan/scroll follow-up. -1 forces a re-push on map re-wire.
+    @* Advanced tick re-runs pan/scroll follow-up. *@
     private long _pushedSelectionTick = -1;
 
     protected override async Task OnInitializedAsync()
@@ -441,17 +370,11 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        // Wire whichever LeafletMap instance is currently realized. The instance
-        // changes when the layout flips between desktop and mobile, so we key
-        // off reference identity rather than firstRender.
+        @* Wire on reference identity change (layout flip). *@
         if (_leafletMap is not null && !ReferenceEquals(_leafletMap, _wiredMap))
         {
             _wiredMap = _leafletMap;
-            // The JS map was just (re)constructed — initMap reset state.stopOrders
-            // and state.tripLegLayer to empty — so the last pushed Stop Order /
-            // legs are stale. Clear both dedup caches so PushTripAsync below
-            // re-applies the badges + legs to the fresh map (e.g. after a
-            // desktop<->mobile viewport flip). [Review][Patch]
+            @* JS map init clears state; dedup caches must be cleared so PushTripAsync re-applies. *@
             _pushedStopOrders = null;
             _pushedMarkerRoles = null;
             _pushedLegs = null;
@@ -464,20 +387,13 @@ else
             }
             catch (OperationCanceledException)
             {
-                // M02: the LeafletMap was disposed mid-await because the
-                // viewport flipped during init. The next render will re-wire
-                // against the new instance; bail out so we don't AttachMap a
-                // dead ref.
+                @* Viewport flipped during init; avoid AttachMap on dead ref. *@
                 _wiredMap = null;
                 return;
             }
             Vm.AttachMap(_leafletMap);
 
-            // Push mobile-mode to the Leaflet interop BEFORE the VM seeds
-            // markers (OnMapInitializedAsync triggers addCollectionMarkers).
-            // On mobile this makes addCollectionMarkers skip bindPopup so the
-            // built-in popup never appears; on desktop the popup binds as
-            // before. Re-pushed on every viewport flip via _jsMobileMode.
+            @* Push mobile-mode before VM seeds markers (controls popup binding). *@
             if (_jsMobileMode != Viewport.IsMobile)
             {
                 _jsMobileMode = Viewport.IsMobile;
@@ -486,7 +402,6 @@ else
                 catch (InvalidOperationException) { }
             }
 
-            // The drag-splitter only exists in the desktop layout.
             if (!Viewport.IsMobile && !_splitterInited)
             {
                 _selfRef ??= DotNetObjectReference.Create(Vm);
@@ -497,26 +412,13 @@ else
 
             await Vm.OnMapInitializedAsync();
 
-            // Map is now live — push any persisted Stop Order badges + connecting
-            // legs onto the freshly-seeded markers (no-op when Trip View is off).
+            @* Push Trip badges + legs to fresh map. *@
             await PushTripAsync();
 
-            // TRIP-OSRM-02 (Story 4.2, AC4): once the map is live, push the active
-            // routing provider's OSM/ODbL attribution to Leaflet's attribution control
-            // (null under the default Mock ⇒ nothing added). Runs per map instance, so
-            // it re-applies after a desktop<->mobile viewport flip — one call covers
-            // both surfaces (they share the single LeafletMap). The JS side dedups, so
-            // a repeat call never double-prints the attribution. Read off the VM
-            // (RoutingAttributionHtml → ITravelTimeProvider.Attribution) to keep the
-            // Component → ViewModel → Service layering — no config sniffing in the page.
+            @* Push routing attribution (VM handles null case). *@
             await _leafletMap.SetRoutingAttributionAsync(TripVm.RoutingAttributionHtml);
 
-            // Mobile: ask for GPS access and drop a "you are here" star. This
-            // runs once per map instance (the block is gated on a fresh
-            // _wiredMap ref). recenter:false — we request the location and mark
-            // it without panning away from the POIs; the locate FAB recenters
-            // on demand. No-op on desktop. Geolocation needs a secure context
-            // (https/localhost); over plain http LAN the browser denies it.
+            @* Mobile: request GPS (once per map instance). Needs secure context. *@
             if (Viewport.IsMobile)
             {
                 try { await Js.InvokeVoidAsync("leafletInterop.locateUser", false, UiStrings.LocationUnavailable); }
@@ -529,11 +431,7 @@ else
             await Vm.ResolvePendingSearchMapUpdateAsync();
         }
 
-        // When the detail just closed (SelectedPoiId went to null while we
-        // had _lastDetailPoiId set), the list is back in the DOM. Scroll the
-        // row we were just viewing into view so the user lands on it. We
-        // gate on SelectedPoi being null and IsMobile to avoid scrolling
-        // during interim renders or on desktop.
+        @* Restore scroll position when detail closes. *@
         if (_pendingScrollPoiId.HasValue && Viewport.IsMobile && Vm.SelectedPoi is null)
         {
             var scrollTo = _pendingScrollPoiId.Value;
@@ -546,18 +444,14 @@ else
 
     private async Task OnRowKeyDownAsync(KeyboardEventArgs e, int poiId)
     {
-        // H07: rows are <div role="button" tabindex="0"> because they contain a
-        // nested action button. Map Enter/Space onto the row's click handler so
-        // keyboard users can open the POI detail just like sighted tap users.
+        @* Map Enter/Space to row click for keyboard accessibility. *@
         if (e.Key == "Enter" || e.Key == " ")
         {
             await Vm.HandlePoiSelectedAsync(poiId);
         }
     }
 
-    // Collections drawer rows are <div role="button" tabindex="0"> toggles.
-    // Map Enter/Space onto the visibility toggle so keyboard users get the
-    // same behaviour as tapping the row.
+    @* Map Enter/Space to visibility toggle for keyboard accessibility. *@
     private async Task OnCollectionRowKeyDownAsync(KeyboardEventArgs e, int collectionId)
     {
         if (e.Key == "Enter" || e.Key == " ")
@@ -578,15 +472,11 @@ else
         StateHasChanged();
     });
 
-    // Re-scope the Trip layer to the current single visible collection (reads
-    // persisted Trip state only when the scope collection changes; otherwise just
-    // refreshes the placeable count), then reconcile the map's Stop badges.
+    @* Re-scope Trip layer to current visible collection; refresh placeable count. *@
     private async Task SyncTripAsync()
     {
         var colId = Vm.SingleVisibleCollectionId;
-        // Gate on the collection's full placeable membership (viewport-independent),
-        // not the viewport-filtered count: Trip View shows the whole collection
-        // regardless of map state, so a pan that empties the view must not hide it.
+        @* Gate on full placeable membership, not viewport-filtered count (Trip shows whole collection). *@
         var count = Vm.CollectionPlaceablePoiCount;
         if (!_tripScopeInit || colId != _tripCollectionId)
         {
@@ -601,18 +491,14 @@ else
         await PushTripAsync();
     }
 
-    // Membership mutation just landed: append/re-compact the Stop Order and
-    // refresh the badges + legs. Wired to Vm.MembershipChanged so it only runs on
-    // real add/remove, not on every state notification.
+    @* Wired to Vm.MembershipChanged so it only runs on real add/remove. *@
     private async Task OnMembershipChangedAsync()
     {
         await TripVm.RefreshAfterMembershipChangeAsync(Vm.CollectionPlaceablePoiCount);
         await PushTripAsync();
     }
 
-    // Push all Trip overlays (numbered Stop badges + connecting legs + selection
-    // emphasis/pan/scroll) to the JS map. Each is independently de-duped, so an
-    // unrelated state notify is cheap.
+    @* Each overlay is independently deduped. *@
     private async Task PushTripAsync()
     {
         await PushStopOrdersAsync();
@@ -620,11 +506,7 @@ else
         await PushTripSelectionAsync();
     }
 
-    // TRIP-SELECT: marker click — reuse the existing marker-click channel. When
-    // Trip View is on, a marker click selects the Stop (map→list: emphasise +
-    // scroll the row into view); the Leaflet popup (desktop) still opens in JS
-    // and the mobile tooltip path is unchanged. When Trip View is off, the
-    // original POI-detail selection behaviour is preserved exactly (AC4).
+    @* Trip View on: marker click selects Stop. Trip View off: original POI-detail selection. *@
     private async Task OnMarkerSelectedAsync(int poiId)
     {
         if (TripVm.IsTripViewEnabled)
@@ -637,12 +519,7 @@ else
         }
     }
 
-    // TRIP-SELECT: reflect the VM's selected Stop onto the map. Emphasis is
-    // re-applied whenever the selected marker changes; the directional follow-up
-    // runs on every (re-)selection — a List selection pans the marker into view, a
-    // Map selection scrolls the stop row into view. De-duped on the pushed
-    // (poiId, SelectionTick) so unrelated state notifications don't re-pan/re-scroll,
-    // while an idempotent re-select (advanced tick) still re-centres its marker.
+    @* Dedup on (poiId, SelectionTick) so re-select with advanced tick still re-centers. *@
     private async Task PushTripSelectionAsync()
     {
         if (_leafletMap is not { IsInitialized: true })
@@ -651,10 +528,6 @@ else
         }
         var sel = TripVm.IsTripViewEnabled ? TripVm.SelectedStopPoiId : null;
         var tick = TripVm.IsTripViewEnabled ? TripVm.SelectionTick : -1;
-        // [Review][Patch] Dedup on (poiId, SelectionTick) rather than poiId alone, so
-        // re-selecting the already-selected row (same poiId, advanced tick) still re-runs
-        // the directional follow-up — re-panning a marker the user has scrolled off-screen
-        // (AC1). Unrelated StateChanged notifications leave both unchanged → no-op.
         var poiChanged = sel != _pushedSelectedStopId;
         var selectionAdvanced = tick != _pushedSelectionTick;
         if (!poiChanged && !selectionAdvanced)
@@ -664,7 +537,6 @@ else
         _pushedSelectedStopId = sel;
         _pushedSelectionTick = tick;
 
-        // Emphasis only needs re-skinning when the selected marker actually changes.
         if (poiChanged)
         {
             await _leafletMap.EmphasizeStopAsync(sel);
@@ -692,10 +564,7 @@ else
             return;
         }
         var orders = TripVm.IsTripViewEnabled ? TripVm.StopOrders : null;
-        // TRIP-STARTFINISH-06: the pinned Start/Finish markers render a distinct
-        // glyph/ring with a localized accessible name. The roles ride along with
-        // the Stop Orders (one re-skin pass JS-side); pure wiring — the roles are
-        // derived entirely from the VM's projections.
+        @* Start/Finish markers are derived entirely from VM projections. *@
         TripMarkerRolesDto? roles = null;
         if (TripVm.IsTripViewEnabled)
         {
@@ -719,10 +588,7 @@ else
         await _leafletMap.SetStopOrdersAsync(orders, roles);
     }
 
-    // Incremental leg redraw (AC3 / NFR1): on a Stop-Order/Start/Finish/membership
-    // change TripViewModel recomputes OrderedLegs and raises StateChanged; we draw
-    // the new legs (replacing only the prior trip-leg layer) or clear them when
-    // Trip View is off. No navigation, no map re-init.
+    @* Incremental leg redraw: replace trip-leg layer on state change. *@
     private async Task PushTripLegsAsync()
     {
         if (_leafletMap is not { IsInitialized: true })
@@ -730,9 +596,7 @@ else
             return;
         }
         var legs = TripVm.IsTripViewEnabled ? TripVm.OrderedLegs : null;
-        // TRIP-STARTFINISH-06: the roundtrip flag rides the same draw call so the
-        // interop can tag the closing leg; the leg list itself already toggles
-        // between N (roundtrip) and N−1 (open path) in TripViewModel.BuildLegs.
+        @* Roundtrip flag toggled in VM; interop tags closing leg. *@
         var roundtrip = TripVm.IsTripViewEnabled && TripVm.IsRoundtrip;
         if (LegsEqual(legs, _pushedLegs) && roundtrip == _pushedRoundtrip)
         {
@@ -767,13 +631,7 @@ else
         }
         for (var i = 0; i < ca; i++)
         {
-            // TripLeg is a record — value equality compares EVERY field, which now
-            // includes IsMeasured AND GeometryPolyline (TRIP-OSRM-02). That is the
-            // load-bearing dedup guarantee for AC3: an Estimated→Measured upgrade that
-            // keeps the same endpoints but gains road geometry (and flips IsMeasured)
-            // is NOT equal to the prior dashed leg, so the no-redraw guard does not
-            // swallow it — the leg redraws solid/road-shaped live via the StateChanged
-            // path. (Were equality coordinate-only, the upgrade would be silently lost.)
+            @* TripLeg value equality includes IsMeasured + GeometryPolyline for dedup; Estimated→Measured upgrade must redraw. *@
             if (!a![i].Equals(b![i]))
             {
                 return false;
@@ -807,13 +665,7 @@ else
     private int? StopOrderFor(int poiId) =>
         TripVm.IsTripViewEnabled && TripVm.StopOrders.TryGetValue(poiId, out var n) ? n : null;
 
-    // Wraps Vm.CloseDetailPane so we capture the POI id BEFORE the VM clears
-    // SelectedPoiId. The same callback handles both UI back chevron and the
-    // system Back button (LucidHistory routes both through OnClose). Because
-    // CloseDetailPane doesn't raise Vm.StateChanged, we can't rely on
-    // OnVmChanged here — but Blazor still re-renders this component because
-    // it owns the EventCallback, so OnAfterRenderAsync runs and the scroll
-    // fires there.
+    @* Capture POI id before VM clears SelectedPoiId for scroll restoration. *@
     private void CloseMobileDetail()
     {
         if (Vm.SelectedPoiId is { } id)
@@ -825,15 +677,11 @@ else
 
     private void OnViewportChanged()
     {
-        // Layout flip invalidates the splitter wiring; let the next map-wire
-        // re-establish it for the desktop layout. Also clear the cached JS
-        // mobile-mode so OnAfterRender re-pushes it.
+        @* Layout flip invalidates splitter wiring and mobile-mode cache. *@
         _splitterInited = false;
         _jsMobileMode = null;
         InvokeAsync(StateHasChanged);
     }
-
-    // --- Mobile helpers ---
 
     private IEnumerable<Poi> MobilePois()
     {

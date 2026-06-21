@@ -1,11 +1,9 @@
 namespace LucidCartographer.Services.Trip;
 
 /// <summary>
-/// TRIP-MATRIX-01 (Story 3.1, D11): builds the on-demand N×N Distance Matrix that
-/// TSP-Sort consumes. Reads the SAME shared <see cref="Data.Entities.RouteSegment"/>
-/// cache as the displayed Legs (one cache, two readers — no separate matrix table)
-/// and fills any pair with no cached row with the shared haversine straight-line
-/// estimate, so the matrix is always complete and the sort is deterministic.
+/// Builds the on-demand N×N Distance Matrix for TSP-Sort, reading the shared
+/// <see cref="Data.Entities.RouteSegment"/> cache (used by both Legs and matrix)
+/// and filling uncached pairs with haversine estimates to ensure a complete, deterministic matrix.
 /// </summary>
 public interface IDistanceMatrixService
 {

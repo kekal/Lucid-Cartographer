@@ -4,18 +4,13 @@ using Unit = System.Reactive.Unit;
 namespace LucidCartographer.Services.Trip;
 
 /// <summary>
-/// TRIP-TRAVELTIME-01: wake signal for
-/// <see cref="TravelTimeComputationBackgroundService"/> — the travel-time
-/// counterpart of <c>EnrichmentTrigger</c>. The background loop awaits
-/// <see cref="WaitAsync"/> between poll cycles; the ViewModel calls
-/// <see cref="Signal"/> when Trip View turns on or the projections rebuild with
-/// missing cache rows, kicking the compute immediately instead of waiting up to
-/// the idle poll interval.
+/// Wake signal for <see cref="TravelTimeComputationBackgroundService"/>,
+/// allowing the background loop to be kicked immediately when Trip View activates
+/// or cache rows are missing, instead of waiting for the idle poll interval.
 /// </summary>
 public sealed class TravelTimeTrigger
 {
-    // Bounded(1) + DropWrite collapses a burst of signals into exactly one
-    // wake-up (same shape as EnrichmentTrigger).
+    // Bounded(1) + DropWrite collapses burst signals into a single wake-up.
     private readonly Channel<Unit> _channel = Channel.CreateBounded<Unit>(
         new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
 

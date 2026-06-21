@@ -1,19 +1,6 @@
 @using LucidCartographer.Data.Entities
 @using LucidCartographer.Services.Trip
 
-@* Story 3.4 (TRIP-LEGMODE-01, FR-19/21/23, UX-DR3/DR11): the per-leg travel-mode
-   pill on the connector. A PRESENTATIONAL component (NFR1) — it raises a single VM
-   command (Vm.SetLegModeAsync) and never touches services/DB or mutates its own
-   persisted state. A rounded-full text-xs pill:
-   - Set (Leg.Mode ∈ {Walk,Drive,Cycle}): primary/10 fill + primary text + the mode
-     glyph + label.
-   - Undefined / Any-Air (Leg.Mode == AnyAir; null is normalized to AnyAir upstream):
-     OUTLINE ONLY + a neutral help glyph + "Any — set mode" — NEVER an error colour
-     (UX-DR11).
-   Clicking opens a small menu of the four modes (Walk / Drive / Cycle / Any-Air) with
-   the ACTIVE one checked; choosing one calls Vm.SetLegModeAsync(Leg.FromPoiId, mode).
-   stopPropagation on the pill + menu so the connector never selects/reorders a row.
-   All copy via UiStrings (Trip*-prefixed); a title at parity for discoverability. *@
 
 <div class="relative inline-flex" @onclick:stopPropagation="true" @onkeydown:stopPropagation="true">
     @{
@@ -37,8 +24,6 @@
 
     @if (_open)
     {
-        @* Small Material-style popover list of the four modes. role=menu + the active
-           mode flagged aria-checked; selecting raises the VM command and closes. *@
         <div role="menu"
              aria-label="@MenuAria"
              class="absolute left-0 top-full z-10 mt-1 min-w-[8rem] rounded-md border border-surface-container-high bg-surface-container-low shadow-md py-1"
@@ -68,20 +53,15 @@
 </div>
 
 @code {
-    /// <summary>The leg this pill controls (its mode is the From-stop's OutgoingTravelMode).</summary>
+    /// <summary>The leg whose travel mode this pill controls.</summary>
     [Parameter, EditorRequired] public TripLeg Leg { get; set; } = null!;
 
-    /// <summary>
-    /// The owning Trip view-model. The pill raises the single VM command
-    /// <see cref="TripViewModel.SetLegModeAsync"/> only — it never touches services/DB
-    /// and never mutates its own state (NFR1).
-    /// </summary>
+    /// <summary>The Trip view-model; pill is presentational (only raises SetLegModeAsync, never mutates state).</summary>
     [Parameter, EditorRequired] public TripViewModel Vm { get; set; } = null!;
 
     private bool _open;
 
-    // The four selectable modes with their UiStrings labels (Any-Air last; it is the
-    // "undefined / manual-only" choice). Mirrors TravelModeSelector's label conventions.
+    // Mirrors TravelModeSelector's label conventions.
     private static readonly (string Mode, string Label)[] Modes =
     [
         (TravelMode.Walk, UiStrings.TripTravelModeWalk),
@@ -110,8 +90,6 @@
         await Vm.SetLegModeAsync(Leg.FromPoiId, mode);
     }
 
-    // The mode glyph. Undefined/Any-Air uses a NEUTRAL help glyph (never an error
-    // icon, UX-DR11). Material Symbols, matching the project's icon convention.
     private static string GlyphFor(string mode) => mode switch
     {
         TravelMode.Walk => "directions_walk",
@@ -120,8 +98,6 @@
         _ => "help_outline",
     };
 
-    // The pill label: the mode name when set, or the neutral "Any — set mode" prompt
-    // for the undefined/Any-Air state (UX-DR11).
     private static string LabelFor(string mode) => mode switch
     {
         TravelMode.Walk => UiStrings.TripTravelModeWalk,

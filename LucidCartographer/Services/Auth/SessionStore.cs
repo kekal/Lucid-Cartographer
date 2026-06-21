@@ -7,11 +7,8 @@ using Microsoft.EntityFrameworkCore;
 namespace LucidCartographer.Services.Auth;
 
 /// <summary>
-/// Persists and validates authentication sessions. Expired and
-/// long-revoked rows are vacuumed by
-/// <see cref="StartupCleanupService.VacuumExpiredSessionsAsync"/>
-/// once per app start; this class only deals with create / validate /
-/// revoke for live sessions.
+/// Manages active authentication sessions. Expiration and revocation are handled only
+/// for live sessions; expired rows are cleaned separately by <see cref="StartupCleanupService.VacuumExpiredSessionsAsync"/>.
 /// </summary>
 public sealed class SessionStore(IDbContextFactory<AppDbContext> factory)
 {

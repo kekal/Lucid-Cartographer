@@ -7,10 +7,8 @@ using Microsoft.JSInterop;
 namespace LucidCartographer.Components.Pages;
 
 /// <summary>
-/// View-side orchestration for the Operations page. Owns the source/op
-/// selection, the tolerance value, the result/discard state, and the commit
-/// dialog. Tolerance debouncing uses a System.Threading.Timer that re-fires
-/// the active operation 500ms after the last slider event.
+/// Orchestrates the Operations page: collection selection, tolerance with 500ms debounce timer,
+/// result/discard state, and commit/export dialogs.
 /// </summary>
 public sealed class OperationsPageViewModel(
     IPoiService poiService,
@@ -46,9 +44,7 @@ public sealed class OperationsPageViewModel(
     public bool IsDedupMode { get; private set; }
     public string? SelectBHint { get; private set; }
 
-    // Whole-database deduplication (distinct from the within-collection
-    // SetOperation.Dedup preview above — this folds duplicate rows across the
-    // entire DB and persists immediately).
+    // Whole-database deduplication (distinct from within-collection preview above).
     public bool IsDeduplicatingDatabase { get; private set; }
     public string? DedupDatabaseMessage { get; private set; }
 
@@ -109,7 +105,7 @@ public sealed class OperationsPageViewModel(
         }
     }
 
-    // LOW-09: When tolerance changes and an operation was already run, re-run it with debounce
+    // When tolerance changes and an operation was already run, re-run it with debounce.
     public void OnToleranceChanged()
     {
         if (ActiveOp == null || Result == null)
@@ -118,8 +114,7 @@ public sealed class OperationsPageViewModel(
         }
 
         _toleranceDebounce?.Dispose();
-        // TimerCallback is void-returning; use Task.Run + try/catch so an
-        // unhandled async exception cannot crash the process.
+        // TimerCallback is void; wrap in Task.Run to prevent unhandled async exceptions from crashing the process.
         _toleranceDebounce = new Timer(o =>
         {
             _ = Task.Run(async () =>
@@ -134,8 +129,7 @@ public sealed class OperationsPageViewModel(
                 }
                 catch
                 {
-                    // Debounce-driven re-runs swallow exceptions; next UI-driven
-                    // run will surface a failure if it persists.
+                    // Debounce-driven re-runs swallow exceptions; next UI-driven run will surface failures.
                 }
             }, _cts.Token);
         }, state: null, 500, Timeout.Infinite);
@@ -165,10 +159,7 @@ public sealed class OperationsPageViewModel(
                 : UiStrings.DeduplicateNone;
             Collections = await poiService.GetCollectionsAsync();
 
-            // The whole-DB pass may have physically deleted a Poi that the
-            // within-collection Dedup preview still references (the preview
-            // keeps group[0]; the DB pass keeps the lowest Id). Invalidate the
-            // stale preview so those defunct rows can no longer be committed.
+            // Whole-DB pass may have deleted Pois that the within-collection preview still references; invalidate stale preview.
             Result = null;
             ResultPois = [];
             DiscardedIds.Clear();
@@ -209,10 +200,7 @@ public sealed class OperationsPageViewModel(
         }
         catch (Exception ex)
         {
-            // CommitResultAsync runs in a transaction, so the DB has already
-            // rolled back. Surface the failure as a user-visible message rather
-            // than letting it propagate and tear down the Blazor circuit
-            // (which the MainLayout ErrorBoundary would catch, wiping state).
+            // CommitResultAsync runs in a transaction; surface failure as message to avoid tearing down the Blazor circuit.
             CommitSuccess = $"Commit failed: {ex.Message}";
         }
     }

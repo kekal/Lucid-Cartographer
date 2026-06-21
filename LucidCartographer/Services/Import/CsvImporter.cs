@@ -15,8 +15,7 @@ public class CsvImporter(ILogger<CsvImporter> logger) : IFileImporter
     {
         logger.LogInformation("Parsing CSV file: {FileName}", fileName);
 
-        // CsvHelper reads synchronously — we yield once to avoid blocking the caller's
-        // synchronization context, then proceed with sync I/O on the thread-pool.
+        // CsvHelper reads synchronously; yield once to avoid blocking the caller's sync context.
         await Task.Yield();
 
         using var reader = new StreamReader(fileStream);
@@ -82,13 +81,11 @@ public class CsvImporter(ILogger<CsvImporter> logger) : IFileImporter
     }
 
     /// <summary>
-    /// Finds a column index by matching header names against candidates.
-    /// IE-23: Tightened fallback from Contains to StartsWith/EndsWith with word boundary
-    /// to prevent greedy matches like "foxylongitude" matching "lon".
+    /// Finds a column index by matching header names against candidates (exact match first,
+    /// then prefix/suffix match to avoid greedy matches like "foxylongitude" matching "lon").
     /// </summary>
     private static int FindColumn(string[] headers, params string[] candidates)
     {
-        // Exact match first
         for (var i = 0; i < headers.Length; i++)
         {
             if (candidates.Any(c => headers[i] == c))
@@ -96,7 +93,6 @@ public class CsvImporter(ILogger<CsvImporter> logger) : IFileImporter
                 return i;
             }
         }
-        // Fallback: StartsWith or EndsWith (word-boundary-ish match)
         for (var i = 0; i < headers.Length; i++)
         {
             if (candidates.Any(c => headers[i].StartsWith(c) || headers[i].EndsWith(c)))

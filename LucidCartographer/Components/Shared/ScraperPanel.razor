@@ -35,14 +35,12 @@
     }
 </div>
 
-@* ── Google Profile + Fetch My Lists ── *@
 <div class="mb-4 p-4 rounded-lg bg-secondary/5">
     <h4 class="font-bold text-sm mb-2 flex items-center gap-2">
         <span class="material-symbols-outlined text-secondary text-base">bookmark</span>
         @UiStrings.FetchMyLists
     </h4>
 
-    @* Profile status card *@
     <div class="flex items-center gap-2 mb-3">
         @if (HasGoogleProfile)
         {
@@ -61,7 +59,6 @@
         }
     </div>
 
-    @* Fetch button *@
     @if (SavedLists == null && !IsFetchingLists)
     {
         <button class="px-4 py-2 rounded-lg bg-secondary text-white text-sm font-medium hover:shadow-lg transition-all flex items-center gap-2"
@@ -72,7 +69,6 @@
         </button>
     }
 
-    @* Fetching spinner *@
     @if (IsFetchingLists)
     {
         <div class="flex items-center gap-3 text-secondary" aria-live="polite">
@@ -81,7 +77,6 @@
         </div>
     }
 
-    @* Error message *@
     @if (FetchListsError != null)
     {
         <div class="mt-2 p-3 rounded-lg bg-tertiary/10 text-tertiary text-sm">
@@ -90,7 +85,6 @@
         </div>
     }
 
-    @* List selection *@
     @if (SavedLists != null && !IsFetchingLists)
     {
         @if (SavedLists.Count == 0)
@@ -141,14 +135,12 @@
 </div>
 
 @code {
-    // Existing URL-based scrape parameters
     [Parameter] public string Url { get; set; } = string.Empty;
     [Parameter] public EventCallback<string> UrlChanged { get; set; }
     [Parameter] public bool IsScraping { get; set; }
     [Parameter] public int ScrapeProgress { get; set; }
     [Parameter] public EventCallback OnScrape { get; set; }
 
-    // Fetch My Lists parameters
     [Parameter] public bool IsFetchingLists { get; set; }
     [Parameter] public IReadOnlyList<SavedListInfo>? SavedLists { get; set; }
     [Parameter] public string? FetchListsError { get; set; }

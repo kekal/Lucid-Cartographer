@@ -49,23 +49,13 @@
             </div>
 
             <div style="padding:18px 18px 32px">
-                @* Name + edit. *@
                 <div style="display:flex;gap:8px;align-items:flex-start">
                     @if (_isEditing)
                     {
-                        @* M03 (Wave 7): the dialog's aria-labelledby points at
-                           "poi-detail-name". The <h1 id="poi-detail-name"> would
-                           disappear when editing, leaving the dialog with a
-                           dangling labelledby ref. Keep the id pinned to the
-                           heading text in both states by routing it through the
-                           input's own id (an editable input *is* a valid label
-                           target when AT resolves aria-labelledby — the input's
-                           accessible name then doubles as the dialog's). *@
-                        @* H03 (Wave 7): without @onkeydown:stopPropagation the Escape
-                           handler here flips _isEditing false, then the keydown bubbles
-                           to the modal root which observes !_isEditing and fires OnClose.
-                           Net: Escape cancels the rename AND closes the modal. Stop the
-                           bubble so the inner handler is the only one that runs. *@
+                        @* Keep the aria-labelledby id pinned to the heading text in both states
+                           by routing it through the input's own id. *@
+                        @* stopPropagation prevents Escape from bubbling to modal root and closing
+                           the panel while in edit mode. *@
                         <input id="poi-detail-name" class="m-name-input" value="@_nameDraft"
                                @oninput="e => _nameDraft = e.Value?.ToString() ?? string.Empty"
                                @onkeydown="OnNameKeyDownAsync"
@@ -97,7 +87,6 @@
                     }
                 </div>
 
-                @* Address *@
                 @if (!string.IsNullOrEmpty(Poi.Address))
                 {
                     <div style="display:flex;align-items:flex-start;gap:8px;margin-top:14px;color:var(--text-2);font-size:14px">
@@ -109,7 +98,6 @@
                     </div>
                 }
 
-                @* Rating *@
                 @if (Poi.GoogleRating.HasValue)
                 {
                     <div style="display:flex;align-items:center;gap:10px;margin-top:14px">
@@ -122,7 +110,6 @@
                     </div>
                 }
 
-                @* Quick actions *@
                 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:18px">
                     <a class="btn btn-secondary m-quick" href="@PoiUrlHelper.GetGoogleMapsUrl(Poi)" target="_blank" rel="noopener">
                         <span class="ms" style="font-size:22px;color:var(--primary)" aria-hidden="true">directions</span>Directions
@@ -156,7 +143,6 @@
                     </button>
                 </div>
 
-                @* Personal rating *@
                 @if (Poi.Rating.HasValue)
                 {
                     <div class="card" style="margin-top:18px;flex-direction:row;align-items:center;justify-content:space-between">
@@ -167,14 +153,12 @@
                     </div>
                 }
 
-                @* Notes *@
                 @if (!string.IsNullOrEmpty(Poi.Notes))
                 {
                     <div class="section-title" style="padding:18px 0 6px">Notes</div>
                     <div class="card"><div style="font-size:14px;color:var(--text-2);line-height:1.5">@Poi.Notes</div></div>
                 }
 
-                @* Coordinates *@
                 <div class="section-title" style="padding:18px 0 6px">Location</div>
                 <div class="card" style="flex-direction:row;align-items:center;justify-content:space-between">
                     <div>
@@ -191,7 +175,6 @@
                     }
                 </div>
 
-                @* Contact *@
                 @if (!string.IsNullOrEmpty(Poi.Website) || !string.IsNullOrEmpty(Poi.Phone))
                 {
                     <div class="section-title" style="padding:18px 0 6px">Contact</div>
@@ -215,7 +198,6 @@
                     </div>
                 }
 
-                @* Manage *@
                 <div class="section-title" style="padding:18px 0 6px">Manage</div>
                 <div style="display:flex;flex-direction:column;gap:8px">
                     <button class="btn btn-secondary btn-block" @onclick="EnrichAsync" disabled="@_enrichQueued">
@@ -268,17 +250,13 @@
             return;
         }
 
-        // H02: previously this also reset _isEditing whenever Poi.IsEnriched was
-        // true, which is the steady-state for any enriched POI — every parent
-        // re-render (filter chip tap, viewport flip, unrelated enrichment) would
-        // wipe the user's in-progress name edit. Decouple the two concerns:
-        // identity change resets the editor; enrichment completion only clears
-        // the user-initiated "Queued…" flag.
+        // Only reset editor state on POI identity change, not enrichment status,
+        // to preserve in-progress edits across parent re-renders.
         if (Poi.Id != _lastPoiId)
         {
             _isEditing = false;
             _enrichQueued = false;
-            _focusOnRender = true; // H06: bring focus inside when a POI opens
+            _focusOnRender = true;
         }
         else if (_enrichQueued && Poi.IsEnriched)
         {

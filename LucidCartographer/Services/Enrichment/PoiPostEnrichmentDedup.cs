@@ -107,8 +107,6 @@ internal static class PoiPostEnrichmentDedup
         }
     }
 
-    // ---- Match strategy ------------------------------------------------------
-
     private static async Task<Poi?> FindCanonicalAsync(
         AppDbContext db, Poi justEnriched, CancellationToken ct)
     {
@@ -146,13 +144,9 @@ internal static class PoiPostEnrichmentDedup
         return candidates.Find(c => PoiIdentity.AreSamePlace(c, justEnriched));
     }
 
-    // ---- Merge mechanics -----------------------------------------------------
-
     private static async Task RewriteCollectionLinksAsync(
         AppDbContext db, Poi duplicate, Poi canonical, CancellationToken ct)
     {
-        // Collect the canonical row's existing collection membership so
-        // we can drop (not duplicate) a link that already exists there.
         var canonicalCollections = await db.PoiCollectionItems
             .Where(ci => ci.PoiId == canonical.Id)
             .Select(ci => ci.PoiCollectionId)
@@ -204,7 +198,6 @@ internal static class PoiPostEnrichmentDedup
                 return;
             }
 
-            // Canonical already has an image — drop the duplicate's.
             db.PoiImages.Remove(duplicateImage);
             return;
         }
@@ -272,11 +265,7 @@ internal static class PoiPostEnrichmentDedup
             canonical.Phone = duplicate.Phone;
         }
 
-        // The canonical is the smaller-Id row, which is often an older, sparser
-        // stub; the duplicate being folded in may be the richer (later enriched)
-        // row. Because MergePairAsync hard-deletes the duplicate, any field we
-        // don't backfill here is lost for good. Mirror SetOperationService
-        // .MergeBSideData — the codebase already treats these as merge-worthy.
+        // Hard-delete of duplicate means uncopied fields are lost; mirrors SetOperationService.MergeBSideData.
         if (string.IsNullOrWhiteSpace(canonical.Category) && !string.IsNullOrWhiteSpace(duplicate.Category))
         {
             canonical.Category = duplicate.Category;

@@ -1,12 +1,8 @@
 namespace LucidCartographer.Services.Export;
 
 /// <summary>
-/// Runs a single Google Saved-List export: resolves the collection's eligible
-/// POIs, drives the headful exporter, and publishes lifecycle + per-place
-/// progress to <see cref="ExportJobStatusService"/>. Scoped — resolved per job
-/// inside <see cref="ExportBackgroundService"/>'s DI scope so its
-/// <see cref="IPoiService"/> gets a fresh DbContext, independent of whichever
-/// Blazor circuit triggered the enqueue (the user may have navigated away).
+/// Runs a single Google Saved-List export. Scoped per job with a fresh DbContext
+/// so the processor is independent of any Blazor circuit that triggered the enqueue.
 /// </summary>
 public sealed class ExportJobProcessor(
     IPoiService poiService,

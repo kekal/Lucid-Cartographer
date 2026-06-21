@@ -470,8 +470,6 @@ public class GoogleMapsListExporter(
         return new ExportPlaceResult(placeUrl, placeName, ExportOutcome.Failed, "No confirm button after naming the list.");
     }
 
-    // ---- Discovery aids: dump candidate selectors to the log on failure ----
-
     private async Task DumpActionBarAsync(IPage page, string reason)
     {
         try

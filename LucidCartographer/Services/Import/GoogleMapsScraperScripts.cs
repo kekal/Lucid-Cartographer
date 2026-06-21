@@ -59,8 +59,6 @@ public static class GoogleMapsScraperScripts
                         if (el.children.length < MIN_CARDS && (el.children.length !== 1 || el.children[0].children.length < MIN_CARDS)) continue;
                         const c = cardChildren(el);
                         if (c.length < MIN_CARDS) continue;
-                        // Count how many of the card children actually host a
-                        // place anchor — that's the signal we want to maximize.
                         const withAnchor = c.filter(hasPlaceAnchor).length;
                         candidates.push({ el, cards: c, anchorCount: withAnchor, total: c.length });
                     }
@@ -88,10 +86,7 @@ public static class GoogleMapsScraperScripts
                         };
                     }
 
-                    // Prefer containers whose children host place anchors.
-                    // Fall back to raw child count only when no container
-                    // has anchors at all (defensive — shouldn't happen on
-                    // a well-formed list URL).
+                    // Prefer containers with place-anchor children; fall back to raw child count if none.
                     const anyWithAnchors = candidates.some(c => c.anchorCount >= MIN_CARDS);
                     let ranked;
                     if (anyWithAnchors) {
@@ -186,19 +181,15 @@ public static class GoogleMapsScraperScripts
                         name = (card.innerText || '').split('\n')[0].trim() || null;
                     }
 
-                    // Rating
                     let rating = null;
                     const rEl = card.querySelector('span.MW4etd');
                     if (rEl && rEl.innerText) rating = rEl.innerText.trim();
 
-                    // Review count (raw text, digit-extraction happens in C#)
                     let reviewCount = null;
                     const rcEl = card.querySelector('span.UY7F9');
                     if (rcEl && rcEl.innerText) reviewCount = rcEl.innerText.trim();
 
-                    // Category + description from .W4Efsd (can repeat; each
-                    // block contains bullet-separated lines). Filter out
-                    // the name, blank lines, and pure-numeric rating junk.
+                    // Extract category and description from .W4Efsd blocks (may repeat).
                     let category = null;
                     let description = null;
                     const bodyEls = Array.from(card.querySelectorAll('.W4Efsd'));
@@ -217,8 +208,6 @@ public static class GoogleMapsScraperScripts
                         if (category && description) break;
                     }
 
-                    // First image on the card — used to fetch thumbnail bytes
-                    // via APIRequest in C# (we upsize ?=w92-h92-k-no to =w1024).
                     let imageSrc = null;
                     const img = card.querySelector('img');
                     if (img && img.src) imageSrc = img.src;
@@ -227,9 +216,7 @@ public static class GoogleMapsScraperScripts
                 });
             })()";
 
-    // ===================== MOBILE WEB scripts =====================
-    // The mobile web Maps UI is far simpler and more stable than desktop (no
-    // obfuscated/rotating classes). These run on a CDP-mobile-emulated page.
+    // Mobile web Maps scripts: simpler/more stable than desktop, run on CDP-mobile-emulated pages.
 
     /// <summary>
     /// Mobile "Your places → Saved" tab: each list row is a <c>&lt;button&gt;</c>

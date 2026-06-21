@@ -8,7 +8,6 @@
 }
 
 <div class="flex flex-col h-full">
-    @* Table Header *@
     <div class="flex items-center justify-between px-4 py-2 flex-shrink-0 bg-surface-container-low/50">
         <div class="flex items-center gap-2">
             <span class="font-bold font-headline text-sm">@UiStrings.FilteredResults</span>
@@ -20,8 +19,6 @@
         </div>
         @if (Pois.Any())
         {
-            @* Batch operations: act on every checked row. Icons mirror the
-               per-row action buttons (move / copy / delete). *@
             <div class="flex items-center gap-1">
                 <button class="text-on-surface-variant hover:text-primary transition-colors p-1"
                         aria-label="@(allSelected ? "Deselect all" : "Select all")"
@@ -55,7 +52,6 @@
         }
     </div>
 
-    @* Table Content *@
     <div class="flex-1 overflow-y-auto" @ref="_scrollContainer">
         @if (!Pois.Any())
         {
@@ -176,9 +172,7 @@
     </div>
 </div>
 
-@* Collection modal. Copy = click a collection to add the POI(s) to it
-   (add-only, instant). Move = a multi-select membership editor: check the
-   collections the POI(s) should belong to, then Apply. *@
+@* Copy adds POI(s) to a collection instantly. Move opens a multi-select membership editor to set exact collection membership. *@
 @if (_modalPoiId != null || _batchMode)
 {
     <div class="fixed inset-0 bg-black/40 flex items-center justify-center" style="z-index: 10000;" @onclick="CloseModal">
@@ -236,10 +230,6 @@
             }
             else
             {
-                @* Membership editor. Checked = the collections the POI(s) will
-                   belong to after Apply. Pre-checked from the POI's current
-                   membership (single) or the union across the selection (batch);
-                   an optional new collection is created and included on Apply. *@
                 <div class="flex-1 overflow-y-auto p-2">
                     @if (Collections != null)
                     {
@@ -279,8 +269,7 @@
 @code {
     [Parameter, EditorRequired] public IReadOnlyList<Poi> Pois { get; set; } = [];
     [Parameter] public int? SelectedPoiId { get; set; }
-    // Trip View Stop Order: PoiId → stop number. Non-null + has-entry renders the
-    // leading order badge on that row; null (Trip View off) renders no badges.
+    // PoiId → stop number; null when Trip View is off.
     [Parameter] public IReadOnlyDictionary<int, int>? StopOrders { get; set; }
     [Parameter] public string? CollectionName { get; set; }
     [Parameter] public IReadOnlyDictionary<int, IReadOnlyList<string>>? PoiCollectionNames { get; set; }
@@ -290,8 +279,7 @@
     [Parameter] public EventCallback<int> OnPoiSelected { get; set; }
     [Parameter] public EventCallback<int> OnFocusClicked { get; set; }
     [Parameter] public EventCallback<int> OnDeleteClicked { get; set; }
-    // Move is now a membership editor: set the POI's collections to exactly the
-    // checked set (CollectionIds), optionally creating and including NewCollectionName.
+    // Sets the POI's collections to exactly the checked set, optionally creating and including NewCollectionName.
     [Parameter] public EventCallback<(int PoiId, IReadOnlyList<int> CollectionIds, string? NewCollectionName)> OnSetMembershipsClicked { get; set; }
     [Parameter] public EventCallback<(int PoiId, int TargetCollectionId)> OnCopyClicked { get; set; }
     [Parameter] public EventCallback<(int PoiId, string NewCollectionName)> OnCopyToNewClicked { get; set; }
@@ -309,16 +297,12 @@
     private bool _showNewCollectionInput;
     private string _newCollectionName = "";
 
-    // Move (membership editor) only: the collections currently ticked. Seeded
-    // from existing membership when the modal opens; Apply sets the POI(s)'
-    // membership to exactly this set (plus any new collection).
+    // Membership editor: seeded from existing membership when modal opens; Apply sets to exactly this set (plus any new).
     private HashSet<int> _checkedCollectionIds = [];
     private ElementReference _scrollContainer;
     private int? _lastScrolledPoiId;
 
-    // POIs the user has checked for a batch operation. Pruned in
-    // OnParametersSet so the count/select-all state stays consistent with the
-    // rows currently shown (the table only ever acts on what's listed).
+    // Pruned in OnParametersSet to stay consistent with visible rows.
     private readonly HashSet<int> _selectedIds = [];
 
     protected override void OnParametersSet()
@@ -427,13 +411,9 @@
         }
     }
 
-    // Require at least one collection (a checked one or a new name): a POI with
-    // no collections is orphaned, and RemovePoiFromCollectionAsync deletes
-    // orphaned POIs outright.
+    // A POI with no collections is orphaned and will be deleted.
     private bool CanApplyMemberships() =>
         _checkedCollectionIds.Count > 0 || !string.IsNullOrWhiteSpace(_newCollectionName);
-
-    // --- Batch selection ---
 
     private void ToggleSelected(int poiId)
     {
@@ -461,9 +441,7 @@
         var ids = CurrentSelectedIds();
         if (ids.Count == 0) { return; }
         _batchMode = true; _isCopy = false; _modalPoiId = null; _showNewCollectionInput = false; _newCollectionName = "";
-        // Seed from the union of the selection's memberships: applying as-is
-        // keeps every existing membership (and homogenises the set across the
-        // selection); unchecking a box removes that collection from all of them.
+        // Seed from union of memberships: unchecking removes from all POIs, keeping preserves all.
         var union = new HashSet<int>();
         foreach (var id in ids)
         {

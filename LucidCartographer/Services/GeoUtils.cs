@@ -3,23 +3,14 @@ using Geolocation;
 namespace LucidCartographer.Services;
 
 /// <summary>
-/// Thin wrapper around the <c>Geolocation</c> NuGet package so the rest
-/// of the codebase has one call site for "distance between two lat/lon
-/// points in meters". The package does spherical great-circle math
-/// (Haversine-family); sub-meter drift versus our old hand-rolled
-/// R=6,371,000m implementation is well within the 100m identity
-/// threshold in <see cref="PoiIdentity"/> and the user-tunable slider
-/// in the operations page, so the swap is behaviour-preserving for
-/// every real consumer.
+/// Centralized distance calculation using the <c>Geolocation</c> NuGet package
+/// with Haversine math; sub-meter precision drift is acceptable against identity/slider thresholds.
 /// </summary>
 public static class GeoUtils
 {
     /// <summary>
-    /// Great-circle distance between two points on Earth, in meters.
-    /// Input ranges are enforced explicitly because
-    /// <c>GeoCalculator.GetDistance</c> accepts out-of-range values
-    /// silently and returns NaN, which is harder to diagnose than
-    /// an ArgumentOutOfRangeException at the call site.
+    /// Great-circle distance in meters. Input ranges are enforced explicitly
+    /// because the underlying library silently returns NaN for invalid bounds.
     /// </summary>
     /// <param name="lat1">Latitude of point 1 in degrees [-90, 90].</param>
     /// <param name="lon1">Longitude of point 1 in degrees [-180, 180].</param>
@@ -33,9 +24,7 @@ public static class GeoUtils
         ValidateCoordinate(lat2, -90, 90, nameof(lat2));
         ValidateCoordinate(lon2, -180, 180, nameof(lon2));
 
-        // decimalPlaces: 6 gives sub-millimeter precision once
-        // converted back to meters — more than enough for any
-        // POI-granularity decision.
+        // decimalPlaces: 6 provides sub-millimeter precision adequate for POI-granularity decisions.
         return GeoCalculator.GetDistance(lat1, lon1, lat2, lon2,
             decimalPlaces: 6,
             distanceUnit: DistanceUnit.Meters);

@@ -3,20 +3,13 @@ using System.Globalization;
 namespace LucidCartographer.Services.Trip;
 
 /// <summary>
-/// TRIP-TRAVELTIME-01: UI-edge conversion of the canonical seconds/meters (AR-11)
-/// into human-readable strings. Lives in the Trip slice but is purely
-/// presentational — the only place duration/distance leave their canonical units.
+/// UI-edge conversion of canonical seconds/meters into human-readable strings.
 /// </summary>
 public static class TravelTimeFormatting
 {
     /// <summary>
-    /// TRIP-RECONCILE-01 (Story 2.1): the SOLE rounding edge for a per-leg duration.
-    /// Rounds canonical seconds to whole minutes, nearest minute, round-half-up
-    /// (e.g. 90s ⇒ 2 min, 30s ⇒ 1 min, 29s ⇒ 0). Every place that DISPLAYS or SUMS
-    /// a leg's minutes must go through this one function so the displayed total
-    /// equals Σ of the displayed per-leg minutes (FR-13/14/15). Canonical
-    /// <see cref="Data.Entities.RouteSegment"/> seconds are NEVER mutated — only the
-    /// display model rounds (NFR2).
+    /// The sole rounding function for per-leg duration. Ensures displayed total
+    /// equals the sum of displayed per-leg minutes (canonical seconds never mutate).
     /// </summary>
     public static int DisplayMinutes(int seconds) =>
         (int)Math.Round(seconds / 60.0, MidpointRounding.AwayFromZero);
@@ -25,10 +18,6 @@ public static class TravelTimeFormatting
     /// Formats a duration in seconds as "Hh Mm" (e.g. "1h 20m"), "Mm" under an
     /// hour (e.g. "12m"), or "&lt;1m" for a sub-minute positive duration. A null
     /// or negative input yields the em-dash unknown marker.
-    /// TRIP-RECONCILE-01 (Story 2.1): the minute figure is the round-once
-    /// <see cref="DisplayMinutes"/> (round-half-up), NOT a truncation of seconds/60,
-    /// so the displayed legs and the displayed total reconcile. The unit text is
-    /// unchanged here — the "m"→"min" change is Story 2.2 (FR-16).
     /// </summary>
     public static string Duration(int? seconds)
     {
@@ -51,17 +40,11 @@ public static class TravelTimeFormatting
             return string.Format(CultureInfo.CurrentCulture, UiStrings.TripDurationMinutes, minutes);
         }
 
-        // TRIP-RECONCILE-01: DisplayMinutes rounded to 0 but the canonical seconds
-        // are positive (< 30s) — show "<1 min" rather than collapsing to "0m" (a free
-        // hop). This leg contributes 0 to the reconciled sum; the "<1 min" is an honest
-        // 0-contribution annotation, not a special-cased sum term.
         return s > 0 ? UiStrings.TripDurationSubMinute : UiStrings.TripDurationZero;
     }
 
-    // Trip stops compaction: the SOLE minutes⇄"HH:MM" edge shared by every duration
-    // picker (dwell, time limit, per-leg movement). Hours are UNCAPPED — a duration is
-    // not a clock time, so >24h is valid (e.g. a multi-day budget). Kept here next to the
-    // other UI-edge conversions; the view-models stay in canonical minutes/seconds (NFR2).
+    // Sole minutes⇄"HH:MM" conversion edge for all duration pickers.
+    // Hours are uncapped (duration ≠ clock time, so >24h is valid).
 
     /// <summary>
     /// Formats a non-negative duration in MINUTES as an uncapped "HH:MM" wire value
@@ -128,9 +111,6 @@ public static class TravelTimeFormatting
         return string.Format(CultureInfo.CurrentCulture, UiStrings.TripDistanceMeters, m);
     }
 
-    // TRIP-TIMELINE-01 (Story 2.6): UI-edge formatting of an honest itinerary arrival.
-    // The pure ItineraryTimeline computes seconds/DateTime/qualifier/IsUnknown; this is
-    // the only place those become a display string (no hardcoded patterns — 2.1 lesson).
 
     /// <summary>
     /// Formats one arrival as a display string: the unknown em-dash when
@@ -170,14 +150,9 @@ public static class TravelTimeFormatting
     }
 
     /// <summary>
-    /// TRIP-TIMELINE-01: a COMPACT arrival for the cramped stop-row slot — the em-dash
-    /// when unknown; otherwise the offset (and the wall-clock, prefixed "~" when
-    /// estimated) WITHOUT the verbose "· Estimated" qualifier word, so a long qualified
-    /// arrival never widens the row and starves the name span (the 2.2/2.5 panel-width
-    /// lesson). Provenance is still conveyed honestly — the "~" marks the approximation,
-    /// the per-leg Fidelity badge names it, and the full <see cref="Arrival"/> text is
-    /// carried in the row's title/aria-label. NOT a loss of honesty: an estimated value
-    /// is never shown as a clean confident time (the "~" + the em-dash rules still hold).
+    /// Compact arrival for constrained display: same as <see cref="Arrival"/> but omits
+    /// the "· Estimated" qualifier word to conserve width. The "~" approximation marker
+    /// is retained (never show estimated as confident).
     /// </summary>
     public static string ArrivalCompact(int? offsetSeconds, DateTime? wallClock, string? qualifier, bool isUnknown, DateTime? tripStart = null)
     {
@@ -211,12 +186,8 @@ public static class TravelTimeFormatting
     }
 
     /// <summary>
-    /// Story 4.2 (FR-27, UX-DR12): the wall-clock display for one arrival. A same-day
-    /// arrival (or no trip start to compare against) renders time-only as before; an
-    /// arrival on a LATER calendar day than <paramref name="tripStart"/> renders the
-    /// locale-driven short date + short time (CultureInfo.CurrentCulture — no hard-coded
-    /// MM/dd order), so a multi-day trip reads on its real days. DISPLAY only — the
-    /// accumulation math (ItineraryTimeline) is untouched.
+    /// Wall-clock display for one arrival. Same-day arrivals render time-only;
+    /// later calendar days include locale-driven date + time.
     /// </summary>
     private static string WallClockText(DateTime clock, DateTime? tripStart) =>
         tripStart is { } start && clock.Date > start.Date

@@ -7,26 +7,20 @@ namespace LucidCartographer.Configuration;
 public static class ViewModelExtensions
 {
     /// <summary>
-    /// Page ViewModels are registered as Transient: a fresh instance per
-    /// page-component instance, matching WPF's "new VM per window" semantic.
-    /// Scoped would reuse across navigations within the same SignalR circuit,
-    /// which is wrong for page-scoped state.
+    /// Page ViewModels are registered as Transient to isolate state per page component.
+    /// Scoped would incorrectly reuse across navigations within the same SignalR circuit.
     /// </summary>
     public static IServiceCollection AddPageViewModels(this IServiceCollection services)
     {
         services.AddTransient<DataSourcesPageViewModel>();
         services.AddTransient<MapPageViewModel>();
-        // Trip View VM shares the page-scoped Transient lifetime (one per MapPage
-        // component instance), alongside MapPageViewModel.
         services.AddTransient<TripViewModel>();
         services.AddTransient<OperationsPageViewModel>();
         services.AddTransient<GoogleSessionPageViewModel>();
 
-        // Viewport width tracker is Scoped (one per circuit) so the layout and
-        // every page agree on the current desktop/mobile breakpoint and share
-        // the same change notifications. AddHttpContextAccessor lets the
-        // service seed itself from the `lucid_viewport` cookie during the
-        // initial SSR pass, eliminating the desktop→mobile flash on phones.
+        // ViewportService is Scoped (per circuit) so all pages share breakpoint state.
+        // AddHttpContextAccessor seeds it from the lucid_viewport cookie during SSR
+        // to prevent desktop→mobile flash on initial load.
         services.AddHttpContextAccessor();
         services.AddScoped<ViewportService>();
         return services;

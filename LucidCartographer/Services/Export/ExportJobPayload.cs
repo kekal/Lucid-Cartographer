@@ -1,10 +1,7 @@
 namespace LucidCartographer.Services.Export;
 
 /// <summary>
-/// Payload for a background Google Saved-List export job. Only the collection id
-/// and target list name are carried across the queue boundary; the eligible
-/// place URLs are resolved fresh from the DB inside <see cref="ExportInvocable"/>
-/// (so the export reflects the collection's state at run time, not enqueue time).
+/// Payload for a background Google Saved-List export job; place URLs are resolved fresh from DB at run time.
 /// </summary>
 public sealed class ExportJobPayload
 {

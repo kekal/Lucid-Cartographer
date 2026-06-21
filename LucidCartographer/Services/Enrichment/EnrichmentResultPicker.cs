@@ -3,17 +3,9 @@ using LucidCartographer.Services.Operations;
 namespace LucidCartographer.Services.Enrichment;
 
 /// <summary>
-/// Pure decision logic for the "smart" name-search fallback. When a Google
-/// Maps name search does not redirect straight to a single canonical place
-/// but lands on a results list (e.g. searching "Park Dzikich Zwierząt
-/// Kadzidłowo" returns both "Park Dzikich Zwierząt" and "Kasa Parku Dzikich
-/// Zwierząt"), this picks the one result whose name unambiguously matches the
-/// POI we were enriching — but only when exactly one candidate clears the bar.
-///
-/// Conservative on purpose: zero matches OR two-or-more matches both return
-/// null, which routes the caller to the manual-URL fallback dialog. Auto-
-/// selecting the wrong place is worse than asking the user, so the threshold
-/// is deliberately higher than the dedup default (0.6).
+/// Decision logic to pick the one unambiguous match from a search-results list
+/// by name similarity. Returns null if zero or multiple candidates match, routing
+/// to manual-URL fallback — auto-selecting the wrong place is worse than asking.
 /// </summary>
 public static class EnrichmentResultPicker
 {
@@ -53,8 +45,7 @@ public static class EnrichmentResultPicker
             {
                 if (matchIndex is not null)
                 {
-                    // A second qualifying card makes the choice ambiguous —
-                    // bail out so the caller shows the manual-URL dialog.
+                    // Multiple matches = ambiguous; defer to manual fallback.
                     return null;
                 }
 

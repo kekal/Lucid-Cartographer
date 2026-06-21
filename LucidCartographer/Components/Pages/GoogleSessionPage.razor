@@ -15,7 +15,6 @@
         </p>
     </div>
 
-    @* Status + actions *@
     <div class="bg-surface-container-low rounded-xl p-5 mb-6">
         <div class="flex items-center gap-3 mb-4">
             @if (Vm.SignedIn == true)
@@ -61,7 +60,6 @@
         }
     </div>
 
-    @* Remote view (server only), shown once the user opens the Google sign-in. *@
     @if (Vm.RemoteViewEnabled)
     {
         @if (Vm.ShowRemoteView)

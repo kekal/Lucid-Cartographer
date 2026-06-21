@@ -18,8 +18,7 @@
 
     protected override void OnInitialized()
     {
-        // BehaviorSubject replays the current value on subscribe, so this
-        // handles both the initial snapshot and subsequent updates.
+        // BehaviorSubject replays the current value on subscribe, capturing both initial state and updates.
         _subscription = Progress.Changes.Subscribe(_ => OnChanged());
     }
 

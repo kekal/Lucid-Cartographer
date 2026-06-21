@@ -1,37 +1,19 @@
 @implements IDisposable
 @using LucidCartographer.Services.Trip
 
-@* Mobile Trip View stop-list panel (Story 1.3, AC2 / UX-DR12) — the MobileTrip*
-   split of TripStopList. Same rows + placeholders in the mobile bottom-panel /
-   sheet idiom (.scroll / .list / .row, data-poi-id, ≥44px touch targets; the
-   safe-area insets are honoured by the hosting .m-bottom-panel). Markup + a
-   ~12-line VM bridge only. The host bottom panel already renders the results
-   header with the Trip View toggle, so this component is just the list body —
-   keeping the toggle reachable so the user can turn Trip View back off. Dark
-   mode is first-class: every colour is a token (var(--…)), never a raw hex. *@
 
-@* TRIP-SELECT-05: announces the selected stop (list→map or map→list). *@
 <span class="sr-only" role="status" aria-live="polite">@Vm.SelectionAnnouncement</span>
 
-@* TRIP-ORDER-03: announces every successful reorder — same VM-backed text as the
-   desktop surface, so the announcement behaviour is identical (NFR4 / AR-9). *@
 <span class="sr-only" role="status" aria-live="polite">@Vm.LastReorderAnnouncement</span>
 
-@* TRIP-STARTFINISH-05: announces Start/Finish designation changes and the
-   roundtrip ↔ open-path shape transitions — same VM-backed text as desktop. *@
 <span class="sr-only" role="status" aria-live="polite">@Vm.StartFinishAnnouncement</span>
 
-@* TRIP-TRAVELTIME-01 (AC6): announce the computing state while legs await the
-   background provider — same VM-backed signal as the desktop surface. *@
 <span class="sr-only" role="status" aria-live="polite">@(Vm.IsAnyLegComputing ? UiStrings.TripLegComputingAnnouncement : null)</span>
 
-@* TRIP-TRAVELMODE-01 (Story 2.2, AC1): per-trip travel-mode selector — same VM-
-   backed control as the desktop surface (UX-DR12). *@
 <div style="display:flex;justify-content:center;padding:8px 12px;border-bottom:1px solid var(--border)">
     <TravelModeSelector Vm="Vm" />
 </div>
 
-@* TRIP-TRAVELTIME-01 (AC5): trip total travel time, rendered once. Partial ⇒ "—". *@
 @if (Vm.OrderedLegs.Count > 0)
 {
     <div class="trip-total" style="display:flex;align-items:center;justify-content:space-between;padding:6px 12px;border-bottom:1px solid var(--border)">
@@ -42,10 +24,7 @@
         </span>
     </div>
 
-    @* TRIP-RECOMPUTE-01 (Story 2.4, AC4): explicit on-demand recompute. In the
-       header area, NOT inside the clickable stop rows (2.2 row-selection regression). *@
     <div style="padding:6px 12px;border-bottom:1px solid var(--border);display:flex;gap:16px;align-items:center">
-        @* TRIP-TSP-01 (Story 3.1, AR-6): explicit on-demand TSP-Sort (mobile). *@
         <button type="button" class="trip-sort-tsp"
                 style="font-size:12px;color:var(--primary);background:none;border:none;padding:0;cursor:pointer"
                 aria-label="@UiStrings.TripSortTspAria"
@@ -61,15 +40,9 @@
             @UiStrings.TripRecomputeLabel
         </button>
     </div>
-    @* TRIP-TSP-01: polite live region announcing a completed sort. *@
     <span role="status" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">@Vm.LastSortAnnouncement</span>
 }
 
-@* TRIP-TIMELINE-01 (Story 2.6, AC2/AC5): header inputs for the wall-clock trip
-   start time + the soft time budget (minutes), and the soft AMBER overrun flag —
-   identical semantics to the desktop surface (UX-DR12). Kept in the header, NOT in
-   the clickable rows. The overrun is a soft warn (amber), never red, shown only
-   when the KNOWN total exceeds the set budget. Tokens only, no raw hex. *@
 @if (Vm.OrderedLegs.Count > 0)
 {
     <div class="trip-budget" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:6px 12px;border-bottom:1px solid var(--border);font-size:12px">
@@ -92,7 +65,6 @@
         </label>
         @if (Vm.Timeline.IsOverBudget)
         {
-            @* Soft amber (warn) overrun — the project's soft-state amber tone, never red. *@
             <span class="trip-overrun" role="status" aria-label="@UiStrings.TripBudgetOverrunAria"
                   style="display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:4px;color:var(--warn);background:var(--warn-soft)">
                 <span class="ms" aria-hidden="true" style="font-size:14px">schedule</span>
@@ -102,12 +74,6 @@
     </div>
 }
 
-@* TRIP-DEGRADE-01 (Story 2.3, AC2): honest approximate note when any leg fell
-   back to a straight-line estimate (the routing engine was unreachable). In a
-   role=status aria-live region so AT hears it; muted token tone, never error-red
-   (UX-DR10). Kept in the panel header area, NOT inside the clickable stop rows
-   (a wide element over the row centre breaks row selection — 2.2 regression).
-   Tokens only, no raw hex (dark mode first-class). *@
 @if (Vm.IsShowingApproximateEstimates)
 {
     <div role="status" aria-live="polite"
@@ -118,7 +84,6 @@
 }
 
 <div class="scroll" style="flex:1">
-    @* `trip-stop-list` scopes the JS scroll-into-view helper (TRIP-SELECT-05). *@
     <div class="list trip-stop-list" aria-label="@UiStrings.TripStopListAria">
         @if (Vm.StopRows.Count == 0)
         {
@@ -133,11 +98,6 @@
             {
                 @if (!row.IsPlaceable)
                 {
-                    @* [TRIP-PLACE-04] Mobile "Not placeable" row — identical
-                       treatment to the desktop list (UX-DR12): kept visible,
-                       de-emphasized, NOT selectable, no routed order badge (the
-                       placeable numbering stays contiguous with no visible gap).
-                       Tokens only, no raw hex. *@
                     <div class="row" @key="row.PoiId" data-poi-id="@row.PoiId"
                          aria-label="@UiStrings.TripStopNotPlaceableAria"
                          title="@UiStrings.TripStopNotPlaceableDetail"
@@ -149,9 +109,6 @@
                             <div class="name" style="color:var(--text-2)">@row.Name</div>
                             <div class="sub">@UiStrings.TripStopNotPlaceable</div>
                         </div>
-                        @* TRIP-DWELL-01 (Story 2.5, AC4): an unplaceable stop still
-                           carries dwell. Not selectable ⇒ no stopPropagation needed.
-                           Tokens only, no raw hex. *@
                         <input type="number" min="0" max="@TripViewModel.MaxDwellMinutes" inputmode="numeric"
                                class="trailing"
                                placeholder="@UiStrings.TripDwellPlaceholder"
@@ -167,12 +124,6 @@
                     var selected = Vm.SelectedStopPoiId == row.PoiId;
                     var number = row.DisplayOrder!.Value;
                     var role = Vm.StopRole(row.PoiId);
-                    @* data-poi-id mirrors the plain POI list rows so the scroll helper
-                       (TRIP-SELECT-05) can locate a row. Tap / Enter / Space select the
-                       stop (list→map). Selected rows tint with the primary-soft token
-                       and expose aria-current (AC3). ≥44px touch target via .row.
-                       The badge shows the presented routed order over the placeable
-                       subset — contiguous 1..M ([TRIP-ORDER-UNPLACE-01]). *@
                     <div class="row" @key="row.PoiId" data-poi-id="@row.PoiId"
                          role="button" tabindex="0"
                          aria-current="@(selected ? "true" : null)"
@@ -186,21 +137,13 @@
                          @ondrop="() => OnDropAsync(stop.OrderIndex)"
                          @ondrop:preventDefault
                          @ondragend="OnDragEnd">
-                        @* TRIP-ORDER-04: drag handle (pointer/touch reorder, UX-DR3).
-                           The whole row is draggable; the handle is the affordance. *@
                         <span aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripDragHandle, row.Name)"
                               style="display:inline-flex;align-items:center;justify-content:center;min-width:24px;color:var(--text-2);touch-action:none">
                             <span class="ms" aria-hidden="true">drag_indicator</span>
                         </span>
-                        @* TRIP-STARTFINISH-03: pinned Start gets a distinct primary
-                           ring on the badge avatar; pinned Finish a distinct muted
-                           ring. Tokens only, no raw hex (dark mode first-class). *@
                         <div class="avatar" style="background:var(--primary)@(role == TripStopRole.Start ? ";box-shadow:0 0 0 2px var(--bg-elev-1),0 0 0 4px var(--primary)" : role == TripStopRole.Finish ? ";box-shadow:0 0 0 2px var(--bg-elev-1),0 0 0 4px var(--text-2)" : "")">
                             <StopOrderBadge Number="number" />
                         </div>
-                        @* TRIP-STARTFINISH-03: distinct Start/Finish glyph (Material
-                           Symbols Outlined) carrying the role's accessible name —
-                           "Start — stop 1 of N" / "Finish — stop N of N". *@
                         @if (role != TripStopRole.None)
                         {
                             <span class="ms" role="img"
@@ -210,10 +153,6 @@
                         }
                         <div class="meta">
                             <div class="name">@row.Name</div>
-                            @* TRIP-TIMELINE-01 (Story 2.6, AC2/AC3): the honest arrival —
-                               relative offset (always) + wall-clock (only with a start
-                               time), qualified, or "—" unknown. Read-only text (no input
-                               ⇒ no selection risk). Tokens only, no raw hex. *@
                             @{ var arrival = ArrivalFor(row.PoiId); }
                             @if (arrival is not null)
                             {
@@ -222,9 +161,6 @@
                                     @ArrivalCompactText(arrival)
                                 </div>
                             }
-                            @* TRIP-TRAVELTIME-01 (AC4): the leg DEPARTING this stop —
-                               travel time + distance + Fidelity badge. No cache row
-                               yet ⇒ "—" + computing; Placeholder/null ⇒ no badge. *@
                             @{ var leg = LegFrom(row.PoiId); }
                             @if (leg is not null)
                             {
@@ -232,8 +168,6 @@
                                     <span aria-label="@(leg.DurationSeconds is null ? UiStrings.TripLegComputingAria : string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegTravelTimeAria, TravelTimeFormatting.Duration(leg.DurationSeconds)))">@TravelTimeFormatting.Duration(leg.DurationSeconds)</span>
                                     <span aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripLegDistanceAria, TravelTimeFormatting.Distance(leg.DistanceMeters))" style="opacity:.8">@TravelTimeFormatting.Distance(leg.DistanceMeters)</span>
                                     <FidelityBadge Fidelity="@leg.Fidelity" />
-                                    @* TRIP-MANUAL-01 (AC5): manual minutes input —
-                                       only under Any/Air. Tokens only, no raw hex. *@
                                     @if (Vm.TravelMode == LucidCartographer.Data.Entities.TravelMode.AnyAir)
                                     {
                                         <input type="number" min="0" max="@TripViewModel.MaxManualLegMinutes" inputmode="numeric"
@@ -252,11 +186,6 @@
                                 <div class="sub" aria-label="@UiStrings.TripLegNoTravelTimeAria">@UiStrings.TripLegTimeUnknown</div>
                             }
                         </div>
-                        @* TRIP-DWELL-01 (Story 2.5): per-stop dwell minutes input, on
-                           every row (placeable AND unplaceable). Prefills the persisted
-                           value; empty clears (null). stopPropagation so editing dwell
-                           never selects/reorders the row; compact, no layout-shifting
-                           sibling (2.2 selection lesson). Tokens only, no raw hex. *@
                         <input type="number" min="0" max="@TripViewModel.MaxDwellMinutes" inputmode="numeric"
                                class="trailing"
                                placeholder="@UiStrings.TripDwellPlaceholder"
@@ -266,12 +195,6 @@
                                @onchange="e => OnDwellMinutesChangedAsync(row.PoiId, e.Value)"
                                @onclick:stopPropagation
                                @onkeydown:stopPropagation />
-                        @* TRIP-ORDER-03: keyboard/touch move controls — identical
-                           semantics to the desktop surface (same VM methods, same
-                           aria-labels), ≥44px touch targets (NFR4 / UX-DR12).
-                           Stacked into a narrow column (Story 1.7) so the Start/
-                           Finish controls beside them fit a 390px row without
-                           pushing the row's tap centre off the selectable area. *@
                         <span style="display:inline-flex;flex-direction:column;flex-shrink:0">
                             <button type="button"
                                     aria-label="@string.Format(System.Globalization.CultureInfo.CurrentCulture, UiStrings.TripMoveStopUp, row.Name)"
@@ -292,11 +215,6 @@
                                 <span class="ms" aria-hidden="true">arrow_downward</span>
                             </button>
                         </span>
-                        @* TRIP-STARTFINISH-04: Set/Unset Start & Finish controls —
-                           identical semantics + UiStrings aria-labels to the desktop
-                           surface (UX-DR12), ≥44px touch targets. "Set as Finish" is
-                           disabled on the current Start row and vice versa (AC-6 as
-                           a disabled control, not an error). *@
                         <span style="display:inline-flex;flex-direction:column;flex-shrink:0">
                             <button type="button"
                                     aria-label="@StartControlAria(role, row.Name)"
@@ -326,9 +244,6 @@
     </div>
 </div>
 
-@* TRIP-TIMELINE-01 (Story 2.6, AC2): the finish/return readout at the END of the
-   list — the return-to-Start arrival on a Roundtrip, or the Finish arrival on an
-   open path — qualified, or "—" unknown. Tokens only, no raw hex. *@
 @if (Vm.Timeline.FinishOrReturn is { } finish)
 {
     <div class="trip-finish" style="display:flex;align-items:center;justify-content:space-between;padding:6px 12px;border-top:1px solid var(--border);font-size:12px">
@@ -347,20 +262,15 @@
 
     private void OnVmChanged() => InvokeAsync(StateHasChanged);
 
-    // TRIP-TRAVELTIME-01: the leg departing a given stop (mirrors desktop).
     private TripLeg? LegFrom(int poiId) =>
         Vm.OrderedLegs.FirstOrDefault(l => l.FromPoiId == poiId);
 
-    // TRIP-TIMELINE-01 (Story 2.6): the per-stop arrival + its display string + the
-    // header start-time/budget input bridges — identical to the desktop surface.
     private ItineraryArrival? ArrivalFor(int poiId) =>
         Vm.Timeline.Stops.FirstOrDefault(a => a.PoiId == poiId);
 
-    // Story 4.2 (FR-27): thread the trip start so a later-day arrival shows its date.
     private string ArrivalText(ItineraryArrival a) =>
         TravelTimeFormatting.Arrival(a.OffsetSeconds, a.ArrivalWallClock, a.QualifyingFidelity, a.IsUnknown, Vm.TripStartTime);
 
-    // TRIP-TIMELINE-01: compact row variant — full text stays in the title/aria-label.
     private string ArrivalCompactText(ItineraryArrival a) =>
         TravelTimeFormatting.ArrivalCompact(a.OffsetSeconds, a.ArrivalWallClock, a.QualifyingFidelity, a.IsUnknown, Vm.TripStartTime);
 
@@ -404,13 +314,11 @@
         }
     }
 
-    // TRIP-DWELL-01 (Story 2.5): current dwell minutes for a row, or empty when unset.
     private static string DwellMinutes(TripStopRow row) =>
         row.DwellMinutes is { } m
             ? m.ToString(System.Globalization.CultureInfo.CurrentCulture)
             : string.Empty;
 
-    // TRIP-DWELL-01: parse + persist via the VM; empty/blank clears the dwell (null).
     private async Task OnDwellMinutesChangedAsync(int poiId, object? raw)
     {
         var text = raw?.ToString();
@@ -426,13 +334,11 @@
         }
     }
 
-    // TRIP-MANUAL-01: current manual minutes for an Any/Air leg (mirrors desktop).
     private static string ManualMinutes(TripLeg leg) =>
         leg.Fidelity == LucidCartographer.Data.Entities.Fidelity.Manual && leg.DurationSeconds is { } s
             ? (s / 60).ToString(System.Globalization.CultureInfo.CurrentCulture)
             : string.Empty;
 
-    // TRIP-MANUAL-01: parse + persist via the VM; empty clears the manual entry.
     private async Task OnManualMinutesChangedAsync(TripLeg leg, object? raw)
     {
         var text = raw?.ToString();
@@ -448,7 +354,6 @@
         }
     }
 
-    // Mobile rows are <div role="button" tabindex="0"> — Enter/Space mirror the tap.
     private void OnRowKeyDown(KeyboardEventArgs e, int poiId)
     {
         if (e.Key is "Enter" or " ")
@@ -457,9 +362,6 @@
         }
     }
 
-    // TRIP-ORDER-04: native HTML5 DnD bridge — identical to the desktop surface.
-    // Remembers the dragged PoiId, forwards the drop's target slot to the VM;
-    // all clamp/pin/no-op logic stays in the authoritative service.
     private int? _draggedPoiId;
 
     private void OnDragStart(int poiId) => _draggedPoiId = poiId;
@@ -477,8 +379,6 @@
         await Vm.MoveStopToAsync(poiId, targetOrderIndex);
     }
 
-    // TRIP-STARTFINISH-04: thin bridges — identical to the desktop surface; all
-    // designation logic lives in the VM → service.
     private Task OnStartClickAsync(int poiId, TripStopRole role) =>
         role == TripStopRole.Start ? Vm.ClearStartAsync() : Vm.SetStartAsync(poiId);
 

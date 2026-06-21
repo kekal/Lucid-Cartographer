@@ -12,11 +12,8 @@ namespace LucidCartographer.Services.Browser;
 public sealed record GoogleSessionStatus(bool SignedIn, bool Busy, string? Detail = null);
 
 /// <summary>
-/// The single, long-lived, in-process headful Chromium session backed by the
-/// persistent Chrome profile. All Google-account-dependent automation borrows
-/// pages from here so the browser the user logs into (via the noVNC view) is the
-/// very same one the exporter/scraper drive. Operations are serialised by
-/// <see cref="GoogleBrowserLock"/> at the call sites.
+/// Shared headful Chromium session backed by persistent profile; automation borrows pages so
+/// the user's logged-in browser is the same one exporter/scraper use. Operations serialised by <see cref="GoogleBrowserLock"/>.
 /// </summary>
 public interface IBrowserSession
 {

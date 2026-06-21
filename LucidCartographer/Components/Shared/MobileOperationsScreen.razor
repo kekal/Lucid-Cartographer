@@ -2,9 +2,6 @@
 @using LucidCartographer.Data.Entities
 @using LucidCartographer.Services.Operations
 
-@* Mobile Operations screen. Presentational over the shared
-   OperationsPageViewModel: stacked source pickers, a 2x2 op grid, a tolerance
-   slider, the live result list with discard/restore, and a commit modal. *@
 <div class="m-app">
     <div class="screen scroll">
         <div class="app-header" style="padding-top:calc(12px + var(--safe-top))">
@@ -130,7 +127,7 @@
                 @foreach (var p in Vm.ResultPois)
                 {
                     var disc = Vm.DiscardedIds.Contains(p.Id);
-                    @* H07: promote the row to a real <button> so keyboard users can discard/restore. *@
+                    @* Button enables keyboard discarding/restoring of result items. *@
                     <button class="row" type="button" @key="p.Id" style="@(disc ? "opacity:0.4;text-decoration:line-through" : "")"
                             aria-pressed="@(disc ? "true" : "false")"
                             aria-label="@($"{(disc ? "Restore" : "Discard")} {p.Name}")"
@@ -154,15 +151,7 @@
             </div>
 
 
-            @* M03: footer only rendered inside the result branch so it doesn't
-               appear with a permanently-disabled button while the user is still
-               picking a source. H03: --bg-base / --divider weren't defined and
-               left the footer transparent — use the real tokens.
-               M02 (Wave 7): horizontal safe-area treatment so landscape on a
-               notched device doesn't tuck the commit button under the side notch.
-               L02 (Wave 7): Vm.Result is non-null inside this branch — the
-               `Vm.Result is null` half of the previous disabled expression was
-               always false. *@
+            @* Footer rendered only when result exists to avoid disabled button while picking sources. Includes horizontal safe-area insets for notched devices. *@
             <div style="position:sticky;bottom:0;padding:14px max(18px, var(--safe-right)) calc(14px + var(--safe-bottom)) max(18px, var(--safe-left));background:var(--bg);border-top:1px solid var(--separator)">
                 <button class="btn btn-primary btn-block" type="button" @onclick="Vm.CommitToLayer" disabled="@(Remaining == 0)">
                     <span class="ms" aria-hidden="true">layers</span>@UiStrings.CommitToLayer

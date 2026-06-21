@@ -3,9 +3,7 @@ namespace LucidCartographer.Configuration;
 public static class McpServerExtensions
 {
     /// <summary>
-    /// Server-level usage guidance returned in the MCP initialize response
-    /// (the protocol's <c>instructions</c> field). Gives a client an overview
-    /// of the toolset before it inspects individual tool descriptions.
+    /// Server-level usage guidance for the MCP initialize response.
     /// </summary>
     private const string ServerInstructions =
         """
@@ -52,11 +50,7 @@ public static class McpServerExtensions
         """;
 
     /// <summary>
-    /// Registers the Model Context Protocol server with the Streamable-HTTP
-    /// transport in stateless mode (each tool call is an independent request,
-    /// so scoped services — PoiService, DbContext — resolve per call). Exposes
-    /// tools, prompt templates, reference resources and server-level
-    /// instructions. The endpoint itself is mapped in Program.cs (app.MapMcp).
+    /// Registers the MCP server with stateless HTTP transport; scoped services resolve per call.
     /// </summary>
     public static IServiceCollection AddMcpServerServices(this IServiceCollection services)
     {

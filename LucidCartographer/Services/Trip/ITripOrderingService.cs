@@ -2,24 +2,21 @@ namespace LucidCartographer.Services.Trip;
 
 /// <summary>
 /// One ordered, placeable routing candidate: a stop with a Stop Order and both
-/// coordinates present. [TRIP-PLACE-03] This is the shape any all-pairs routing
-/// computation (the Epic 3 N×N Distance Matrix / TSP candidate set) consumes —
-/// unplaceable stops never appear here. Coordinates are non-nullable by
-/// construction (the accessor filters through <see cref="StopPlaceability"/>).
+/// coordinates present. This is the shape any all-pairs routing computation
+/// (N×N Distance Matrix / TSP candidate set) consumes — unplaceable stops never
+/// appear here. Coordinates are non-nullable by construction.
 /// </summary>
 public sealed record PlaceableStop(int PoiId, int OrderIndex, double Latitude, double Longitude);
 
 /// <summary>
 /// Owns the Stop Order (<see cref="Data.Entities.PoiCollectionItem.OrderIndex"/>)
 /// for a Trip. This is the SINGLE write-path for <c>OrderIndex</c> across the
-/// whole app — seed, append, compaction (and later drag/keyboard/TSP/MCP
-/// reordering in Stories 1.5/3.x) all funnel through one gated method here.
-/// Never mutate <c>OrderIndex</c> from a ViewModel or component.
+/// whole app — seed, append, compaction, and reordering all funnel through
+/// gated methods here. Never mutate <c>OrderIndex</c> from a ViewModel or component.
 ///
-/// Canonical invariant (AR-11): <c>OrderIndex</c> is 1-based, contiguous,
-/// gap-free and unique across the <b>placeable</b> items of a collection
-/// (a POI is placeable when both Latitude and Longitude are non-null).
-/// Non-placeable items carry <c>OrderIndex == 0</c> ("not a stop").
+/// Invariant: <c>OrderIndex</c> is 1-based, contiguous, gap-free, and unique
+/// across placeable items (both Latitude and Longitude non-null).
+/// Non-placeable items carry <c>OrderIndex == 0</c>.
 /// </summary>
 public interface ITripOrderingService
 {
@@ -37,11 +34,9 @@ public interface ITripOrderingService
     Task<IReadOnlyDictionary<int, int>> GetStopOrderAsync(int collectionId, CancellationToken ct = default);
 
     /// <summary>
-    /// Returns the ordered <b>placeable-only</b> stop set — the routing candidate
-    /// set. [TRIP-PLACE-03] Legs and any future all-pairs work (Distance Matrix,
-    /// Epic 3) must consume this accessor; the full membership (including
-    /// unplaceable items) stays available to the stop <i>list</i> via the
-    /// ViewModel projection. Read-only: never writes <c>OrderIndex</c>.
+    /// Returns the ordered placeable-only stop set — the routing candidate set.
+    /// Legs and all-pairs work must consume this accessor; full membership
+    /// stays available via the ViewModel projection. Read-only: never writes <c>OrderIndex</c>.
     /// </summary>
     Task<IReadOnlyList<PlaceableStop>> GetPlaceableStopsAsync(int collectionId, CancellationToken ct = default);
 
@@ -62,27 +57,17 @@ public interface ITripOrderingService
 
     /// <summary>
     /// Moves a single Stop to <paramref name="targetOrderIndex"/> (1-based) and
-    /// renumbers the affected range so the order stays contiguous 1..N. Covers
-    /// both drag-to-position and one-step keyboard moves (Story 1.5). Pin-aware:
-    /// when <see cref="Data.Entities.PoiCollection.StartPoiId"/> /
-    /// <see cref="Data.Entities.PoiCollection.FinishPoiId"/> designate a Start /
-    /// Finish, the target is clamped into the movable interior window and the
-    /// pinned Stops never move; moving the pinned Stop itself is a no-op.
-    /// Out-of-range targets clamp; a no-op move short-circuits without writing.
-    /// Never changes <c>StartPoiId</c>/<c>FinishPoiId</c> (that is Story 1.7).
+    /// renumbers the affected range so the order stays contiguous 1..N. Pin-aware:
+    /// designated Start/Finish stops are clamped to 1/N and never reorder.
+    /// Out-of-range targets clamp; no-op moves short-circuit without writing.
     /// </summary>
     Task ReorderStopAsync(int collectionId, int poiId, int targetOrderIndex, CancellationToken ct = default);
 
     /// <summary>
-    /// Designates the Stop as the Trip's Start (Story 1.7, [TRIP-STARTFINISH-02]):
-    /// writes <see cref="Data.Entities.PoiCollection.StartPoiId"/> and pins the
-    /// Stop to <c>OrderIndex</c> 1 through the single ordering write path (AR-11),
-    /// renumbering the remaining placeable Stops to fill 2..N in their existing
-    /// relative order. Re-designation releases the prior Start (it becomes an
-    /// interior Stop). No-op when the POI is not a placeable, ordered Stop of the
-    /// collection or is already the Start. Throws
-    /// <see cref="InvalidOperationException"/> when the POI is the current Finish
-    /// (a stop cannot be both Start and Finish).
+    /// Designates the Stop as the Trip's Start: writes <see cref="Data.Entities.PoiCollection.StartPoiId"/>
+    /// and pins to <c>OrderIndex</c> 1, renumbering remaining stops to 2..N in existing order.
+    /// Re-designation releases the prior Start. Throws <see cref="InvalidOperationException"/>
+    /// when the POI is the current Finish.
     /// </summary>
     Task SetStartAsync(int collectionId, int poiId, CancellationToken ct = default);
 
@@ -93,14 +78,10 @@ public interface ITripOrderingService
     Task ClearStartAsync(int collectionId, CancellationToken ct = default);
 
     /// <summary>
-    /// Designates the Stop as the Trip's Finish ([TRIP-STARTFINISH-02]): writes
-    /// <see cref="Data.Entities.PoiCollection.FinishPoiId"/> and pins the Stop to
-    /// <c>OrderIndex</c> N through the single ordering write path (AR-11),
-    /// renumbering interior Stops as needed. A distinct Finish makes the Trip an
-    /// open path (no closing leg). Re-designation releases the prior Finish.
-    /// No-op when the POI is not a placeable, ordered Stop or is already the
-    /// Finish. Throws <see cref="InvalidOperationException"/> when the POI is the
-    /// current Start (Finish == Start is rejected).
+    /// Designates the Stop as the Trip's Finish: writes <see cref="Data.Entities.PoiCollection.FinishPoiId"/>
+    /// and pins to <c>OrderIndex</c> N, renumbering interior stops as needed.
+    /// A distinct Finish makes the Trip an open path (no closing leg).
+    /// Throws <see cref="InvalidOperationException"/> when the POI is the current Start.
     /// </summary>
     Task SetFinishAsync(int collectionId, int poiId, CancellationToken ct = default);
 
@@ -118,78 +99,43 @@ public interface ITripOrderingService
     Task CompactOrderAsync(int collectionId, CancellationToken ct = default);
 
     /// <summary>
-    /// TRIP-TSP-01 (Story 3.1, AR-6/D5): "Sort in Traveling Salesman order". Builds
-    /// the on-demand N×N Distance Matrix over the placeable Stops
-    /// (<see cref="IDistanceMatrixService"/>, reusing the shared cache), runs
-    /// nearest-neighbour + 2-opt, and rewrites <c>OrderIndex</c> through the SAME
-    /// single write path (<see cref="ITripOrderingService"/>, AR-11) as drag /
-    /// keyboard / MCP — it is just another ordering write, freely overridable by a
-    /// later manual drag. This is the ONLY method that sorts; the system never
-    /// reorders without an explicit caller (no automatic trigger).
-    ///
-    /// Pin-aware: a designated Start stays at Order 1 and a designated Finish at
-    /// Order N (interior edges only). A Roundtrip (no distinct Finish) closes the
-    /// loop; an open path does not. The new order's total travel time is GUARANTEED
-    /// <b>≤</b> the pre-sort order for the same Stops/mode — if the search cannot
-    /// improve on the current order, the current order is kept (no worse result is
-    /// ever written). No-op for a collection with fewer than two placeable Stops.
+    /// Sorts stops in Traveling Salesman order: builds N×N Distance Matrix over
+    /// placeable stops, runs nearest-neighbour + 2-opt, and rewrites through the
+    /// single ordering write path — freely overridable by manual drag. Pin-aware:
+    /// designated Start/Finish stay at 1/N. New travel time is guaranteed ≤ pre-sort
+    /// (current order kept if no improvement). No-op for fewer than two stops.
     /// </summary>
     Task SortTravelingSalesmanAsync(int collectionId, CancellationToken ct = default);
 
     /// <summary>
-    /// TRIP-MCP-01 (Story 3.2, AR-8/FR-16): assigns a full Stop Order supplied by an
-    /// external caller (the MCP agent). <paramref name="orderedPoiIds"/> must be
-    /// EXACTLY the collection's placeable, ordered Stops — every Stop present once,
-    /// no unknown / unplaceable / duplicate id — otherwise an
-    /// <see cref="ArgumentException"/> is thrown (the MCP runtime surfaces it as a
-    /// tool error). The supplied sequence is the interior order; a designated Start
-    /// stays at Order 1 and a designated Finish at Order N (pins win, via the shared
-    /// <c>ArrangeWithPins</c>). Writes through the SAME single <c>OrderIndex</c> path
-    /// (1-based, contiguous, gap-free, unique — AR-11) as drag / keyboard / TSP, so an
-    /// MCP-assigned order persists identically to a manual drag and stays drag-editable.
+    /// Assigns a full Stop Order from an external caller (e.g. MCP agent).
+    /// <paramref name="orderedPoiIds"/> must be exactly the collection's placeable,
+    /// ordered stops — every stop present once. Designated Start/Finish stay at 1/N.
+    /// MCP-assigned orders persist identically to manual drag and stay drag-editable.
     /// </summary>
     Task AssignOrderAsync(int collectionId, IReadOnlyList<int> orderedPoiIds, CancellationToken ct = default);
 
     /// <summary>
-    /// TRIP-DWELL-01 / TRIP-MCP-01: persists the dwell time (minutes) on the
-    /// collection's membership for <paramref name="poiId"/>. <paramref name="minutes"/>
-    /// is stored verbatim on <c>PoiCollectionItem.DwellMinutes</c>; <c>null</c> clears
-    /// it. Written under the shared <see cref="SqliteWriteLock"/>. No-op when the
-    /// membership is absent or <paramref name="minutes"/> is out of range
-    /// (<c>&lt; 0</c> or <c>&gt; <see cref="TripOrderingService.MaxDwellMinutes"/></c>).
-    /// The single dwell-write implementation shared by the UI (TripViewModel) and MCP.
+    /// Persists the dwell time (minutes) on the collection membership for <paramref name="poiId"/>.
+    /// <paramref name="minutes"/> is stored verbatim on <c>PoiCollectionItem.DwellMinutes</c>;
+    /// <c>null</c> clears it. Written under <see cref="SqliteWriteLock"/>.
     /// </summary>
     Task SetDwellMinutesAsync(int collectionId, int poiId, int? minutes, CancellationToken ct = default);
 
     /// <summary>
-    /// TRIP-LEGMODE-01 (Story 3.4, FR-19): sets ONE leg's travel mode by writing
-    /// <see cref="Data.Entities.PoiCollectionItem.OutgoingTravelMode"/> on the From-stop's
-    /// membership. <paramref name="mode"/> must be <c>null</c> (≡ AnyAir, the undefined /
-    /// manual-only state) or one of <see cref="Data.Entities.TravelMode.All"/>; any other
-    /// value throws <see cref="ArgumentException"/>. Written under the shared
-    /// <see cref="SqliteWriteLock"/> — this is the sole writer of a single leg's mode
-    /// (the order-reset path in <c>SetOrderAsync</c> is the only other place
-    /// <c>OutgoingTravelMode</c> is touched, TRIP-LEGMODE-01). Does NOT change the Stop
-    /// Order. No-op when the membership is absent or the mode is already the stored value.
-    /// The single per-leg-mode write shared by the UI (TripViewModel) and the MCP
-    /// <c>set_leg_travel_mode</c> tool (Story 3.6).
+    /// Sets ONE leg's travel mode by writing <see cref="Data.Entities.PoiCollectionItem.OutgoingTravelMode"/>
+    /// on the From-stop's membership. <paramref name="mode"/> must be <c>null</c> (≡ AnyAir/undefined)
+    /// or one of <see cref="Data.Entities.TravelMode.All"/>. Does NOT change Stop Order.
+    /// This is the sole writer of outgoing travel mode (barring order-reset operations).
     /// </summary>
     Task SetOutgoingTravelModeAsync(int collectionId, int fromPoiId, string? mode, CancellationToken ct = default);
 
     /// <summary>
-    /// TRIP-BULKMODE-01: bulk sibling of <see cref="SetOutgoingTravelModeAsync"/> — assigns
-    /// ONE <paramref name="mode"/> to the <c>OutgoingTravelMode</c> of EVERY leg's From-stop
-    /// of the collection's trip in a single gated transaction (no per-leg round-trip). The
-    /// From-stop set mirrors <c>TripViewModel.BuildLegs</c> / the background service's
-    /// <c>DirectionalPairs</c>: every ordered placeable stop except a distinct Finish (which
-    /// departs no leg); on a Roundtrip the last stop is included (it departs the closing leg).
-    /// When <paramref name="overwriteExisting"/> is false, only legs currently unset
-    /// (null ≡ AnyAir, or the explicit AnyAir value) are changed; legs with an explicit mode
-    /// are left untouched. <paramref name="mode"/> must be <c>null</c> (≡ AnyAir) or one of
-    /// <see cref="Data.Entities.TravelMode.All"/>; any other value throws
-    /// <see cref="ArgumentException"/>. Does NOT change Stop Order, Start, or Finish. No-op for
-    /// fewer than two placeable stops, an absent collection, or when nothing actually changes.
-    /// Shared by the UI (TripViewModel) bulk control.
+    /// Bulk assignment of travel mode: assigns ONE <paramref name="mode"/> to every leg's
+    /// From-stop in a single transaction. Covers every ordered placeable stop except a
+    /// distinct Finish (which departs no leg). When <paramref name="overwriteExisting"/> is false,
+    /// only currently-unset (null/AnyAir) legs change. <paramref name="mode"/> must be <c>null</c>
+    /// (≡ AnyAir) or one of <see cref="Data.Entities.TravelMode.All"/>.
     /// </summary>
     Task SetAllOutgoingTravelModesAsync(int collectionId, string? mode, bool overwriteExisting, CancellationToken ct = default);
 

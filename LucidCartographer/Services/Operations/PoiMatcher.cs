@@ -6,19 +6,15 @@ namespace LucidCartographer.Services.Operations;
 
 /// <summary>
 /// Stateless POI matching service. All public methods delegate to
-/// <see cref="PoiIdentity.AreSamePlace(Poi?, Poi?, double, double)"/>
-/// — the single "same real place" rule used across import, enrichment
-/// and set operations. Name similarity (Fastenshtein) plus geographic
-/// proximity (Haversine). URL is deliberately NOT part of the rule:
-/// distinct franchise branches that share a corporate URL stay
-/// distinct. Thread-safe because nothing is mutated per call.
+/// <see cref="PoiIdentity.AreSamePlace(Poi?, Poi?, double, double)"/>,
+/// which uses name similarity (Fastenshtein) plus geographic proximity (Haversine).
+/// URL is deliberately NOT part of the rule to keep distinct franchise branches separate.
+/// Thread-safe (immutable).
 /// </summary>
 public partial class PoiMatcher : IPoiMatcher
 {
-    /// <summary>Default spatial tolerance in meters for proximity matching.</summary>
     public const double DefaultToleranceMeters = IPoiMatcher.DefaultToleranceMeters;
 
-    /// <summary>Default threshold for name similarity (0.0 - 1.0).</summary>
     public const double DefaultNameSimilarityThreshold = IPoiMatcher.DefaultNameSimilarityThreshold;
 
     /// <summary>
@@ -124,13 +120,11 @@ public partial class PoiMatcher : IPoiMatcher
     {
         ArgumentNullException.ThrowIfNull(pois);
 
-        // Filter out unlocated POIs up front — PoiIdentity excludes them
-        // anyway, and the latitude pre-filter below needs .Value.
+        // Filter out unlocated POIs; latitude pre-filter below requires non-null coordinates.
         pois = pois.Where(p => p is { Latitude: not null, Longitude: not null }).ToList();
 
         var n = pois.Count;
-        // Pre-extract each POI's stable Google place ids once so the O(N^2)
-        // pairwise loop below doesn't re-parse URLs.
+        // Pre-extract place IDs once to avoid re-parsing in O(N^2) loop.
         var ftids = new string?[n];
         var mids = new string?[n];
         for (var i = 0; i < n; i++)
@@ -166,8 +160,7 @@ public partial class PoiMatcher : IPoiMatcher
                     continue;
                 }
 
-                // Fast latitude pre-filter. Coords are guaranteed non-null
-                // by the Where() pass at the top of the method.
+                // Fast latitude pre-filter: rejects obviously-distant pairs without Haversine.
                 if (Math.Abs(pois[i].Latitude!.Value - pois[j].Latitude!.Value) > latThresholdDegrees)
                 {
                     continue;
@@ -226,12 +219,8 @@ public partial class PoiMatcher : IPoiMatcher
     }
 
     // ---- Name similarity & URL normalization -------------------------------
-    //
-    // NameSimilarity stays here (not in PoiIdentity) because it is a
-    // general-purpose string helper also used by the UI for fuzzy
-    // match displays. NormalizeUrl is kept for display / outbound
-    // "view on Google Maps" links; no import or dedup code calls it
-    // any more.
+    // NameSimilarity is a general-purpose string helper used by the UI.
+    // NormalizeUrl is for display / outbound "view on Google Maps" links.
 
     /// <summary>
     /// Computes name similarity between two strings using Fastenshtein
@@ -267,11 +256,7 @@ public partial class PoiMatcher : IPoiMatcher
         return 1.0 - (double)distance / maxLen;
     }
 
-    /// <summary>
-    /// Delegates to Fastenshtein. Preserves historical shorter-first
-    /// ordering and empty-string short-circuit so behaviour is
-    /// argument-order-independent.
-    /// </summary>
+    /// <summary>Computes Levenshtein distance; short-circuits on empty string.</summary>
     internal static int LevenshteinDistance(string s, string t)
     {
         if (s.Length > t.Length)
@@ -282,12 +267,7 @@ public partial class PoiMatcher : IPoiMatcher
         return s.Length == 0 ? t.Length : Fastenshtein.Levenshtein.Distance(s, t);
     }
 
-    /// <summary>
-    /// Normalizes a Google Maps URL for display / outbound-link purposes.
-    /// Handles: http vs https, www vs non-www, trailing slashes, fragment
-    /// removal, tracking parameter removal, percent-encoding normalization,
-    /// CID/ftid extraction. Pure function.
-    /// </summary>
+    /// <summary>Normalizes a Google Maps URL: protocol, www, fragments, tracking params, CID/ftid extraction.</summary>
     public static string NormalizeUrl(string url)
     {
         url = url.Trim();
@@ -348,10 +328,7 @@ public partial class PoiMatcher : IPoiMatcher
         return url;
     }
 
-    /// <summary>
-    /// Removes common tracking query parameters (utm_*, hl, authuser,
-    /// entry) from a URL.
-    /// </summary>
+    /// <summary>Removes tracking query parameters (utm_*, hl, authuser, entry) from a URL.</summary>
     private static string RemoveTrackingParams(string url)
     {
         var qIdx = url.IndexOf('?');

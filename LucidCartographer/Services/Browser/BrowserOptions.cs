@@ -1,27 +1,22 @@
 namespace LucidCartographer.Services.Browser;
 
 /// <summary>
-/// Configuration for the single shared headful Chromium session that performs
-/// all Google-account-dependent automation (Saved-List export, "Fetch My Lists",
-/// authenticated shared-list scrape). Bound from the <c>Browser</c> config section.
+/// Configuration for the shared headful Chromium session (Saved-List export,
+/// authenticated scrape, Google sign-in). Bound from the <c>Browser</c> config section.
 /// </summary>
 public sealed class BrowserOptions
 {
     public const string SectionName = "Browser";
 
     /// <summary>
-    /// Persistent Chrome profile directory. Resolution precedence (applied in
-    /// <see cref="BrowserSessionManager"/>): <c>CHROME_PROFILE_PATH</c> env var →
-    /// this value → <c>AppContext.BaseDirectory/data/chrome-profile</c> (dev default).
-    /// In Docker this points at the persisted <c>/data</c> volume so the Google
-    /// sign-in survives container restarts.
+    /// Persistent Chrome profile directory (env var → config → default dev path).
+    /// In Docker, points to the persisted <c>/data</c> volume for sign-in persistence.
     /// </summary>
     public string? ProfilePath { get; set; }
 
     /// <summary>
-    /// Launch Chromium headless. Defaults to <c>false</c> — the session must be
-    /// headful so the user can sign in via the noVNC remote view (and so it
-    /// renders into the Xvfb display on the server).
+    /// Launch Chromium headless. Defaults to false — session must be headful
+    /// for user sign-in via noVNC and Xvfb rendering.
     /// </summary>
     public bool Headless { get; set; }
 
@@ -30,15 +25,14 @@ public sealed class BrowserOptions
 }
 
 /// <summary>
-/// Settings for the embedded noVNC remote view that lets the user drive the
-/// server-side headful Chromium (for the Google login) from their own browser.
+/// Settings for the embedded noVNC remote view of the server-side headful
+/// Chromium session (allows user to sign in via their browser).
 /// </summary>
 public sealed class RemoteViewOptions
 {
     /// <summary>
-    /// When true, the app proxies noVNC at <c>/google-session/novnc</c> and the
-    /// Google session page shows the embedded view. Enabled in Docker (where
-    /// Xvfb + x11vnc + websockify run); off in local dev (a real window appears).
+    /// Proxy noVNC at <c>/google-session/novnc</c> for embedded remote view.
+    /// Enabled in Docker; disabled in local dev (real window appears).
     /// </summary>
     public bool Enabled { get; set; }
 

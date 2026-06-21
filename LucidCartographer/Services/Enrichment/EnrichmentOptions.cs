@@ -4,7 +4,7 @@ namespace LucidCartographer.Services.Enrichment;
 /// Tunables for <see cref="PoiEnrichmentBackgroundService"/>. Bound
 /// from the <c>Enrichment</c> section of <c>appsettings.json</c> so
 /// the service's parallelism and batching can change without a
-/// recompile. Defaults here match what was previously hard-coded.
+/// recompile.
 /// </summary>
 public sealed class EnrichmentOptions
 {
@@ -41,9 +41,7 @@ public sealed class EnrichmentOptions
     public int IdlePollSeconds { get; set; } = 30;
 
     /// <summary>
-    /// Maximum consecutive enrichment failures allowed before a row is
-    /// paused from automatic retries until manually reset.
-    /// Default: 5.
+    /// Maximum consecutive enrichment failures before pausing a row from automatic retries.
     /// </summary>
     public int MaxRetries { get; set; } = 5;
 

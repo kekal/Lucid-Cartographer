@@ -12,14 +12,10 @@ public class ImportOrchestrator(
     : IImportOrchestrator
 {
     /// <summary>
-    /// IE-25: Default color constant shared with the interface default parameter.
-    /// When changing this value, update the interface default parameter as well.
+    /// Default color constant; keep in sync with interface default parameter.
     /// </summary>
     internal const string DefaultColor = "#005bbf";
 
-    /// <summary>
-    /// IE-08: Replaced GetImporter on interface with CanImport. This method is now internal-only.
-    /// </summary>
     private IFileImporter? GetImporter(string fileName)
     {
         var ext = Path.GetExtension(fileName).ToLowerInvariant();
@@ -59,11 +55,8 @@ public class ImportOrchestrator(
 
     /// <summary>
     /// Shared persistence entry point for both file imports and Google scrapes.
-    /// Drops rows with out-of-range coordinates, short-circuits if nothing valid
-    /// survives, then delegates the heavy lifting to <see cref="ImportPersister"/>.
-    /// IE-12: Does not create an empty collection when parsing yields 0 valid POIs.
-    /// IE-13 / IE-18: URL normalization and invariant-culture comparisons live in
-    /// <see cref="ImportPersister"/>.
+    /// Drops out-of-range coordinates; does not create an empty collection if no valid POIs remain.
+    /// URL normalization and invariant-culture comparisons are in <see cref="ImportPersister"/>.
     /// </summary>
     private async Task<ImportResult> PersistImportedPoisAsync(
         IReadOnlyList<ImportedPoi> parsed,
@@ -79,10 +72,7 @@ public class ImportOrchestrator(
             return EmptyImportResult(parsed.Count, collectionName);
         }
 
-        // KML files can group Placemarks under <Folder> elements. When the
-        // importer surfaces FolderName on any row, split into one collection
-        // per folder so the user gets the same structure they see in My Maps.
-        // Rows with no FolderName fall back to the user-provided collection name.
+        // KML folders are preserved as separate collections; rows without a folder fall back to the user-provided name.
         var groups = validParsed
             .GroupBy(p => string.IsNullOrWhiteSpace(p.FolderName) ? collectionName : p.FolderName!)
             .ToList();
@@ -106,21 +96,13 @@ public class ImportOrchestrator(
             lastResult = groupResult;
         }
 
-        // Enqueue atomicity: each newly-created row is born with
-        // EnrichmentRequested=true (set in ImportPersister.BuildPoi) and committed
-        // in the SAME SaveChanges that inserts it, so a group that commits is
-        // always queued — even if a LATER group throws (SQLite-busy, constraint,
-        // cancellation between groups). Dedup-linked existing rows are never
-        // rebuilt, so they are correctly left un-enqueued. All that remains here
-        // is to wake the worker once instead of waiting for the next poll tick.
+        // Newly-created POIs are queued for enrichment atomically with commit; signal worker once to avoid poll latency.
         if (anyAdded)
         {
             enrichmentTrigger.Signal();
         }
 
-        // For multi-folder imports return an aggregate; the per-collection
-        // breakdown is in the logs. Single-group case keeps the original
-        // collection id so the UI can navigate to it.
+        // Single-group case returns the collection ID for UI navigation; multi-folder case returns an aggregate.
         if (groups.Count == 1 && lastResult is not null)
         {
             return lastResult;
@@ -140,9 +122,7 @@ public class ImportOrchestrator(
 
     private static List<ImportedPoi> FilterValidCoordinates(IReadOnlyList<ImportedPoi> parsed)
     {
-        // NULL coords are allowed through — enrichment will fill them in
-        // later. A half-null pair (one set, the other missing) is
-        // rejected. Non-null coords must be in range.
+        // NULL coords allowed (enrichment fills them); half-null pairs and out-of-range rejected.
         return parsed
             .Where(p => (p.Latitude == null && p.Longitude == null)
                         || p is { Latitude: >= -90 and <= 90, Longitude: >= -180 and <= 180 })

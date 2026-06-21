@@ -12,15 +12,12 @@ public static class AuthEndpoints
 {
     public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        // Login endpoint with rate limiting + CSRF validation. Mapped at
-        // /auth/login, NOT /login: the Login.razor page is routable at /login,
-        // and MapRazorComponents registers a POST handler for routable pages,
-        // so a POST /login would match two endpoints (AmbiguousMatchException).
+        // Mapped at /auth/login (not /login) to avoid conflicting with routable
+        // Login.razor page, which would cause AmbiguousMatchException.
         endpoints.MapPost("/auth/login", async context =>
         {
-            // ARCH-CRIT-03: Validate antiforgery token on login POST.
-            // Failure surfaces as 400 (not a redirect) so anomaly-detection
-            // tooling can distinguish CSRF abuse from typo'd passwords.
+            // Antiforgery validation surfaces as 400 (not redirect) to let
+            // anomaly detection distinguish CSRF abuse from typo'd passwords.
             var antiforgery = context.RequestServices.GetRequiredService<IAntiforgery>();
             try
             {
@@ -77,8 +74,7 @@ public static class AuthEndpoints
                         ExpiresUtc = DateTimeOffset.UtcNow.AddDays(30)
                     });
 
-                // Only honour local return URLs (prevents open-redirect). Used by the
-                // OAuth /connect/authorize flow to resume after an interactive login.
+                // Only local URLs to prevent open-redirect; used by OAuth /connect/authorize.
                 var redirectTo = IsLocalUrl(returnUrl) ? returnUrl : "/";
                 context.Response.Redirect(redirectTo);
             }
@@ -88,10 +84,8 @@ public static class AuthEndpoints
             }
         }).RequireRateLimiting("login");
 
-        // Logout endpoint. Revoke + sign-out are independent: a failed
-        // server-side revoke must NOT leave the client cookie valid, so
-        // SignOutAsync runs unconditionally. Worst case: stale Sessions
-        // row hangs around until the vacuum sweep cleans it up.
+        // Revoke and sign-out are independent: failed revoke must not leave
+        // client cookie valid, so SignOutAsync runs unconditionally.
         endpoints.MapGet("/logout", async context =>
         {
             var sessionToken = context.User.FindFirstValue("session_token");

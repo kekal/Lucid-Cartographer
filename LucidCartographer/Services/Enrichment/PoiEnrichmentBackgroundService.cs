@@ -41,9 +41,7 @@ public class PoiEnrichmentBackgroundService : BackgroundService
     private readonly EnrichmentTrigger _trigger;
     private readonly DedupTrigger _dedupTrigger;
     private readonly SqliteWriteLock _writeLock;
-    // TRIP-INVALIDATE-01 (Story 2.4): the invalidation service is Scoped, so this
-    // singleton hosted worker resolves it per-write from a fresh scope rather than
-    // capturing it in the constructor.
+    // Invalidation service is Scoped, so resolve per-write from a fresh scope.
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<PoiEnrichmentBackgroundService> _logger;
     private readonly ResiliencePipeline _pipeline;
@@ -51,11 +49,7 @@ public class PoiEnrichmentBackgroundService : BackgroundService
     private readonly TimeSpan _idlePollInterval;
     private readonly TimeSpan _baseRetryDelay;
     private readonly SemaphoreSlim _pageConcurrencyLock;
-    // Tracks POI ids currently being enriched across all workers in this
-    // process. Without it, two workers can pick the same id when their
-    // batch queries overlap, leading to lost updates and dedup deletions
-    // racing each other. Entry held for the lifetime of the worker's
-    // page+persist phase.
+    // Prevents two workers from claiming the same POI in overlapping batch queries.
     private readonly ConcurrentDictionary<int, byte> _inFlight = new();
 
     public PoiEnrichmentBackgroundService(
@@ -93,9 +87,6 @@ public class PoiEnrichmentBackgroundService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Small startup delay so the app has a chance to finish booting
-        // (migrations, static file mapping, …) before we hit the DB and
-        // — on a cold machine — install Chromium.
         try { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); }
         catch { return; }
 
@@ -125,10 +116,7 @@ public class PoiEnrichmentBackgroundService : BackgroundService
             UserAgent = _options.UserAgent
         });
 
-        // In headed mode Chromium closes the window when its last page goes
-        // away. Workers open and close pages per POI, so between batches the
-        // window would flash closed and re-open. An always-open anchor page
-        // (about:blank) keeps the window count >= 1 for the whole session.
+        // Anchor page prevents window from closing in headed mode when workers open/close tabs.
         if (_options.Headed)
         {
             var anchorPage = await context.NewPageAsync();
@@ -194,11 +182,6 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         var processed = 0;
         var loggedQueueDepth = false;
 
-        // Pull a batch of pending IDs, fan them out across
-        // `_options.Concurrency` parallel Playwright tabs (all sharing
-        // the same BrowserContext), then loop until the queue drains.
-        // Each worker owns its own DbContext because EF Core contexts
-        // are not thread-safe.
         while (!ct.IsCancellationRequested)
         {
             List<int> batchIds;
@@ -215,9 +198,6 @@ public class PoiEnrichmentBackgroundService : BackgroundService
                 batchIds = candidates
                     .Where(p => IsRetryDue(p.EnrichmentFailureCount, p.LastEnrichmentAttemptAt, now))
                     .Select(p => p.Id)
-                    // Skip ids another worker is already enriching this
-                    // batch — the in-flight entry stays until the persist
-                    // task finishes, so we won't double-claim a row.
                     .Where(id => !_inFlight.ContainsKey(id))
                     .Take(_options.BatchSize)
                     .ToList();
@@ -236,11 +216,6 @@ public class PoiEnrichmentBackgroundService : BackgroundService
 
             var metricsBefore = EnrichmentMetrics.Snapshot();
 
-            // Per-worker tab pool. Each worker owns a long-lived IPage and
-            // pulls IDs off a channel until drained, so we pay the tab
-            // open/close cost once per batch instead of per POI. GotoAsync
-            // does a cross-document navigation, which tears down the previous
-            // document — no state leaks between rows.
             var workerCount = Math.Max(1, _options.Concurrency);
             var queue = Channel.CreateUnbounded<int>(new UnboundedChannelOptions
             {
@@ -271,9 +246,6 @@ public class PoiEnrichmentBackgroundService : BackgroundService
 
             processed += batchIds.Count;
 
-            // One progress refresh per batch is enough; the per-POI
-            // updates inside EnrichOneAsync already tick the counter
-            // down as workers complete.
             await using (var progressDb = await _factory.CreateDbContextAsync(ct))
             {
                 var newRemaining = await progressDb.Pois.CountAsync(
@@ -290,11 +262,6 @@ public class PoiEnrichmentBackgroundService : BackgroundService
     {
         await _pageConcurrencyLock.WaitAsync(ct);
         IPage? page = null;
-        // Persist phase (image download, DB writes, dedup) doesn't need the
-        // tab. Fire-and-forget into this list so the worker immediately
-        // starts the next POI's GotoAsync while the previous POI's
-        // housekeeping runs in parallel. We await the list before the
-        // worker closes its tab so nothing is lost on shutdown.
         var persistTasks = new List<(int PoiId, Task Task)>();
         try
         {
@@ -303,9 +270,6 @@ public class PoiEnrichmentBackgroundService : BackgroundService
             {
                 if (!_inFlight.TryAdd(poiId, 0))
                 {
-                    // Another worker grabbed this id already (shouldn't
-                    // happen given the dispatch-side filter, but cheap
-                    // defensive guard).
                     continue;
                 }
 
@@ -328,9 +292,6 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         }
         finally
         {
-            // Await each persist task individually so a failure on row N
-            // doesn't hide failures on rows >N. Task.WhenAll only rethrows
-            // the first faulted task; we want every POI's outcome logged.
             foreach (var (poiId, task) in persistTasks)
             {
                 try { await task; }
@@ -364,10 +325,6 @@ public class PoiEnrichmentBackgroundService : BackgroundService
     /// </summary>
     private async Task<Task> EnrichOneAsync(IBrowserContext context, IPage page, int poiId, CancellationToken ct)
     {
-        // Snapshot the row's pre-enrichment state — we only need a few
-        // fields for the page-phase entry-point decision plus the failure
-        // counter for the early-out check. The persist phase reloads its
-        // own copy from a fresh DbContext.
         Poi snapshot;
         await using (var db = await _factory.CreateDbContextAsync(ct))
         {
@@ -382,29 +339,8 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         EnrichedDetails details;
         try
         {
-
-            // Pick entry point based on what the scraper captured:
-            //   - if GoogleMapsUrl already contains /maps/place/, open it directly;
-            //   - otherwise run a Google Maps name search (scraper left
-            //     coords NULL because the list card was anchor-less).
-            // "enrichment" Polly pipeline: retry (3 attempts,
-            // jittered exponential backoff) + 2-minute per-attempt
-            // timeout. Transient Playwright failures are retried
-            // in-place; terminal failures leave IsEnriched=false so
-            // the next idle poll cycle re-picks the row.
             details = await _pipeline.ExecuteAsync(async innerCt =>
             {
-                // Any URL the row has — canonical /maps/place/, a /maps/search/
-                // result page, or a maps.app.goo.gl shortlink — gets navigated
-                // directly. Playwright follows redirects and the place-URL wait
-                // loop in EnrichCoreAsync handles the post-redirect hydration.
-                // Only fall back to a name search when we have no URL at all.
-                // Only navigate GoogleMapsUrl if it actually points at Google
-                // Maps. Older imports (and a now-fixed GeoJSON branch) used
-                // to drop a venue's own website here, which sent the enricher
-                // to e.g. termymaltanskie.com.pl — no place selectors, all
-                // fields empty, fallback modal. Treat anything else as missing
-                // and route through the coord-anchored name search.
                 if (!string.IsNullOrEmpty(snapshot.GoogleMapsUrl) && PoiUrlHelper.IsGoogleMapsUrl(snapshot.GoogleMapsUrl!))
                 {
                     return await PoiDetailEnricher.EnrichAsync(page, snapshot.GoogleMapsUrl!, innerCt, _logger);
@@ -414,13 +350,9 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         }
         catch (Exception ex)
         {
-            // Hard failure (exception during page work). The browser is now
-            // free to move on; persist the failure counter in the background.
             return PersistFailureAsync(poiId, ex, ct);
         }
 
-        // Page is done — return a Task for the persist phase so the worker
-        // can immediately start the next POI's GotoAsync.
         return PersistSuccessAsync(context, poiId, details, ct);
     }
 
@@ -451,11 +383,7 @@ public class PoiEnrichmentBackgroundService : BackgroundService
                 poi.Phone = details.Phone;
             }
 
-            // Enrichment's !3d!4d coords are always more authoritative
-            // than whatever we had.
-            // TRIP-INVALIDATE-01 (Story 2.4): capture the pre-write coords so cached
-            // legs are invalidated only when enrichment ACTUALLY moves the point
-            // (the common "an unplaceable stop got coordinates" / "pin moved" path).
+            // Capture pre-write coords to invalidate cached legs only if enrichment actually moves the point.
             var oldLatitude = poi.Latitude;
             var oldLongitude = poi.Longitude;
             if (details is { Latitude: not null, Longitude: not null })
@@ -474,14 +402,8 @@ public class PoiEnrichmentBackgroundService : BackgroundService
 
             await BackfillImageAsync(context, db, poi, details.ImageUrl, ct);
 
-            // Success is decided by what THIS pass scraped (details.*), not the
-            // merged poi.*: a POI created via MCP/import may already have an
-            // address, and counting that would mask a failed lookup and skip the
-            // manual-URL fallback.
             var hasUsefulData = details.ResolvedPlace;
             poi.LastEnrichmentAttemptAt = DateTime.UtcNow;
-            // Terminal outcome — clears EnrichmentRequested either way. Soft failure
-            // (no place data) flips NeedsManualUrl so the UI prompts for a URL.
             EnrichmentStateMachine.ApplyOutcome(
                 poi,
                 hasUsefulData ? EnrichmentOutcome.Resolved : EnrichmentOutcome.SoftFailure,
@@ -497,9 +419,7 @@ public class PoiEnrichmentBackgroundService : BackgroundService
 
             await SaveChangesWithWriteLockAsync(db, ct);
 
-            // TRIP-INVALIDATE-01 (Story 2.4): after the coord write lands, drop the
-            // POI's stale non-Manual cached legs so the compute service refills them.
-            // A newly-placeable stop has no prior rows ⇒ this is a harmless no-op.
+            // Invalidate stale cached legs when coords actually change.
             if (coordsChanged)
             {
                 await using var scope = _scopeFactory.CreateAsyncScope();
@@ -523,13 +443,7 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
         catch (DbUpdateConcurrencyException)
         {
-            // The concurrency token fired: a concurrent writer changed or
-            // deleted this row between our load and our commit. The likeliest
-            // cause is the dedup pass folding this just-scraped row into an
-            // older canonical and hard-deleting it — in which case this row is
-            // gone for good and the misleading "will retry next cycle" never
-            // happens (nothing re-enqueues a deleted row). Re-enqueue the
-            // surviving canonical so the place's fresh data is re-fetched.
+            // Dedup may have deleted this row mid-enrichment; re-enqueue the surviving canonical.
             await ReenqueueSurvivingCanonicalAsync(poiId, details, ct);
         }
         catch (Exception ex)
@@ -540,15 +454,8 @@ public class PoiEnrichmentBackgroundService : BackgroundService
     }
 
     /// <summary>
-    /// Recovery for the dedup-deletes-mid-enrichment race (a
-    /// <see cref="DbUpdateConcurrencyException"/> on the success commit): the
-    /// just-scraped row was folded into an older canonical and removed, so its
-    /// fresh scrape would otherwise be lost. On a fresh context, find the
-    /// surviving same-place row (by stable place id from the scraped URL, else
-    /// by a coordinate bounding box) and set
-    /// <see cref="Poi.EnrichmentRequested"/> so the worker re-fetches it next
-    /// cycle. If the row was changed rather than deleted (still present), this
-    /// is a no-op beyond a Warning — the next pass picks up the live state.
+    /// When dedup deletes a POI mid-enrichment, finds the surviving canonical by place ID or
+    /// bounding box and re-enqueues it so the fresh scrape isn't lost.
     /// </summary>
     private async Task ReenqueueSurvivingCanonicalAsync(int poiId, EnrichedDetails details, CancellationToken ct)
     {
@@ -556,8 +463,6 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         {
             await using var db = await _factory.CreateDbContextAsync(ct);
 
-            // Still present? Then it was updated, not deleted by dedup — nothing
-            // is lost; let the next cycle observe the live state.
             if (await db.Pois.AsNoTracking().AnyAsync(p => p.Id == poiId, ct))
             {
                 _logger.LogWarning(
@@ -569,9 +474,6 @@ public class PoiEnrichmentBackgroundService : BackgroundService
             var ftid = PoiUrlHelper.ExtractFeatureId(details.GoogleMapsUrl);
             Poi? survivor = null;
 
-            // Stable Google place id is the most reliable hand-off: the dedup
-            // backfill copies GoogleMapsUrl onto the canonical, so the survivor
-            // carries the same feature id we just scraped.
             if (ftid is not null)
             {
                 var idCandidates = await db.Pois
@@ -580,8 +482,7 @@ public class PoiEnrichmentBackgroundService : BackgroundService
                 survivor = idCandidates.Find(p => PoiUrlHelper.ExtractFeatureId(p.GoogleMapsUrl) == ftid);
             }
 
-            // Fall back to a coordinate bounding box around the scraped coords —
-            // mirrors the dedup candidate pre-filter.
+            // Fall back to coordinate bounding box.
             if (survivor is null && details is { Latitude: not null, Longitude: not null })
             {
                 const double box = 0.002;
@@ -693,10 +594,6 @@ public class PoiEnrichmentBackgroundService : BackgroundService
         string? imageUrl,
         CancellationToken ct)
     {
-        // No usable new photo this pass → keep whatever the POI already has.
-        // A failed (or photo-less) re-enrichment must never strip an existing
-        // photo; the only way an image leaves the row is being overwritten by a
-        // freshly-downloaded one below.
         if (string.IsNullOrWhiteSpace(imageUrl) || !IsLikelyPlacePhotoUrl(imageUrl))
         {
             return;
@@ -724,12 +621,6 @@ public class PoiEnrichmentBackgroundService : BackgroundService
                     ? ctHeader
                     : "image/jpeg";
 
-                // Swap in the new photo only now that the bytes are in hand.
-                // Update the existing row in place (PoiId is the PK, so a
-                // remove+add would collide on the key); the old bytes survive
-                // until this same SaveChanges commits the new ones, so the
-                // replacement is atomic and a download failure leaves the
-                // previous photo untouched.
                 if (existingImage is not null)
                 {
                     existingImage.Data = bytes;
@@ -755,14 +646,11 @@ public class PoiEnrichmentBackgroundService : BackgroundService
                 _logger.LogDebug(ex, "Image download failed for Poi {PoiId} from {ImageUrl}", poi.Id, candidateUrl);
             }
         }
-        // Every candidate failed → leave the existing photo (and ImageUrl) intact.
     }
 
     private static IEnumerable<string> BuildImageFetchCandidates(string imageUrl)
     {
-        // Google Maps' DOM <img src> is a tiny thumbnail (e.g. =w86-h86-k-no).
-        // Swap the size suffix to ask the CDN for the full-size photo first;
-        // fall back to the original only if the upscaled URL 404s.
+        // Upscale Google Maps thumbnail (e.g. =w86-h86-k-no) to full size first; fall back to original if needed.
         var equalsIdx = imageUrl.LastIndexOf('=');
         if (equalsIdx > 0)
         {

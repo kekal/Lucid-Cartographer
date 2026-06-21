@@ -31,11 +31,9 @@ internal sealed class ImportPersister(
 {
     private const string GoogleScrapeSourceType = "google_maps_scrape";
 
-    // State built up during RunAsync.
     private PoiCollection _collection = null!;
     private HashSet<int> _existingLinks = [];
-    // Lower-cased name → existing rows with that name. Built once per
-    // import to avoid N+1 lookups inside ProcessItemsAsync.
+    // Maps lowercase names to existing rows — built once to avoid N+1 per-row lookups.
     private Dictionary<string, List<Poi>> _existingByName = new(StringComparer.Ordinal);
 
     private readonly List<NewPoiEntry> _newPois = [];
@@ -88,12 +86,8 @@ internal sealed class ImportPersister(
     }
 
     /// <summary>
-    /// One-shot lookup for every existing row whose name appears in the
-    /// imported batch. Avoids the prior O(N) per-row query — a 1000-row
-    /// import now does one IN-list lookup instead of 1000 round trips.
-    /// SQL-side comparison uses uninverted name; the in-memory match in
-    /// <see cref="FindExistingMatchAsync"/> still calls
-    /// <see cref="PoiIdentity.AreSamePlace"/> for the final say.
+    /// Fetches all existing rows matching any imported name in a single IN-list query,
+    /// then groups them for fast in-memory lookup by FindExistingMatchAsync.
     /// </summary>
     private async Task<Dictionary<string, List<Poi>>> LoadExistingByNameAsync()
     {
@@ -179,10 +173,7 @@ internal sealed class ImportPersister(
 
     private async Task HandleDuplicateAsync(Poi existing, ImportedPoi imported)
     {
-        // In-batch duplicate (same name+coords as a Poi we queued earlier
-        // this cycle). Its Id is still 0 — the first occurrence's link is
-        // created by the newPois pass after SaveChanges, so we just bump
-        // the skipped counter and bail.
+        // In-batch duplicates have Id=0; their collection link is created after SaveChanges.
         if (existing.Id == 0)
         {
             _skipped++;
@@ -385,19 +376,9 @@ internal sealed class ImportPersister(
             Website = imported.Website,
             Phone = imported.Phone,
             ImageUrl = imported.ImageUrl,
-            // PoiImage is attached in a second pass after SaveChanges:
-            // EF Core's relationship fixup on a one-to-one with a
-            // store-generated principal key fails if we set it here
-            // ("PoiImage.PoiId unknown" on save).
+            // Image rows attached in a separate pass after Ids are generated.
             AddedDate = DateTime.UtcNow,
-            // Not yet enriched, but enqueued atomically: BuildPoi runs only for
-            // genuinely new rows (dedup-linked existing rows never flow through
-            // here), so setting EnrichmentRequested at construction commits the
-            // enqueue flag in the SAME SaveChanges that creates the row. This
-            // closes the window where a committed import row could be left with
-            // EnrichmentRequested=false — invisible to the worker forever — if a
-            // later, separate flip-and-save step threw. The worker keys strictly
-            // off EnrichmentRequested (EnrichmentStateMachine.QueuePredicate).
+            // EnrichmentRequested set here ensures atomic enqueue in same SaveChanges as row creation.
             IsEnriched = false,
             EnrichmentRequested = true
         };

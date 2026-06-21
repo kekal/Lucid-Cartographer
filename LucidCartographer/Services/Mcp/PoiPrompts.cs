@@ -5,9 +5,7 @@ using ModelContextProtocol.Server;
 namespace LucidCartographer.Services.Mcp;
 
 /// <summary>
-/// Reusable MCP prompt templates for common Lucid Cartographer workflows.
-/// Clients fetch these via prompts/list and prompts/get; the returned message
-/// seeds a conversation that then drives the MCP tools.
+/// Reusable MCP prompt templates; clients fetch via prompts/list and prompts/get to seed conversations.
 /// </summary>
 [McpServerPromptType]
 public static class PoiPrompts

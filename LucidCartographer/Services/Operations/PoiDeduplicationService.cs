@@ -48,10 +48,8 @@ public sealed class PoiDeduplicationService(
     {
         await using var db = await factory.CreateDbContextAsync(ct);
 
-        // Tracked load: MergePairAsync mutates the canonical and removes the
-        // duplicates, so the group members must be the same instances the
-        // context tracks. FindDuplicateGroups itself filters out rows without
-        // coordinates and decides identity by place id / name+proximity.
+        // Must load into context as tracked entities so MergePairAsync mutations
+        // affect the context; FindDuplicateGroups filters out rows without coordinates.
         var all = await db.Pois.ToListAsync(ct);
         var groups = matcher.FindDuplicateGroups(all, cancellationToken: ct);
         if (groups.Count == 0)
@@ -96,10 +94,7 @@ public sealed class PoiDeduplicationService(
             {
                 ct.ThrowIfCancellationRequested();
 
-                // First canonical (lowest Id, since canonicals is Id-ascending)
-                // that is the same place as poi. IsMatch checks place id first
-                // (equal ftid wins regardless of coord drift, so legitimately-
-                // drifted same-place rows still merge), then name+proximity.
+                // Lowest-Id canonical matching this poi (place id takes precedence over proximity).
                 Poi? target = null;
                 foreach (var canonical in canonicals)
                 {
@@ -112,11 +107,7 @@ public sealed class PoiDeduplicationService(
 
                 if (target is null)
                 {
-                    // poi is a transitive-only bridge relative to every existing
-                    // canonical. Start a new sub-cluster rather than deleting it:
-                    // a later sibling that matches poi (but not the primary
-                    // canonical) now collapses INTO poi, while a truly lone
-                    // far-apart row simply survives as a singleton canonical.
+                    // Transitive-only bridge: start a sub-cluster so later rows matching this one still merge.
                     if (canonicals.Count > 0)
                     {
                         logger.LogWarning(
@@ -136,11 +127,7 @@ public sealed class PoiDeduplicationService(
                 }
                 catch (DbUpdateException ex)
                 {
-                    // A concurrent enrichment write changed one of these rows
-                    // between our load and our commit (the Version token caught
-                    // it). The context is now in an indeterminate state, so we
-                    // abort this pass and let the next trigger (drain signal or
-                    // hourly tick) start fresh — deduplication is idempotent.
+                    // Concurrent enrichment write detected by Version token; abort and retry next pass (idempotent).
                     logger.LogWarning(ex,
                         "Deduplication aborted mid-pass (concurrent write to Poi {Duplicate} or {Canonical}); " +
                         "merged {Pois} so far, will retry on next pass",

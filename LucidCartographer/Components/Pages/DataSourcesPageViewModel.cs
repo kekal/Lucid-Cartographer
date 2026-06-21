@@ -30,8 +30,7 @@ public sealed class DataSourcesPageViewModel(
     private readonly CancellationTokenSource _cts = new();
     private IDisposable? _statusSubscription;
     private IDisposable? _exportStatusSubscription;
-    // True once we've seen a Queued/Running export this session — lets us ignore a
-    // stale terminal status the BehaviorSubject replays to a freshly loaded page.
+    // Ignores stale terminal status replayed by BehaviorSubject on fresh page load.
     private bool _exportObservedActive;
 
     public event Action? StateChanged;
@@ -79,10 +78,7 @@ public sealed class DataSourcesPageViewModel(
     // Export indicator (per-collection) — the KML "Export to My Maps" action.
     public int? ExportingId { get; private set; }
 
-    // Google Saved-List export (background job). ExportingCollectionId drives the
-    // per-row spinner/disable (only the active collection's button), IsGoogleExporting
-    // gates the progress banner, and GoogleExportMessage streams coarse per-place
-    // progress from ExportJobStatusService.
+    // Background Google Saved-List export: ExportingCollectionId drives per-row button state, IsGoogleExporting gates banner, GoogleExportMessage streams progress.
     public bool IsGoogleExporting { get; private set; }
     public int? ExportingCollectionId { get; private set; }
     public string? GoogleExportMessage { get; private set; }
@@ -124,11 +120,7 @@ public sealed class DataSourcesPageViewModel(
     {
         await LoadCollectionsAsync();
 
-        // Subscribe to background-import lifecycle events. BehaviorSubject
-        // replays the latest value on subscribe, so we pick up a job that
-        // was enqueued on another circuit / by an earlier visit and is
-        // still running. This is the whole point of the Coravel refactor:
-        // the user can navigate away and come back and still see status.
+        // BehaviorSubject replays latest value on subscribe, preserving job state across circuit visits.
         _statusSubscription = importJobStatus.Changes.Subscribe(OnImportJobStatusChanged);
         _exportStatusSubscription = exportJobStatus.Changes.Subscribe(OnExportJobStatusChanged);
     }
@@ -147,9 +139,7 @@ public sealed class DataSourcesPageViewModel(
             case ExportJobState.Completed:
                 IsGoogleExporting = false;
                 ExportingCollectionId = null;
-                // Ignore a terminal status replayed by the BehaviorSubject on a
-                // fresh page (we never observed this job run) — otherwise every
-                // revisit triggers a spurious reload + a stale "export done" banner.
+                // Skip stale replay on fresh page load if this job wasn't observed as active.
                 if (!_exportObservedActive)
                 {
                     return;
@@ -174,9 +164,7 @@ public sealed class DataSourcesPageViewModel(
 
     private void OnImportJobStatusChanged(ImportJobStatus status)
     {
-        // The Rx callback is invoked off the Blazor circuit. We mutate state
-        // synchronously and signal the view via StateChanged; the view
-        // marshals to InvokeAsync(StateHasChanged).
+        // Rx callback is off-circuit; state mutation signals view via StateChanged.
         switch (status.State)
         {
             case ImportJobState.Queued:
@@ -210,11 +198,7 @@ public sealed class DataSourcesPageViewModel(
         Notify();
     }
 
-    // The Rx callback that schedules this is synchronous (Action<T>),
-    // so the only way to surface errors is to log + signal them here.
-    // Without this wrapper, a reload failure would only reach the
-    // global UnobservedTaskException handler when the GC finalizes
-    // the discarded Task — far too late to be useful.
+    // Synchronous Rx callback cannot propagate errors; this wrapper logs and signals failures.
     private async Task ReloadAfterCompletionWithLoggingAsync()
     {
         try
@@ -304,10 +288,7 @@ public sealed class DataSourcesPageViewModel(
         {
             const long maxUploadSizeBytes = 10 * 1024 * 1024; // 10MB max
 
-            // The browser-side stream only lives for the duration of this
-            // SignalR invocation, so we drop the bytes onto disk before
-            // enqueuing. The invocable owns the temp file afterwards and
-            // deletes it once the job completes (success OR failure).
+            // Browser stream only lives for this invocation; write to disk before enqueue. Background job owns and cleans up temp file.
             var tempPath = Path.Combine(Path.GetTempPath(),
                 $"lucid-import-{Guid.NewGuid():N}{Path.GetExtension(file.Name)}");
             await using (var tempStream = File.Create(tempPath))
@@ -324,8 +305,6 @@ public sealed class DataSourcesPageViewModel(
                 Color = SelectedColor
             });
             CollectionName = string.Empty;
-            // IsImporting / QueuedMessage are driven by the status
-            // subscription from here on; leave them alone.
         }
         catch (Exception ex)
         {
@@ -341,9 +320,7 @@ public sealed class DataSourcesPageViewModel(
             return;
         }
 
-        // The whole scrape-then-persist pipeline now runs inside the
-        // background job, so the user can navigate away during the 20–40s
-        // scrape without killing the circuit.
+        // Background job allows navigation away during scrape without killing circuit.
         ImportResult = null;
         ImportError = null;
 
@@ -454,8 +431,7 @@ public sealed class DataSourcesPageViewModel(
 
         try
         {
-            // Resolve short URLs (maps.app.goo.gl/...) to full Google Maps URLs
-            // so we can extract place name and coordinates immediately.
+            // Resolve short URLs to extract place name and coordinates immediately.
             if (url.Contains("goo.gl/", StringComparison.OrdinalIgnoreCase))
             {
                 try
@@ -475,17 +451,12 @@ public sealed class DataSourcesPageViewModel(
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex)
                 {
-                    // Best-effort short-URL expansion: any non-cancellation
-                    // failure just leaves the original short URL in place.
+                    // Short-URL expansion failure: use original URL as fallback.
                     logger.LogDebug(ex, "Short-URL HEAD resolution failed; using original URL");
                 }
             }
 
-            // Only accept the place marker (!3d!4d) — never trust the
-            // `/@lat,lon` viewport-center fallback for Add-POI, otherwise
-            // a map that was panned elsewhere would bind the wrong coords
-            // to the new row. Enrichment will fill coords from the detail
-            // page if the URL has no place marker.
+            // Only accept place marker (!3d!4d) — viewport-center fallback would bind wrong coords if map was panned. Enrichment fills coords if marker absent.
             var coords = PoiUrlHelper.ExtractPlaceCoordinatesFromUrl(url);
 
             // Derive a placeholder name from the URL
@@ -518,18 +489,13 @@ public sealed class DataSourcesPageViewModel(
                 Latitude = coords?.lat,
                 Longitude = coords?.lon,
                 GoogleMapsUrl = url,
-                IsEnriched = false  // enrichment service will fill details
+                IsEnriched = false
             };
 
             var created = await poiService.CreatePoiAsync(poi, AddPoiCollectionId!.Value);
 
-            // Creation is decoupled from enrichment: it does not enqueue. This
-            // "add from URL" flow is a higher-level pipeline whose whole purpose
-            // is to enrich the pasted place, so explicitly request enrichment for
-            // the new row (otherwise it would sit forever as "Pending enrichment").
+            // Creation is decoupled from enrichment; explicitly request it for the new row.
             await poiService.RequestEnrichmentAsync([created.Id], _cts.Token);
-
-            // Wake the enrichment service so it picks up the new POI immediately
             enrichmentTrigger.Signal();
 
             AddPoiSuccess = true;
@@ -570,13 +536,7 @@ public sealed class DataSourcesPageViewModel(
             var kmlExporter = exporters.First(e => e.FormatName == "KML");
             var bytes = kmlExporter.Export(pois, col.Name);
 
-            // Push the KML to the client's browser as a download. The app may
-            // run in a container, where a server-side file path (the previous
-            // approach) is meaningless to the user. The browser never exposes
-            // the saved location to JS, so we copy the file NAME to the
-            // clipboard instead — the user pastes it into the OS file picker
-            // when importing into My Maps to jump straight to it. Then open
-            // Google My Maps so they can import the just-downloaded file.
+            // Download as file; copy sanitized name to clipboard for user to paste into My Maps file picker.
             var fileName = $"{SanitizeFileName(col.Name)}.kml";
             await js.InvokeVoidAsync("LucidCartographer.downloadFile",
                 fileName, "application/vnd.google-earth.kml+xml", Convert.ToBase64String(bytes));
@@ -614,12 +574,7 @@ public sealed class DataSourcesPageViewModel(
         });
     }
 
-    /// <summary>
-    /// Strips characters that are invalid in file names (and ':' / '/' which the
-    /// browser's download attribute mishandles) so a collection name like
-    /// "4-7.06: Запад → Kalisz" yields a usable .kml download. Unicode letters
-    /// are preserved; only the unsafe punctuation is replaced with '_'.
-    /// </summary>
+    /// <summary>Sanitizes collection name for use as .kml file name, preserving Unicode.</summary>
     private static string SanitizeFileName(string name)
     {
         var invalid = Path.GetInvalidFileNameChars().Concat(['/', '\\', ':']).ToHashSet();

@@ -6,9 +6,7 @@ namespace LucidCartographer.Configuration;
 public static class PoiServicesExtensions
 {
     /// <summary>
-    /// Named HttpClient for the manual-photo downloader (create_poi / edit_poi
-    /// imageUrl). Isolated timeout / UA / response-size cap so it doesn't inherit
-    /// the default client's settings.
+    /// HttpClient for image downloads with isolated timeout, user-agent, and response-size cap.
     /// </summary>
     public const string ImageDownloadClient = "image-download";
 

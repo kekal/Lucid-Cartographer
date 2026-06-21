@@ -4,11 +4,8 @@ using NetTopologySuite.IO;
 namespace LucidCartographer.Services.Import;
 
 /// <summary>
-/// GPX importer backed by NetTopologySuite.IO.GPX. Strict spec parser:
-/// malformed XML or schema-incompatible content surfaces the library's
-/// own diagnostic via <see cref="System.Xml.XmlException"/>. Only
-/// waypoints (<c>&lt;wpt&gt;</c>) become POIs — routes and tracks are
-/// not POIs and are skipped, matching the previous behaviour.
+/// GPX importer using NetTopologySuite.IO.GPX. Converts only waypoints to POIs;
+/// routes and tracks are skipped. Strict XML validation via <see cref="System.Xml.XmlException"/>.
 /// </summary>
 public class GpxImporter(ILogger<GpxImporter> logger) : IFileImporter
 {
@@ -36,15 +33,12 @@ public class GpxImporter(ILogger<GpxImporter> logger) : IFileImporter
             var lat = (double)wpt.Latitude;
             var lon = (double)wpt.Longitude;
 
-            // IE-24: coord-based fallback name (consistent with CsvImporter).
+            // Fallback to coordinate-based name if no explicit name is provided.
             var name = string.IsNullOrWhiteSpace(wpt.Name)
                 ? $"Point ({lat:F4}, {lon:F4})"
                 : wpt.Name.Trim();
 
-            // IE-20: only assign to GoogleMapsUrl if the link is actually a
-            // Google Maps URL. GPX <link> can point anywhere; stuffing
-            // arbitrary URLs into GoogleMapsUrl pollutes dedup and misleads
-            // the user.
+            // Validate Google Maps URL to prevent dedup pollution from arbitrary links.
             string? googleUrl = null;
             foreach (var link in wpt.Links)
             {

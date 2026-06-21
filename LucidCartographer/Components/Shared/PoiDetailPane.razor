@@ -6,7 +6,6 @@
 }
 
 <div class="flex flex-col h-full bg-white">
-    @* Header *@
     <div class="flex items-center justify-between p-4 flex-shrink-0">
         <h3 class="font-bold font-headline">@UiStrings.LocationDetails</h3>
         <button class="p-1 rounded hover:bg-surface-container-low transition-colors"
@@ -16,24 +15,16 @@
         </button>
     </div>
 
-    @* Content *@
     <div class="flex-1 overflow-y-auto px-4 pb-4">
-        @* Image *@
         @if (!string.IsNullOrEmpty(Poi.ImageUrl))
         {
             <div class="mb-3 rounded-lg overflow-hidden">
-                @* Served from our own endpoint against PoiImages.Data — Google
-                   blocks hotlinking of googleusercontent URLs cross-origin and
-                   the signed tokens expire within minutes, so we persist the
-                   bytes at scrape time. ImageUrl (the original Google source)
-                   is the presence flag; the actual render goes through
-                   /api/poi-image/{id}. *@
+                @* Google blocks hotlinking googleusercontent URLs cross-origin and tokens expire within minutes; we cache bytes at scrape and render via /api/poi-image/{id}. *@
                 <img src="/api/poi-image/@Poi.Id" alt="@Poi.Name"
                      class="w-full h-40 object-cover" loading="lazy" />
             </div>
         }
 
-        @* Name (with inline edit + "use the Google Maps name" actions) & Address *@
         <div class="flex items-start gap-1 mb-1">
             @if (_isEditingName)
             {
@@ -61,9 +52,7 @@
                     <span class="material-symbols-outlined text-base" aria-hidden="true">edit</span>
                 </button>
             }
-            @* "Use the name from Google Maps" — fills the editor with the place
-               name read from the canonical /maps/place/ URL for review. Disabled
-               until the POI is enriched (only then is the canonical URL present). *@
+            @* Enabled only when enriched (canonical URL present). *@
             <button type="button" @onclick="UseGoogleMapsName"
                     disabled="@(!CanUseGoogleMapsName)"
                     class="p-1 rounded hover:bg-surface-container-low transition-colors text-on-surface-variant flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
@@ -80,9 +69,7 @@
             </p>
         }
 
-        @* Collection chips (blue) + a single gray Category chip from the
-           Google classification (e.g. "hotel"). The legacy Status concept
-           was removed — POIs no longer carry a state. *@
+        @* Category chip from Google classification; collections render as blue chips. *@
         <div class="flex flex-wrap gap-2 mb-4">
             @if (!string.IsNullOrEmpty(Poi.Category))
             {
@@ -101,7 +88,6 @@
             }
         </div>
 
-        @* Google Rating + Reviews *@
         @if (Poi.GoogleRating.HasValue)
         {
             <div class="flex items-center gap-2 mb-4" role="img" aria-label="@($"Google rating: {Poi.GoogleRating.Value:F1} out of 5 stars")">
@@ -123,7 +109,6 @@
             </div>
         }
 
-        @* Contact info *@
         @if (!string.IsNullOrEmpty(Poi.Website) || !string.IsNullOrEmpty(Poi.Phone))
         {
             <div class="space-y-2 mb-4">
@@ -145,7 +130,6 @@
             </div>
         }
 
-        @* Personal Rating *@
         @if (Poi.Rating.HasValue)
         {
             <div class="flex items-center gap-2 mb-4" role="img" aria-label="@($"Your rating: {Poi.Rating.Value} out of 5 stars")">
@@ -162,13 +146,11 @@
             </div>
         }
 
-        @* Coordinates *@
         <div class="bg-surface-container-low rounded-lg p-3 mb-4">
             <div class="text-xs text-on-surface-variant mb-1">Coordinates</div>
             <div class="font-mono text-sm">@(Poi is { Latitude: not null, Longitude: not null } ? $"{Poi.Latitude.Value:F6}, {Poi.Longitude.Value:F6}" : "—")</div>
         </div>
 
-        @* Notes *@
         @if (!string.IsNullOrEmpty(Poi.Notes))
         {
             <div class="mb-4">
@@ -177,7 +159,6 @@
             </div>
         }
 
-        @* Tags (many-to-many via PoiTag join table) *@
         @if (Poi.PoiTags.Any() == true)
         {
             <div class="mb-4">
@@ -191,13 +172,11 @@
             </div>
         }
 
-        @* Dates *@
         <div class="text-xs text-on-surface-variant space-y-1">
             <div>Added: @Poi.AddedDate.ToString("MMMM dd, yyyy")</div>
         </div>
     </div>
 
-    @* Footer: Enrich + Google Maps buttons *@
     <div class="p-4 flex-shrink-0 space-y-2">
         <button type="button"
                 @onclick="HandleEnrichClick"
@@ -239,17 +218,13 @@
     private bool _isEditingName;
     private string _nameDraft = "";
 
-    // The place name embedded in the canonical Google Maps URL, if any. The
-    // "use the Google Maps name" button is only meaningful (and enabled) when
-    // the POI is enriched AND such a name can be parsed from its URL.
+    // Place name from canonical URL; button only meaningful when enriched.
     private string? _googleMapsName;
     private bool CanUseGoogleMapsName => Poi is { IsEnriched: true } && _googleMapsName is not null;
 
     protected override void OnParametersSet()
     {
-        // The pane renders only when Poi is non-null (parent owns the
-        // null check), but bUnit / unit tests do pass Poi=null to verify
-        // graceful handling — guard accordingly.
+        // bUnit tests pass Poi=null to verify graceful handling.
         if (Poi is null)
         {
             return;
@@ -263,7 +238,6 @@
             _enrichRequested = false;
         }
 
-        // Drop any in-progress rename when the user switches to a different POI.
         if (Poi.Id != _lastEditedPoiId)
         {
             _lastEditedPoiId = Poi.Id;
@@ -290,8 +264,7 @@
             return;
         }
 
-        // Pre-fill the editor with the Google Maps name so the user can review
-        // (and tweak) it before committing, rather than overwriting silently.
+        // Pre-fill for user review before committing.
         _nameDraft = _googleMapsName!;
         _isEditingName = true;
     }

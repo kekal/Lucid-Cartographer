@@ -19,7 +19,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     {
         modelBuilder.Entity<Poi>(entity =>
         {
-            // All MaxLength via Fluent API only (removed [MaxLength] attributes from entity — DRY)
             entity.Property(e => e.Name).HasMaxLength(500);
             entity.Property(e => e.GoogleMapsUrl).HasMaxLength(2048);
             entity.Property(e => e.Address).HasMaxLength(1000);
@@ -36,11 +35,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasIndex(e => e.GoogleMapsUrl);
             entity.HasIndex(e => new { e.Latitude, e.Longitude });
             entity.HasIndex(e => e.Name);
-            // IsEnriched is a pure data state now, still queried by
-            // startup revive and the failed-enrichment count.
             entity.HasIndex(e => e.IsEnriched);
-            // The enrichment queue: PoiEnrichmentBackgroundService pages
-            // through rows that explicitly requested enrichment.
             entity.HasIndex(e => new { e.EnrichmentRequested, e.EnrichmentFailureCount, e.LastEnrichmentAttemptAt });
 
             // Check constraints for data integrity
@@ -78,11 +73,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
             entity.HasIndex(e => e.Name);
 
-            // TRIP-SCHEMA-03: Trip-lens columns + Start/Finish FKs.
             entity.Property(e => e.TravelMode).HasMaxLength(20);
 
-            // FK-id-only relationships to Poi (no inverse collection on Poi). Deleting a
-            // Start/Finish POI nulls the reference rather than cascading the Collection away.
+            // Deleting a Start/Finish POI nulls the reference (not cascade)
             entity.HasOne<Poi>()
                 .WithMany()
                 .HasForeignKey(e => e.StartPoiId)
@@ -95,8 +88,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasIndex(e => e.StartPoiId);
             entity.HasIndex(e => e.FinishPoiId);
 
-            // TRIP-SCHEMA-01: string-persisted enum constrained at the DB level (CK_<Table>_<Column>
-            // style, like CK_Poi_*). SQL is built from TravelMode.All so it can never drift.
+            // Constraint built from TravelMode.All to prevent drift
             entity.ToTable(t =>
                 t.HasCheckConstraint("CK_PoiCollection_TravelMode",
                     EnumCheckSql("TravelMode", TravelMode.All)));
@@ -104,7 +96,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
         modelBuilder.Entity<PoiCollectionItem>(entity =>
         {
-            // Composite PK replaces surrogate Id (REVIEW-24)
             entity.HasKey(e => new { e.PoiId, e.PoiCollectionId });
 
             entity.HasOne(e => e.Poi)
@@ -117,10 +108,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasForeignKey(e => e.PoiCollectionId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // TRIP-LEGMODE-01: per-leg travel mode for the leg leaving this stop. NULLABLE —
-            // null ≡ AnyAir (one undefined/Any-Air state, no "unset" sentinel). The CHECK
-            // therefore ALLOWS NULL or one of TravelMode.All, built from TravelMode.All so it
-            // can't drift (mirrors the CK_*_TravelMode pattern, but nullable).
+            // Null = AnyAir (no "unset" sentinel); constraint allows NULL or TravelMode.All
             entity.Property(e => e.OutgoingTravelMode).HasMaxLength(20);
             entity.ToTable(t =>
                 t.HasCheckConstraint("CK_PoiCollectionItem_OutgoingTravelMode",
@@ -164,14 +152,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
         modelBuilder.Entity<RouteSegment>(entity =>
         {
-            // TRIP-CACHE-01: directional composite key — A→B and B→A are distinct rows.
+            // Directional: A→B and B→A are distinct rows
             entity.HasKey(e => new { e.FromPoiId, e.ToPoiId, e.TravelMode });
 
             entity.Property(e => e.TravelMode).HasMaxLength(20);
             entity.Property(e => e.Fidelity).HasMaxLength(20);
             entity.Property(e => e.Source).HasMaxLength(100);
 
-            // Cached legs are invalidated when either endpoint POI is deleted.
             entity.HasOne<Poi>()
                 .WithMany()
                 .HasForeignKey(e => e.FromPoiId)
@@ -184,8 +171,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasIndex(e => e.FromPoiId);
             entity.HasIndex(e => e.ToPoiId);
 
-            // TRIP-SCHEMA-01: string-persisted enums constrained at the DB level. SQL is built
-            // from TravelMode.All / Fidelity.All so the constraints can never drift.
+            // Constraints built from enum .All to prevent drift
             entity.ToTable(t =>
             {
                 t.HasCheckConstraint("CK_RouteSegment_TravelMode",
@@ -196,15 +182,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         });
     }
 
-    // TRIP-SCHEMA-01: single source of truth for the string-enum CHECK constraints. Produces e.g.
-    // "TravelMode IN ('AnyAir','Drive','Walk','Cycle')" directly from the enum's All list, so adding
-    // a value to TravelMode.All / Fidelity.All cannot silently diverge from the DB constraint.
+    // Builds enum CHECK constraint from .All list to prevent drift
     private static string EnumCheckSql(string column, IReadOnlyList<string> allowed) =>
         $"{column} IN ({string.Join(",", allowed.Select(v => $"'{v}'"))})";
 
-    // TRIP-LEGMODE-01: nullable variant of EnumCheckSql for columns where NULL is a valid,
-    // meaningful value (here null ≡ AnyAir). Produces e.g.
-    // "OutgoingTravelMode IS NULL OR OutgoingTravelMode IN ('AnyAir','Drive','Walk','Cycle')".
+    // Nullable variant where NULL is a valid state (null ≡ AnyAir)
     private static string NullableEnumCheckSql(string column, IReadOnlyList<string> allowed) =>
         $"{column} IS NULL OR {EnumCheckSql(column, allowed)}";
 

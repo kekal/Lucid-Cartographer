@@ -6,11 +6,8 @@ namespace LucidCartographer.Configuration;
 public static class DeduplicationServicesExtensions
 {
     /// <summary>
-    /// Whole-database deduplication pipeline. Registers the shared SQLite
-    /// write lock (also used by the enrichment worker), the wake trigger, the
-    /// scoped dedup engine, and the background service that runs a pass on
-    /// enrichment-drain signals and once per configured interval.
-    /// Tunable via the "Deduplication" section of appsettings.json.
+    /// Registers the deduplication pipeline: SQLite write lock (shared with enrichment),
+    /// wake trigger, dedup engine, and background service. Tunable via appsettings.json.
     /// </summary>
     public static IServiceCollection AddDeduplicationPipeline(
         this IServiceCollection services,

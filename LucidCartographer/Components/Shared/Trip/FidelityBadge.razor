@@ -1,21 +1,14 @@
 @using LucidCartographer.Data.Entities
 
-@* TRIP-TRAVELTIME-01: small provenance pill qualifying a leg's travel time.
-   Measured → secondary, Estimated → on-surface-variant (the codebase's muted
-   token; the story names it "on-surface-muted" but no such token exists in
-   tailwind.config.js), Manual → primary. The internal "Placeholder" fidelity
-   (and a null/unknown fidelity) is NEVER shown as a badge — the leg renders an
-   em-dash in its time slot instead. text-xs so the pill never overpowers the
-   time it qualifies. *@
+@* Small provenance pill qualifying a leg's travel time. Placeholder and null fidelities
+   are never shown; the time slot renders an em-dash instead. *@
 
 @{
     var label = Label(Fidelity);
 }
 @if (label is not null)
 {
-    @* Self-explaining tooltip (Story 2.3, FR-7): the plain-language explanation is
-       used for BOTH title and aria-label (parity, NFR7); the visible text stays the
-       short word. *@
+    @* Tooltip is used for both title and aria-label (parity). *@
     var tooltip = Tooltip(Fidelity);
     <span class="@PillClass(Fidelity)"
           aria-label="@tooltip"
@@ -28,8 +21,7 @@
     /// <summary>The leg's cached fidelity (one of <see cref="Fidelity"/>), or null when uncomputed.</summary>
     [Parameter, EditorRequired] public string? Fidelity { get; set; }
 
-    // Placeholder is internal-only and null is "not computed yet" — neither
-    // renders a badge (the time slot shows "—" instead).
+    // Placeholder and null never render a badge (time slot shows "—" instead).
     private static string? Label(string? fidelity) => fidelity switch
     {
         Data.Entities.Fidelity.Measured => UiStrings.TripFidelityMeasured,
@@ -38,9 +30,7 @@
         _ => null,
     };
 
-    // Plain-language explanation mirroring the Label switch. Only the three real
-    // fidelities have a tooltip; Placeholder/null never render a badge so they
-    // never reach here. Used for both title and aria-label (parity, NFR7).
+    // Only Measured, Estimated, and Manual have tooltips (Placeholder/null never render).
     private static string? Tooltip(string? fidelity) => fidelity switch
     {
         Data.Entities.Fidelity.Measured => UiStrings.TripFidelityMeasuredTooltip,

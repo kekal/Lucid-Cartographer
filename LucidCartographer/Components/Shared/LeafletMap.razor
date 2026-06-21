@@ -9,15 +9,11 @@
     [Parameter] public EventCallback<int> OnMarkerSelected { get; set; }
     [Parameter] public EventCallback<MapBounds> OnBoundsChanged { get; set; }
 
-    // LOW-08: GUID ensures uniqueness across multiple LeafletMap instances on the same page
-    // or across rapid mount/unmount cycles where a simple counter could collide.
+    // GUID ensures uniqueness across multiple instances and mount/unmount cycles
     private readonly string _mapElementId = $"leaflet-map-{Guid.NewGuid():N}";
     private readonly TaskCompletionSource _initTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    /// <summary>
-    /// Returns a Task that completes when the map JS initialization is done.
-    /// Parents should await this instead of using Task.Delay.
-    /// </summary>
+    /// <summary>Returns Task that completes when map JS initialization is done.</summary>
     public Task WaitForInitAsync() => _initTcs.Task;
 
     public bool IsInitialized { get; private set; }
@@ -26,7 +22,7 @@
     {
         if (firstRender)
         {
-            // REVIEW-12: Set callback via Func instead of subscribing to event
+            // Set callback via Func instead of subscribing to event
             MapService.OnMarkerClicked = HandleMarkerClickedAsync;
             MapService.OnBoundsChanged = HandleBoundsChangedAsync;
             try
@@ -144,9 +140,8 @@
         await MapService.ClearTripAsync();
     }
 
-    // TRIP-OSRM-02 (Story 4.2, AC4): forward the active routing provider's OSM/ODbL
-    // attribution to the map's attribution control (null removes any prior routing
-    // attribution — the default Mock declares none).
+    // Forward the active routing provider's OSM/ODbL attribution to the map's attribution control
+    // (null removes any prior routing attribution — the default Mock declares none)
     public async Task SetRoutingAttributionAsync(string? html)
     {
         if (!IsInitialized)
@@ -177,7 +172,6 @@
         await MapService.PanToStopAsync(poiId);
     }
 
-    // REVIEW-12: Async callback — no more async void
     private async Task HandleMarkerClickedAsync(int poiId)
     {
         try
@@ -208,20 +202,11 @@
         MapService.OnBoundsChanged = null;
         _initTcs.TrySetCanceled();
 
-        // M05: flip IsInitialized FIRST so any concurrent VM call checking
-        // `_map is { IsInitialized: true }` short-circuits during the gap
-        // between dispose and the next AttachMap. The async JS teardown below
-        // takes a few hundred ms and the VM is otherwise free to fire calls
-        // against a dead map ref during that window.
+        // Flip IsInitialized first so concurrent VM calls short-circuit during JS teardown
         var wasInitialized = IsInitialized;
         IsInitialized = false;
 
-        // Tear down the JS-side map but DO NOT dispose the service itself.
-        // LeafletMapService is registered scoped — its lifetime is owned by the
-        // Blazor circuit, not this component. Disposing it here would leave the
-        // circuit's next MapPage visit with a dead service: its _disposed flag
-        // would be set, silently short-circuiting the next InitMapAsync call and
-        // leaving a blank map until a full page refresh.
+        // Tear down JS-side map only; service lifetime is owned by the Blazor circuit (scoped).
         if (wasInitialized)
         {
             try

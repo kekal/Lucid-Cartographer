@@ -6,16 +6,8 @@ namespace LucidCartographer.Configuration;
 public static class ImportPipelineExtensions
 {
     /// <summary>
-    /// Registers the file-import pipeline:
-    ///   - Stateless parsers (Singleton) — ARCH-HIGH-02
-    ///   - Per-request orchestrator (Scoped)
-    ///   - Background queue via Coravel — user clicks Import → job is enqueued
-    ///     via IImportJobQueue → Coravel's scheduler runs it on a background
-    ///     thread inside its own DI scope, decoupled from the Blazor circuit.
-    ///     The user is free to navigate away; ImportJobStatusService publishes
-    ///     lifecycle events the UI subscribes to.
-    ///   - Google Maps list scraper (Singleton with internal SemaphoreSlim,
-    ///     HIGH-07).
+    /// Registers file-import pipeline: stateless parsers (Singleton), orchestrator (Scoped),
+    /// Coravel background queue (decoupled from Blazor circuit), and Google Maps scraper.
     /// </summary>
     public static IServiceCollection AddImportPipeline(this IServiceCollection services)
     {
@@ -25,7 +17,6 @@ public static class ImportPipelineExtensions
         services.AddSingleton<IFileImporter, CsvImporter>();
         services.AddScoped<IImportOrchestrator, ImportOrchestrator>();
 
-        // Coravel-backed background import pipeline
         services.AddQueue();
         services.AddSingleton<ImportJobStatusService>();
         services.AddTransient<ImportInvocable>();

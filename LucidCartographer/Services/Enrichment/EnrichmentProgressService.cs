@@ -3,16 +3,8 @@ using System.Reactive.Subjects;
 namespace LucidCartographer.Services.Enrichment;
 
 /// <summary>
-/// Tiny singleton that lets the background enrichment service publish
-/// progress ("N of M fetched") to anyone on the UI that cares. Subscribers
-/// observe <see cref="Changes"/> (a BehaviorSubject-backed stream that
-/// replays the latest Remaining on subscribe) to refresh their header
-/// counter and re-render POIs as they get real coords.
-///
-/// <see cref="Total"/> is a high-water mark: it grows with new
-/// <see cref="Set(int)"/> values while work is pending and resets to 0
-/// once the queue drains, so the UI can display "13 / 22 fetched" during
-/// a run and hide itself between runs.
+/// Publishes enrichment progress (remaining count) via a reactive stream so the UI can display fetched vs. total.
+/// <see cref="Total"/> resets to 0 when the queue drains, so progress display persists during a run and hides between runs.
 /// </summary>
 public class EnrichmentProgressService
 {
@@ -24,15 +16,12 @@ public class EnrichmentProgressService
 
     public void Set(int remaining)
     {
-        // Grow the high-water mark when new work arrives.
         if (remaining > Total)
         {
             Total = remaining;
         }
 
-        // Reset the session when the queue drains so the next batch
-        // starts counting from scratch rather than carrying the old
-        // total forward.
+        // Reset when drained so the next batch starts counting fresh rather than carrying old total forward.
         if (remaining == 0)
         {
             Total = 0;

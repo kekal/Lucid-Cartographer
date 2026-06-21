@@ -30,9 +30,7 @@ public static class NoVncProxyEndpoint
 
         var backend = $"{remote.WebsockifyHost}:{remote.WebsockifyPort}";
 
-        // {**path} catch-all: serves vnc_lite.html, the noVNC asset tree, and the
-        // "websockify" websocket. Not in the route-guard exempt list, so the cookie
-        // auth redirect already gates it; we re-check defensively below.
+        // Catch-all route serves noVNC assets and websocket; defensively re-check auth below.
         app.Map($"{RoutePrefix}/{{**path}}", async (HttpContext ctx, string? path) =>
         {
             if (!(ctx.User.Identity?.IsAuthenticated ?? false))
@@ -67,9 +65,7 @@ public static class NoVncProxyEndpoint
                 ctx.Response.ContentType = contentType;
             }
 
-            // For the main client document, inject CSS to hide the noVNC control
-            // bar — autoconnect means the user never needs its buttons, so the
-            // embed shows just the remote browser.
+            // Hide noVNC control bar via CSS; autoconnect makes it unnecessary.
             if (path.EndsWith("vnc.html", StringComparison.OrdinalIgnoreCase)
                 && (contentType?.Contains("text/html", StringComparison.OrdinalIgnoreCase) ?? false))
             {
@@ -100,7 +96,7 @@ public static class NoVncProxyEndpoint
 
     private static async Task ProxyWebSocketAsync(HttpContext ctx, string backend, string path)
     {
-        // Preserve the noVNC subprotocol negotiation ("binary" / "base64").
+        // Preserve noVNC subprotocol negotiation ("binary" / "base64").
         var requested = ctx.WebSockets.WebSocketRequestedProtocols;
 
         using var client = new ClientWebSocket();

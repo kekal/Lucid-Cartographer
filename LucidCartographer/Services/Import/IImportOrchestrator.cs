@@ -7,7 +7,6 @@ public interface IImportOrchestrator
 {
     /// <summary>
     /// Returns true if the given file name has a supported importer.
-    /// IE-08: Replaces GetImporter which leaked implementation details.
     /// </summary>
     bool CanImport(string fileName);
 

@@ -12,7 +12,6 @@ public static class DatabaseServicesExtensions
     ///   3. Default "data/cartographer.db" relative to ContentRootPath
     /// Relative paths are resolved against ContentRootPath so the process does not depend
     /// on the current working directory. The containing directory is created if missing.
-    /// (MED-06: OS-independent DB path resolution.)
     /// </summary>
     public static IServiceCollection AddAppDatabase(
         this IServiceCollection services,

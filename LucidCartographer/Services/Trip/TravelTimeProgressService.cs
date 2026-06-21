@@ -3,13 +3,7 @@ using System.Reactive.Subjects;
 namespace LucidCartographer.Services.Trip;
 
 /// <summary>
-/// TRIP-TRAVELTIME-01: tiny singleton that lets
-/// <see cref="TravelTimeComputationBackgroundService"/> publish a "legs
-/// computing" count to the UI — the travel-time counterpart of
-/// <c>EnrichmentProgressService</c>. The ViewModel subscribes to
-/// <see cref="Changes"/> (a BehaviorSubject replaying the latest value on
-/// subscribe) and refreshes its leg projections + raises StateChanged when the
-/// count drops, so freshly-computed legs land without polling the circuit thread.
+/// Publishes travel-time computation progress via a reactive stream instead of polling.
 /// </summary>
 public sealed class TravelTimeProgressService
 {

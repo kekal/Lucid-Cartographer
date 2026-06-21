@@ -162,7 +162,6 @@ public sealed class BrowserSessionManager : IBrowserSession, IAsyncDisposable
                 new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30000 });
             await GoogleConsent.DismissAsync(page, _logger);
             _logger.LogInformation("Navigated shared session to Google sign-in (URL: {Url})", page.Url);
-            // Login is completed by the user in the remote view; don't block here.
             return new GoogleSessionStatus(false, Busy: false,
                 "Sign-in page opened. Complete the login in the view below, then Refresh status.");
         }

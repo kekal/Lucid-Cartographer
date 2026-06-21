@@ -18,11 +18,7 @@ public sealed class StartupCleanupService(
     ILoggerFactory loggerFactory)
     : IHostedService
 {
-    // Cross-restart guard for ReviveStuckImportedPoisAsync: a single
-    // transient DB hiccup is fine, but two consecutive failures point at
-    // a real schema/index problem and we'd rather refuse to start than
-    // silently keep limping. Persisted in-memory only — restarting a
-    // healthy host clears it.
+    // Refuse to start after two consecutive ReviveStuckImportedPois failures (transient hiccup vs. real schema problem).
     private static int s_consecutiveReviveFailures;
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -38,10 +34,7 @@ public sealed class StartupCleanupService(
 
     private void SweepOrphanedTempFiles()
     {
-        // Sweep orphaned lucid-import-* temp files left by a previous crash that
-        // died between "file streamed to disk" and "Coravel invocable ran +
-        // deleted it in finally". Cheap and safe: only files matching the specific
-        // pattern we wrote ourselves, older than 1h, are removed.
+        // Clean up lucid-import-* temp files older than 1h (safe: crashes between stream and cleanup).
         var logger = loggerFactory.CreateLogger("TempFileSweep");
         try
         {
@@ -107,7 +100,6 @@ public sealed class StartupCleanupService(
                     "Revived {Count} stuck POIs (failed enrichment or pseudo-enriched) for re-enrichment; cleared {ImageCount} untrustworthy photo(s)",
                     revived, clearedImages);
             }
-            // Successful run resets the consecutive-failure counter.
             Interlocked.Exchange(ref s_consecutiveReviveFailures, 0);
         }
         catch (Exception ex)
@@ -183,7 +175,6 @@ public sealed class StartupCleanupService(
             poi.EnrichmentFailureCount = 0;
             poi.LastEnrichmentAttemptAt = null;
             poi.EnrichmentNeedsManualUrl = false;
-            // Re-enqueue explicitly — the worker keys off EnrichmentRequested now.
             poi.EnrichmentRequested = true;
             if (poi.GoogleMapsUrl == null || !poi.GoogleMapsUrl.Contains("/maps/place/"))
             {

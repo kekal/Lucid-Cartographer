@@ -2,10 +2,7 @@ namespace LucidCartographer.Data.Entities;
 
 /// <summary>
 /// String constants for Leg travel-time Fidelity values.
-/// TRIP-SCHEMA-01: persisted as strings (human-readable DB values), mirroring the
-/// <see cref="PoiCategory"/> string-constant precedent rather than an int-backed enum.
-/// The storing property (RouteSegment.Fidelity) is typed <c>string</c> and is restricted
-/// to this set by an EF check constraint in AppDbContext.
+/// Persisted as strings (human-readable DB values), restricted by EF check constraint in AppDbContext.
 /// </summary>
 public static class Fidelity
 {
@@ -20,8 +17,7 @@ public static class Fidelity
     ];
 
     /// <summary>
-    /// Returns true if the fidelity is one of the allowed values.
-    /// Fidelity is a non-nullable column, so null is treated as invalid.
+    /// Validates that the fidelity is one of the allowed values; null is invalid.
     /// </summary>
     public static bool IsValid(string? fidelity) =>
         fidelity is not null && All.Contains(fidelity);

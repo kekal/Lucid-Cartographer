@@ -18,7 +18,7 @@ public class PoiCollection
 
     public DateTime CreatedDate { get; set; }
 
-    public string? SourceType { get; set; } // Use CollectionSourceType constants
+    public string? SourceType { get; set; }
 
     public string? SourceFileName { get; set; }
 
@@ -31,10 +31,8 @@ public class PoiCollection
     [System.ComponentModel.DataAnnotations.ConcurrencyCheck]
     public int Version { get; set; }
 
-    // TRIP-SCHEMA-03: additive Trip-lens fields. A Collection is just a plain POI set
-    // until Trip View is enabled; these persist the Trip arrangement per-Collection (D10).
-    // FK ids only (no nav property) keeps the migration minimal and avoids extra navs on
-    // Poi; the Start/Finish relationships are configured in AppDbContext with
+    // Trip arrangement fields. FK ids only (no nav property) keeps the migration minimal
+    // and avoids extra navs on Poi; relationships configured in AppDbContext with
     // OnDelete(SetNull) so deleting a Start/Finish POI nulls the reference, not cascades.
     // FinishPoiId == null ⇒ Roundtrip (closing leg returns to Start).
 
@@ -53,7 +51,7 @@ public class PoiCollection
     /// <summary>Optional soft time budget in MINUTES; exceeding it raises a soft overrun flag.</summary>
     public int? TimeBudgetMinutes { get; set; }
 
-    /// <summary>Whether Trip View is enabled for this Collection (per-Collection persistence — D10).</summary>
+    /// <summary>Whether Trip View is enabled for this Collection.</summary>
     public bool TripViewEnabled { get; set; }
 
     public List<PoiCollectionItem> CollectionItems { get; set; } = [];
