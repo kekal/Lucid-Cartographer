@@ -26,6 +26,17 @@ mobile mirror phase is deferred).
 
 ## What it does
 
+The **Trip View toggle** is offered whenever a **single** collection is in scope
+(no active search) and that collection has **≥1 placeable POI** — gated on the
+collection's **full membership**, not the map viewport (`TRIP-GATE-01` / UX-DR1;
+fix 2026-06-20, commit a6114bd). Panning the map away from the POIs no longer hides
+the toggle. The same single threshold (`TripViewModel.MinPlaceableForToggle = 1`)
+drives both `IsToggleAvailable` and the auto-disable mirror, so "offer" and
+"auto-disable" can never drift apart. The host feeds the viewport-independent count
+via `MapPageViewModel.CollectionPlaceablePoiCount` (placeable count over the lone
+visible collection's `VisiblePois`, else 0). When the last placeable member is
+removed while Trip View is on, it auto-disables and persists off.
+
 Flip Trip View on for a Collection and it becomes an ordered, mapped trip:
 
 - **Stop Order** — contiguous 1-based numbering (1..N), seeded by POI added-date,
@@ -61,7 +72,8 @@ cache, sole `OrderIndex` writer, background compute) and added:
   replacement, not the old additive `w-64` side column (which is gone, along with the
   selection batch toolbar). Toggling off restores `PoiTable` unchanged. The panel
   **header is compact (2 rows, compaction milestone)**: title + stop count + trip total
-  inline on the left, **Sort** and **Recompute** as bordered buttons on the right
+  inline on the left, **Sort**, **Recompute**, and the **bulk mode selector**
+  ("Set mode for all…", TRIP-BULKMODE-01) as bordered controls on the right
   (collapsed from the prior 5 stacked rows). The wide trip
   table is a CSS-grid of aligned columns: reorder gutter (drag + ▲▼) · Stop # badge
   (Start/Finish glyph) · full Name + address sub-line + enrichment icon · Dwell
@@ -284,10 +296,32 @@ gone). A leg is always keyed/identified by its **From stop**:
   Editing is allowed on **any** leg, generalizing Wave-1's Any/Air-only entry. VM
   commands: `SetLegModeAsync`, `SetManualLegTimeAsync`, `ClearManualLegTimeAsync`
   (`MaxManualLegMinutes` cap).
+- **Bulk mode assignment (TRIP-BULKMODE-01, 2026-06-20).** A header control
+  (`BulkLegModeSelector`) assigns **one** mode to **all** legs of the active trip in a
+  single action — the remedy for an all-Any/Air trip, where every leg is uncomputed so
+  Sort/Recompute stay disabled until a mode is set leg-by-leg. An **overwrite** checkbox
+  (default **off**) chooses whether to touch legs that already carry an explicit mode;
+  off = fill only the undefined (null/AnyAir) legs. The write is **one gated
+  transaction** (`SetAllOutgoingTravelModesAsync`, no per-leg round-trip) followed by one
+  projection refresh + one `Notify`; a ground mode signals the compute trigger, Any/Air
+  does not (same shape as `SetLegModeAsync`). The "all legs" From-stop set mirrors
+  `BuildLegs`/`DirectionalPairs` exactly (consecutive `0..N-2`, plus the closing leg's
+  last stop on a Roundtrip with no distinct Finish). It changes **only**
+  `OutgoingTravelMode` — never Stop Order, Start/Finish, or the time budget. The control
+  is shown only when `OrderedLegs.Count > 0` and — unlike Sort/Recompute — deliberately
+  **does NOT gate on `IsAnyLegComputing`** (an Any/Air leg makes that true, which would
+  disable the control on exactly the trips it fixes; FR-13 reversed in the frozen spec
+  amendment). It is disabled only transiently while its own bulk request is in flight
+  (anti-double-submit), and the overwrite checkbox is reset to off on every open
+  (non-sticky). Overwrite-on can blank a Manual time under the old mode key — accepted as
+  an explicit user action (no confirm prompt). Desktop-only; not mirrored to mobile.
 - **Sole writer extended.** `OutgoingTravelMode` is mutated **only** inside
-  `TripOrderingService` — the order/reset path plus the new
+  `TripOrderingService` — the order/reset path, the per-leg
   `SetOutgoingTravelModeAsync` (validates `null | TravelMode.All`, throws on invalid),
-  reused by both the `LegModePill` VM command and the MCP `set_leg_travel_mode` tool.
+  and the bulk `SetAllOutgoingTravelModesAsync`. The per-leg writer is reused by both the
+  `LegModePill` VM command and the MCP `set_leg_travel_mode` tool; the bulk writer backs
+  the `BulkLegModeSelector` via `TripViewModel.SetAllLegsModeAsync`. There is **no** new
+  MCP tool for bulk assignment.
 - **Three mirrored projection sites (tech-debt C3).** The leg set (consecutive pairs +
   roundtrip closing leg), the open/roundtrip shape decision, and the `(From,To,Mode)`
   cache lookup are duplicated byte-for-byte in `TripViewModel.BuildLegs`,
@@ -392,7 +426,8 @@ is active, null under Mock). `TripProjections.cs` holds the VM's read-model reco
 types.
 
 Razor components under `Components/Shared/Trip/`:
-`TripToggle` / `MobileTripToggle` (region switch, `aria-pressed`, ≥2-placeable gate),
+`TripToggle` / `MobileTripToggle` (region switch, `aria-pressed`, ≥1-placeable
+collection-membership gate — viewport-independent),
 `TripStopList` (Wave-2 wide CSS-grid trip table) / `MobileTripPanel`, `StopOrderBadge`,
 `FidelityBadge` (self-explaining Measured/Estimated/Manual pill; "—" em-dash for any
 unmeasured/unentered leg — Placeholder is internal-only), and the **Wave-2 desktop**
@@ -408,6 +443,13 @@ components:
   keeps canonical minutes; it raises `ValueChanged` only and is the sole consumer of
   `TravelTimeFormatting.FormatHhmm`/`TryParseHhmm`. A `@key` re-key snaps the field back
   to the canonical display after a rejected/clamped entry.
+- **`BulkLegModeSelector.razor`** (TRIP-BULKMODE-01, 2026-06-20) — header control in the
+  `TripStopList` action row (beside Sort/Recompute, in the legs-present block). A small
+  "Set mode for all…" button opens a popover with an overwrite checkbox above the four
+  Walk/Drive/Cycle/Any-Air choices; picking one calls `Vm.SetAllLegsModeAsync(mode,
+  overwrite)` and closes. Presentational (NFR1) — raises the one VM command only, holds
+  no persisted state, not gated on compute. Mirrors `LegModePill` glyph/UiStrings
+  conventions; `stopPropagation` so the header never triggers a row interaction.
 - **`LegModePill.razor`** (RD2/Story 3.4) — per-leg mode control: a rounded pill that
   opens a 4-item Walk/Drive/Cycle/Any-Air menu (active mode checked), neutral "Any —
   set mode" outline for the undefined state (never an error tone). Replaces the
