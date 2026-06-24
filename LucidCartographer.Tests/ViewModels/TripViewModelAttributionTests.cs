@@ -12,7 +12,7 @@ namespace LucidCartographer.Tests.ViewModels;
 /// Story 4.2 (TRIP-OSRM-02, AC4 / NFR8): the ViewModel surfaces the active travel-time
 /// provider's declared routing-data attribution (read off
 /// <see cref="ITravelTimeProvider.Attribution"/>) so the page can push it to the map's
-/// attribution control. An OSM-based provider (OSRM) declares the OSM/ODbL string; the
+/// attribution control. An OSM-based provider (Valhalla) declares the OSM/ODbL string; the
 /// haversine Mock and the no-provider construction paths declare nothing (null). This
 /// guards the seam the integration host can't see (no real Leaflet attribution control).
 /// </summary>
@@ -22,6 +22,7 @@ public class TripViewModelAttributionTests
     {
         public string Source => "Fake";
         public string? Attribution => attribution;
+        public bool ProducesMeasuredFidelity => false;
         public Task<TravelLegResult> GetLegAsync(
             TravelEndpoint from, TravelEndpoint to, string travelMode, CancellationToken ct) =>
             Task.FromResult(new TravelLegResult(0, 0, Fidelity.Estimated, null));
@@ -61,9 +62,9 @@ public class TripViewModelAttributionTests
     [Fact]
     public async Task RoutingAttributionHtml_SurfacesProviderAttribution_WhenOsmBased()
     {
-        // Mirrors what OsrmTravelTimeProvider.Attribution returns (UiStrings, NFR5).
-        await using var vm = Build(new FakeProvider(UiStrings.TripRoutingAttributionOsm));
-        vm.RoutingAttributionHtml.Should().Be(UiStrings.TripRoutingAttributionOsm);
+        // Mirrors what ValhallaTravelTimeProvider.Attribution returns (UiStrings, NFR5/NFR8).
+        await using var vm = Build(new FakeProvider(UiStrings.TripRoutingAttributionValhalla));
+        vm.RoutingAttributionHtml.Should().Be(UiStrings.TripRoutingAttributionValhalla);
         vm.RoutingAttributionHtml.Should().NotBeNullOrWhiteSpace();
     }
 }

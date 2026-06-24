@@ -170,12 +170,15 @@ public sealed class TripViewModel(
     public bool IsShowingApproximateEstimates => OrderedLegs.Any(l => l.IsFallback);
 
     /// <summary>
-    /// True when no measured provider is configured (null/haversine Mock) AND the trip has
-    /// at least one normally-Estimated leg (not a fallback). Distinct from fallback estimates
+    /// True when no measured-capable provider is configured (null/haversine Mock) AND the trip
+    /// has at least one normally-Estimated leg (not a fallback). Drives the quiet "enable
+    /// Valhalla for measured road times" note. Gated on the provider capability seam
+    /// (<see cref="ITravelTimeProvider.ProducesMeasuredFidelity"/>) rather than a provider-id
+    /// string, so it suppresses for ANY measured provider. Distinct from fallback estimates
     /// (provider-down); the two notes describe different states.
     /// </summary>
-    public bool RecommendsOsrm =>
-        travelTimeProvider?.Source != TravelTimeSource.Osrm
+    public bool RecommendsMeasuredProvider =>
+        travelTimeProvider?.ProducesMeasuredFidelity != true
         && OrderedLegs.Any(l => l.Fidelity == Data.Entities.Fidelity.Estimated && !l.IsFallback);
 
     /// <summary>

@@ -13,7 +13,9 @@ namespace LucidCartographer.Services.Trip;
 /// Loads Trip-View-enabled collections' ordered placeable stops, forms directional leg pairs
 /// (k→k+1, plus closing leg back to start on Roundtrip), calls the provider for uncached pairs,
 /// and upserts results into <see cref="RouteSegment"/> under <see cref="SqliteWriteLock"/>.
-/// Computes only if no cache row exists yet for the (FromPoiId, ToPoiId, TravelMode) key.
+/// Computes when no cache row exists for the (FromPoiId, ToPoiId, TravelMode) key, or when a
+/// measured-capable provider can upgrade an existing low-fidelity Estimated/Placeholder row
+/// produced from Mock/EstimatedFallback (capability-gated recompute, AD-2).
 /// </summary>
 public sealed class TravelTimeComputationBackgroundService(
     IDbContextFactory<AppDbContext> factory,
@@ -121,15 +123,24 @@ public sealed class TravelTimeComputationBackgroundService(
             return [];
         }
 
-        // Existing cache keys; avoids recomputing legs already cached. Manually-entered legs
-        // are just RouteSegment rows, so they're present here and never re-queued.
+        // Existing cache rows, projected with Fidelity + Source so upgrade-eligibility can be
+        // evaluated per leg. A row keyed by (From, To, Mode) makes the leg non-pending UNLESS
+        // a measured-capable provider can upgrade it (AD-2, below). Manually-entered and
+        // already-Measured legs are just RouteSegment rows here and are never upgrade-eligible.
         var existing = await db.RouteSegments
             .AsNoTracking()
-            .Select(r => new { r.FromPoiId, r.ToPoiId, r.TravelMode })
+            .Select(r => new { r.FromPoiId, r.ToPoiId, r.TravelMode, r.Fidelity, r.Source })
             .ToListAsync(ct);
-        var have = existing
-            .Select(r => (r.FromPoiId, r.ToPoiId, r.TravelMode))
-            .ToHashSet();
+        var cached = new Dictionary<(int, int, string), (string Fidelity, string Source)>();
+        foreach (var r in existing)
+        {
+            cached[(r.FromPoiId, r.ToPoiId, r.TravelMode)] = (r.Fidelity, r.Source);
+        }
+
+        // Capability gate (Story 2.1 seam): only a measured-capable provider (Valhalla=true)
+        // re-enqueues upgrade-eligible rows. Mock=false collapses to the legacy "no row" rule,
+        // so a Mock deployment never re-churns its own Estimated rows into an infinite loop.
+        var measuredCapable = provider.ProducesMeasuredFidelity;
 
         var pending = new List<PendingLeg>();
         var seen = new HashSet<(int, int, string)>();
@@ -160,8 +171,16 @@ public sealed class TravelTimeComputationBackgroundService(
                 }
 
                 var key = (from.PoiId, to.PoiId, mode);
-                if (have.Contains(key) || !seen.Add(key))
+                if (!seen.Add(key))
                 {
+                    continue; // already queued this pass — dedupe regardless of cache state.
+                }
+
+                if (cached.TryGetValue(key, out var row)
+                    && !(measuredCapable && IsUpgradeEligible(row.Fidelity, row.Source)))
+                {
+                    // A row exists and is NOT a measured-upgradeable estimate ⇒ leave it alone.
+                    // When measuredCapable is false this is byte-for-byte the legacy "any row ⇒ skip".
                     continue;
                 }
 
@@ -171,6 +190,15 @@ public sealed class TravelTimeComputationBackgroundService(
 
         return pending;
     }
+
+    /// <summary>
+    /// A cached row is eligible for measured upgrade iff it is a low-fidelity, self-produced
+    /// estimate — an Estimated/Placeholder row from Mock/EstimatedFallback. Manual/Measured
+    /// rows (and estimates from any other source) are never upgrade-eligible (AD-2).
+    /// </summary>
+    private static bool IsUpgradeEligible(string fidelity, string source) =>
+        (fidelity is Fidelity.Estimated or Fidelity.Placeholder)
+        && (source is TravelTimeSource.Mock or TravelTimeSource.EstimatedFallback);
 
     /// <summary>True for ground modes that auto-compute (Walk/Drive/Cycle); AnyAir is excluded.</summary>
     private static bool IsGroundMode(string mode) =>

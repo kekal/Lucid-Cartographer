@@ -12,6 +12,7 @@ namespace LucidCartographer.Services;
 ///   3. Bootstrap an initial admin user when the Users table is empty.
 ///   4. Revive stuck file-imported POIs (one-time data recovery, idempotent).
 ///   5. Vacuum expired / long-revoked auth sessions.
+///   6. Purge stale OSRM-sourced RouteSegment cache rows (one-time migration, idempotent).
 /// </summary>
 public sealed class StartupCleanupService(
     IServiceProvider services,
@@ -28,6 +29,7 @@ public sealed class StartupCleanupService(
         await EnsureAdminUserAsync(cancellationToken);
         await ReviveStuckImportedPoisAsync(cancellationToken);
         await VacuumExpiredSessionsAsync(cancellationToken);
+        await PurgeOsrmCacheRowsAsync(cancellationToken);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
@@ -221,6 +223,72 @@ public sealed class StartupCleanupService(
         {
             logger.LogWarning(ex, "Session vacuum failed; continuing startup");
         }
+    }
+
+    /// <summary>
+    /// One-time migration (FR-16, AD-6): the hand-rolled OSRM provider has been retired,
+    /// so its cached rows (<c>Source="OSRM"</c>, Fidelity Measured) are stale, un-reproducible
+    /// measurements that the never-downgrade-Measured guard (<c>[TRIP-MANUAL-01]</c>) would
+    /// otherwise pin forever. Delete them once under the write lock so the active provider
+    /// recomputes them via the existing missing-row trigger. Idempotent / self-retiring:
+    /// a no-op once the rows are gone. Manual rows are never touched.
+    /// </summary>
+    private async Task PurgeOsrmCacheRowsAsync(CancellationToken cancellationToken)
+    {
+        var logger = loggerFactory.CreateLogger("OsrmCachePurge");
+        try
+        {
+            using var scope = services.CreateScope();
+            var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            var writeLock = scope.ServiceProvider.GetRequiredService<SqliteWriteLock>();
+            await using var db = await factory.CreateDbContextAsync(cancellationToken);
+
+            await writeLock.Gate.WaitAsync(cancellationToken);
+            try
+            {
+                var purged = await PurgeOsrmCacheRowsCoreAsync(db, cancellationToken);
+                if (purged > 0)
+                {
+                    logger.LogWarning(
+                        "Purged {Count} stale OSRM-sourced route-segment cache row(s); the active provider will recompute them",
+                        purged);
+                }
+            }
+            finally
+            {
+                writeLock.Gate.Release();
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "OSRM cache purge failed; continuing startup");
+        }
+    }
+
+    /// <summary>
+    /// Pure purge logic, extracted for testability. Deletes every <see cref="RouteSegment"/>
+    /// whose <see cref="RouteSegment.Source"/> equals the literal string <c>"OSRM"</c>, while
+    /// never touching a <see cref="Fidelity.Manual"/> row. Returns the deleted-row count.
+    /// </summary>
+    internal static async Task<int> PurgeOsrmCacheRowsCoreAsync(
+        AppDbContext db, CancellationToken cancellationToken)
+    {
+        // The literal "OSRM" is intentional: the TravelTimeSource.Osrm constant is removed in
+        // Story 3.3, so this migration must not depend on it (AD-6). The Fidelity != Manual
+        // belt makes the never-touch-Manual guarantee structural even though Manual rows carry
+        // Source="Manual" and would not match "OSRM" anyway.
+        var stale = await db.RouteSegments
+            .Where(r => r.Source == "OSRM" && r.Fidelity != Fidelity.Manual)
+            .ToListAsync(cancellationToken);
+
+        if (stale.Count == 0)
+        {
+            return 0;
+        }
+
+        db.RouteSegments.RemoveRange(stale);
+        await db.SaveChangesAsync(cancellationToken);
+        return stale.Count;
     }
 
     private async Task EnsureAdminUserAsync(CancellationToken cancellationToken)

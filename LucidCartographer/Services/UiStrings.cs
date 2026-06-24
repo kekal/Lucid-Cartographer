@@ -128,9 +128,9 @@ public static class UiStrings
     public const string TripRoundtripAnnounce = "Roundtrip — returns to start";
     public const string TripOpenPathAnnounce = "Open path — ends at {0}";
 
-    // Trip View — routing-data attribution. Shown on map attribution when OSM-based routing (OSRM) is active.
-    public const string TripRoutingAttributionOsm =
-        "Routing &copy; OSRM &middot; Map data &copy; OpenStreetMap contributors (ODbL)";
+    // Trip View — routing-data attribution. Shown on map attribution when OSM-based routing (Valhalla) is active.
+    public const string TripRoutingAttributionValhalla =
+        "Routing &copy; Valhalla &middot; Map data &copy; OpenStreetMap contributors (ODbL)";
 
     // Trip View — unplaceable stops. POI kept in collection, excluded from route.
     public const string TripStopNotPlaceable = "Not placeable";
@@ -183,9 +183,9 @@ public static class UiStrings
 
     // Contextual note on default deployment (no measured provider configured) explaining why all legs are estimates.
     public const string TripMockEstimateNote =
-        "All times are straight-line estimates. Enable OSRM for measured road times.";
-    public const string TripMockEstimateOsrmLink = "How to enable OSRM";
-    public const string TripMockEstimateOsrmHref = "docs/osrm.md";
+        "All times are straight-line estimates. Enable Valhalla for measured road times.";
+    public const string TripMockEstimateValhallaLink = "How to enable Valhalla";
+    public const string TripMockEstimateValhallaHref = "docs/valhalla.md";
 
     // Trip View — travel-mode selector. Segment labels + radiogroup accessible name; per-trip choice.
     public const string TripTravelModeSelectorAria = "Travel mode";

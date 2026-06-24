@@ -54,7 +54,7 @@ public sealed record TripLeg(
     // straight-line fallback (Source == TravelTimeSource.EstimatedFallback).
     // Drives IsShowingApproximateEstimates — distinct from a normally-Estimated leg.
     bool IsFallback = false,
-    // Measured road geometry as an encoded polyline (precision 5, from OsrmTravelTimeProvider).
+    // Measured road geometry as an encoded polyline (precision 6, from ValhallaTravelTimeProvider).
     // Null/empty = no road geometry known (Estimated/Manual/Placeholder/Air or cache not
     // yet computed) ⇒ map draws straight dashed connector. Only Measured legs carry it;
     // its presence (not IsMeasured alone) makes the line render solid. Decoded JS-side.

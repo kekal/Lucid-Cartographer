@@ -78,7 +78,7 @@ app.MapHealthChecks("/health");
 app.MapAuthEndpoints();
 app.MapOAuthEndpoints();
 app.MapPoiImageEndpoints();
-app.MapDocsEndpoints(); // Includes /docs/osrm.md for Trip View OSRM setup instructions.
+app.MapDocsEndpoints(); // Includes /docs/valhalla.md for Trip View Valhalla setup instructions.
 
 // noVNC proxy for Google sign-in remote view; Docker/Linux only; gated by cookie auth.
 app.MapNoVncProxy();

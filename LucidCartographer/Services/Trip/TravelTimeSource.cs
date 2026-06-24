@@ -14,10 +14,10 @@ public static class TravelTimeSource
     public const string Manual = "Manual";
 
     /// <summary>
-    /// Self-hosted OSRM provider: measured leg from real road network with encoded geometry.
+    /// Self-hosted Valhalla provider: measured leg from real road network with encoded geometry.
     /// Opt-in per deployment — never the default.
     /// </summary>
-    public const string Osrm = "OSRM";
+    public const string Valhalla = "Valhalla";
 
     /// <summary>Provider failed; haversine fallback substituted.</summary>
     public const string EstimatedFallback = "EstimatedFallback";

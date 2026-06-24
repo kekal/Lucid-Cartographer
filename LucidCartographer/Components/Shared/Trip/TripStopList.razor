@@ -114,15 +114,15 @@
             <span>@UiStrings.TripApproximateEstimatesNote</span>
         </div>
     }
-    @* OSRM recommendation on default Mock provider deployment; guidance only. *@
-    @if (Vm.RecommendsOsrm && !Vm.IsShowingApproximateEstimates)
+    @* Measured-provider recommendation on default Mock-provider deployment; guidance only. *@
+    @if (Vm.RecommendsMeasuredProvider && !Vm.IsShowingApproximateEstimates)
     {
         <div class="flex items-start gap-1.5 px-3 py-1.5 border-b border-surface-container-high flex-shrink-0 text-xs text-on-surface-variant bg-surface-container">
             <span class="material-symbols-outlined flex-shrink-0" style="font-size:16px" aria-hidden="true">info</span>
             <span>
                 @UiStrings.TripMockEstimateNote
-                <a href="@UiStrings.TripMockEstimateOsrmHref" target="_blank" rel="noopener"
-                   class="text-primary hover:underline">@UiStrings.TripMockEstimateOsrmLink</a>
+                <a href="@UiStrings.TripMockEstimateValhallaHref" target="_blank" rel="noopener"
+                   class="text-primary hover:underline">@UiStrings.TripMockEstimateValhallaLink</a>
             </span>
         </div>
     }

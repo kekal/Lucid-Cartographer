@@ -97,6 +97,95 @@ public class StartupCleanupServiceTests
         }
     }
 
+    // --- Story 3.2 (FR-16, AD-6): one-time OSRM cache-row purge ---
+
+    private static RouteSegment Segment(int from, int to, string fidelity, string source) => new()
+    {
+        FromPoiId = from,
+        ToPoiId = to,
+        TravelMode = TravelMode.Drive,
+        DurationSeconds = 600,
+        DistanceMeters = 5000,
+        Fidelity = fidelity,
+        Source = source,
+        ComputedAt = DateTime.UtcNow,
+    };
+
+    [Fact]
+    public async Task PurgeOsrmCore_DeletesOsrmRows_KeepsManualAndOtherSources()
+    {
+        var factory = TestDbHelper.CreateFactory();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.RouteSegments.Add(Segment(1, 2, Fidelity.Measured, "OSRM"));        // purged
+            db.RouteSegments.Add(Segment(2, 1, Fidelity.Measured, "OSRM"));        // purged
+            db.RouteSegments.Add(Segment(3, 4, Fidelity.Manual, "Manual"));        // survives
+            db.RouteSegments.Add(Segment(4, 3, Fidelity.Estimated, "Mock"));       // survives
+            db.RouteSegments.Add(Segment(5, 6, Fidelity.Measured, "Valhalla"));    // survives
+            await db.SaveChangesAsync();
+        }
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var purged = await StartupCleanupService.PurgeOsrmCacheRowsCoreAsync(db, CancellationToken.None);
+            purged.Should().Be(2, "only the two Source=OSRM rows are stale");
+        }
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            (await db.RouteSegments.AnyAsync(r => r.Source == "OSRM")).Should().BeFalse();
+            (await db.RouteSegments.CountAsync()).Should().Be(3, "Manual, Mock, and Valhalla rows survive");
+            (await db.RouteSegments.AnyAsync(r => r.Source == "Manual")).Should().BeTrue();
+            (await db.RouteSegments.AnyAsync(r => r.Source == "Valhalla")).Should().BeTrue();
+        }
+    }
+
+    [Fact]
+    public async Task PurgeOsrmCore_NeverDeletesManualRow_EvenIfMislabeledOsrm()
+    {
+        // Defensive belt: even a Manual-fidelity row stamped Source="OSRM" must survive —
+        // [TRIP-MANUAL-01] never lets a user-entered time be touched.
+        var factory = TestDbHelper.CreateFactory();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.RouteSegments.Add(Segment(1, 2, Fidelity.Manual, "OSRM"));
+            await db.SaveChangesAsync();
+        }
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var purged = await StartupCleanupService.PurgeOsrmCacheRowsCoreAsync(db, CancellationToken.None);
+            purged.Should().Be(0, "a Manual row is never touched");
+        }
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            (await db.RouteSegments.CountAsync()).Should().Be(1);
+        }
+    }
+
+    [Fact]
+    public async Task PurgeOsrmCore_IsIdempotent_SecondRunIsNoOp()
+    {
+        var factory = TestDbHelper.CreateFactory();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.RouteSegments.Add(Segment(1, 2, Fidelity.Measured, "OSRM"));
+            await db.SaveChangesAsync();
+        }
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            (await StartupCleanupService.PurgeOsrmCacheRowsCoreAsync(db, CancellationToken.None)).Should().Be(1);
+        }
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            (await StartupCleanupService.PurgeOsrmCacheRowsCoreAsync(db, CancellationToken.None))
+                .Should().Be(0, "the rows are already gone — the migration self-retires");
+        }
+    }
+
     [Fact]
     public async Task ReviveCore_LeavesDormantManualPoiUntouched()
     {

@@ -10,23 +10,25 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace LucidCartographer.Tests.ViewModels;
 
 /// <summary>
-/// Story 2.4 (FR-8/10, RD11): <see cref="TripViewModel.RecommendsOsrm"/> drives the quiet
-/// "enable OSRM for measured road times" note on a default (no-measured-provider)
-/// deployment. It is true only for a null/Mock provider with at least one NORMALLY
-/// Estimated (non-fallback) leg, and stays DISTINCT from
+/// <see cref="TripViewModel.RecommendsMeasuredProvider"/> drives the quiet "enable Valhalla
+/// for measured road times" note on a default (no-measured-provider) deployment. It is true
+/// only for a non-measured-capable provider (null/Mock, ProducesMeasuredFidelity != true)
+/// with at least one NORMALLY Estimated (non-fallback) leg, and stays DISTINCT from
 /// <see cref="TripViewModel.IsShowingApproximateEstimates"/> (the engine-unreachable
-/// fallback): a trip whose only "estimates" are fallback legs must NOT recommend OSRM.
+/// fallback). Capability-gated, so ANY measured provider (e.g. Valhalla) suppresses it
+/// (Epic 3: the prior gate keyed on the now-removed OSRM source string).
 /// </summary>
-public class TripViewModelRecommendsOsrmTests
+public class TripViewModelRecommendsMeasuredProviderTests
 {
     private const int CollectionId = 1;
 
-    // A stub provider that declares an arbitrary Source — used to simulate an OSRM
-    // (measured) deployment where the recommendation must be suppressed.
-    private sealed class StubProvider(string source) : ITravelTimeProvider
+    // A stub provider that declares its measured capability — used to simulate a measured
+    // (Valhalla) deployment where the recommendation must be suppressed.
+    private sealed class StubProvider(string source, bool producesMeasured) : ITravelTimeProvider
     {
         public string Source => source;
         public string? Attribution => null;
+        public bool ProducesMeasuredFidelity => producesMeasured;
         public Task<TravelLegResult> GetLegAsync(
             TravelEndpoint from, TravelEndpoint to, string travelMode, CancellationToken ct) =>
             Task.FromResult(new TravelLegResult(0, 0, Fidelity.Estimated, null));
@@ -43,10 +45,6 @@ public class TripViewModelRecommendsOsrmTests
         for (var i = 1; i <= placeable; i++)
         {
             db.Pois.Add(new Poi { Id = i, Name = $"P{i}", Latitude = 50 + i, Longitude = 20 + i, AddedDate = new DateTime(2025, 1, i) });
-            // Story 3.2 (TRIP-LEGMODE-01): legs resolve their cache row by their OWN per-leg
-            // mode now, not the collection's trip-wide TravelMode. Set each From-stop's
-            // OutgoingTravelMode to the same mode the segments are seeded under so the legs
-            // pick those rows (preserving each test's original "legs under <mode>" intent).
             db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = i, PoiCollectionId = CollectionId, OutgoingTravelMode = travelMode });
         }
         db.SaveChanges();
@@ -84,57 +82,57 @@ public class TripViewModelRecommendsOsrmTests
     }
 
     [Fact]
-    public async Task RecommendsOsrm_True_ForNullProvider_WithNonFallbackEstimatedLegs()
+    public async Task Recommends_True_ForNullProvider_WithNonFallbackEstimatedLegs()
     {
         var factory = Seed(placeable: 2);
         await AddSegmentAsync(factory, 1, 2, Fidelity.Estimated);
         await AddSegmentAsync(factory, 2, 1, Fidelity.Estimated);
         await using var vm = await EnabledVmAsync(factory, placeable: 2, provider: null);
 
-        vm.RecommendsOsrm.Should().BeTrue();
+        vm.RecommendsMeasuredProvider.Should().BeTrue();
         // It is the normal Mock-Estimated state, NOT the engine-unreachable fallback.
         vm.IsShowingApproximateEstimates.Should().BeFalse();
     }
 
     [Fact]
-    public async Task RecommendsOsrm_True_ForMockProvider_WithNonFallbackEstimatedLegs()
+    public async Task Recommends_True_ForMockProvider_WithNonFallbackEstimatedLegs()
     {
         var factory = Seed(placeable: 2);
         await AddSegmentAsync(factory, 1, 2, Fidelity.Estimated);
         await AddSegmentAsync(factory, 2, 1, Fidelity.Estimated);
-        await using var vm = await EnabledVmAsync(factory, placeable: 2, new StubProvider(TravelTimeSource.Mock));
+        await using var vm = await EnabledVmAsync(factory, placeable: 2, new StubProvider(TravelTimeSource.Mock, producesMeasured: false));
 
-        vm.RecommendsOsrm.Should().BeTrue();
+        vm.RecommendsMeasuredProvider.Should().BeTrue();
     }
 
     [Fact]
-    public async Task RecommendsOsrm_False_WhenProviderIsOsrm()
+    public async Task Recommends_False_WhenProviderIsMeasuredCapable()
     {
         var factory = Seed(placeable: 2);
-        // Estimated legs present, but a measured provider is configured ⇒ no recommendation.
+        // Estimated legs present, but a measured-capable provider (Valhalla) is configured ⇒ no recommendation.
         await AddSegmentAsync(factory, 1, 2, Fidelity.Estimated);
         await AddSegmentAsync(factory, 2, 1, Fidelity.Estimated);
-        await using var vm = await EnabledVmAsync(factory, placeable: 2, new StubProvider(TravelTimeSource.Osrm));
+        await using var vm = await EnabledVmAsync(factory, placeable: 2, new StubProvider(TravelTimeSource.Valhalla, producesMeasured: true));
 
-        vm.RecommendsOsrm.Should().BeFalse();
+        vm.RecommendsMeasuredProvider.Should().BeFalse();
     }
 
     [Fact]
-    public async Task RecommendsOsrm_False_WhenOnlyFallbackEstimatedLegs()
+    public async Task Recommends_False_WhenOnlyFallbackEstimatedLegs()
     {
         var factory = Seed(placeable: 2);
         // The only "estimates" are the engine-unreachable fallback — the fallback note
-        // covers this; the OSRM-recommendation note must stay distinct (not shown).
+        // covers this; the measured-provider recommendation note must stay distinct (not shown).
         await AddSegmentAsync(factory, 1, 2, Fidelity.Estimated, TravelTimeSource.EstimatedFallback);
         await AddSegmentAsync(factory, 2, 1, Fidelity.Estimated, TravelTimeSource.EstimatedFallback);
         await using var vm = await EnabledVmAsync(factory, placeable: 2, provider: null);
 
         vm.IsShowingApproximateEstimates.Should().BeTrue();
-        vm.RecommendsOsrm.Should().BeFalse();
+        vm.RecommendsMeasuredProvider.Should().BeFalse();
     }
 
     [Fact]
-    public async Task RecommendsOsrm_False_WhenNoLegs()
+    public async Task Recommends_False_WhenNoLegs()
     {
         // Trip View off / no enabled trip ⇒ no legs ⇒ no recommendation.
         var factory = Seed(placeable: 2);
@@ -147,11 +145,11 @@ public class TripViewModelRecommendsOsrmTests
         await vm.LoadAsync(CollectionId, 2);
 
         vm.OrderedLegs.Should().BeEmpty();
-        vm.RecommendsOsrm.Should().BeFalse();
+        vm.RecommendsMeasuredProvider.Should().BeFalse();
     }
 
     [Fact]
-    public async Task RecommendsOsrm_False_ForAnyAirPlaceholderLegs()
+    public async Task Recommends_False_ForAnyAirPlaceholderLegs()
     {
         // Any/Air with no manual entry ⇒ Placeholder legs (not Estimated) ⇒ no recommendation.
         var factory = Seed(placeable: 2, travelMode: TravelMode.AnyAir);
@@ -159,18 +157,18 @@ public class TripViewModelRecommendsOsrmTests
         await AddSegmentAsync(factory, 2, 1, Fidelity.Placeholder, travelMode: TravelMode.AnyAir);
         await using var vm = await EnabledVmAsync(factory, placeable: 2, provider: null);
 
-        vm.RecommendsOsrm.Should().BeFalse();
+        vm.RecommendsMeasuredProvider.Should().BeFalse();
     }
 
     [Fact]
-    public async Task RecommendsOsrm_False_ForMeasuredLegs()
+    public async Task Recommends_False_ForMeasuredLegs()
     {
-        // Measured legs (e.g. cached from a prior OSRM run) ⇒ nothing to recommend.
+        // Measured legs (e.g. cached from a prior measured run) ⇒ nothing to recommend.
         var factory = Seed(placeable: 2);
-        await AddSegmentAsync(factory, 1, 2, Fidelity.Measured, TravelTimeSource.Osrm);
-        await AddSegmentAsync(factory, 2, 1, Fidelity.Measured, TravelTimeSource.Osrm);
+        await AddSegmentAsync(factory, 1, 2, Fidelity.Measured, TravelTimeSource.Valhalla);
+        await AddSegmentAsync(factory, 2, 1, Fidelity.Measured, TravelTimeSource.Valhalla);
         await using var vm = await EnabledVmAsync(factory, placeable: 2, provider: null);
 
-        vm.RecommendsOsrm.Should().BeFalse();
+        vm.RecommendsMeasuredProvider.Should().BeFalse();
     }
 }

@@ -1070,4 +1070,54 @@ public class TripOrderingServiceTests
         (await db.PoiCollectionItems.FirstAsync(ci => ci.PoiId == 2 && ci.PoiCollectionId == CollectionId))
             .DwellMinutes.Should().Be(30, "the dwell write itself still landed");
     }
+
+    // Story 1.3 (AD-1 / RD3): the smart-haversine detour factor must NEVER reach the
+    // TSP cost matrix, so the computed Stop Order is invariant to detour-factor config.
+    [Fact]
+    public async Task SortTravelingSalesman_OrderIsInvariant_ToDetourFactorConfiguration()
+    {
+        // Distinct coordinates so the TSP solver has a non-degenerate problem to sort.
+        async Task<IDbContextFactory<AppDbContext>> SeedGeoAsync()
+        {
+            var f = TestDbHelper.CreateFactory();
+            await using var db = await f.CreateDbContextAsync();
+            db.PoiCollections.Add(new PoiCollection { Id = CollectionId, Name = "Trip", Color = "#005bbf", TravelMode = TravelMode.Drive });
+            (int id, double lat, double lon)[] pts =
+            [
+                (1, 50.00, 20.00), (2, 50.90, 20.10), (3, 50.10, 20.95),
+                (4, 50.85, 20.92), (5, 50.45, 20.40),
+            ];
+            var day = new DateTime(2025, 1, 1);
+            foreach (var (id, lat, lon) in pts)
+            {
+                db.Pois.Add(new Poi { Id = id, Name = $"P{id}", Latitude = lat, Longitude = lon, AddedDate = day.AddDays(id) });
+                db.PoiCollectionItems.Add(new PoiCollectionItem { PoiId = id, PoiCollectionId = CollectionId, OrderIndex = id });
+            }
+            await db.SaveChangesAsync();
+            return f;
+        }
+
+        TripOrderingService ServiceWith(IDbContextFactory<AppDbContext> f, TravelTimeOptions options) =>
+            new(f, new SqliteWriteLock(),
+                new DistanceMatrixService(f, Microsoft.Extensions.Options.Options.Create(options)),
+                NullLogger<TripOrderingService>.Instance);
+
+        // Run 1: shipped default detour factors.
+        var f1 = await SeedGeoAsync();
+        await ServiceWith(f1, new TravelTimeOptions()).SortTravelingSalesmanAsync(CollectionId);
+        var order1 = await ReadOrderAsync(f1);
+
+        // Run 2: wildly exaggerated, asymmetric detour factors.
+        var f2 = await SeedGeoAsync();
+        await ServiceWith(f2, new TravelTimeOptions
+        {
+            DriveDetourFactor = 3.0,
+            CycleDetourFactor = 5.0,
+            WalkDetourFactor = 8.0,
+        }).SortTravelingSalesmanAsync(CollectionId);
+        var order2 = await ReadOrderAsync(f2);
+
+        order2.Should().Equal(order1,
+            "the TSP cost matrix uses raw haversine — detour-factor config must never change the computed order (AD-1)");
+    }
 }

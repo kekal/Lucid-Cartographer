@@ -41,19 +41,22 @@ services:
       - Auth__TrustedNetworks__0=172.16.0.0/12
       - Auth__TrustedNetworks__1=10.0.0.0/8
       - Auth__TrustedNetworks__2=192.168.0.0/16
-      # --- OPTIONAL: OSRM measured travel times (Story 4.1, TRIP-OSRM-01) ---
-      # Uncomment to flip the active provider to the self-hosted OSRM sidecars
-      # below. Each ground mode talks to its own per-profile backend (Drive->car,
-      # Walk->foot, Cycle->bike); a mode left unset degrades to a straight-line
-      # estimate. Start the sidecars with: docker compose --profile osrm up
-      # See docs/osrm.md for the one-time extract-prep steps. NFR7: OSRM is
-      # self-hosted, so coordinates never leave the deployment (no egress).
-      # NFR8: enabling OSRM brings the OSM/ODbL attribution obligation (Story 4.2
-      # renders it).
-      # - TravelTime__Provider=Osrm
-      # - TravelTime__Osrm__DriveBaseUrl=http://osrm-car:5000
-      # - TravelTime__Osrm__WalkBaseUrl=http://osrm-foot:5000
-      # - TravelTime__Osrm__CycleBaseUrl=http://osrm-bike:5000
+      # --- OPTIONAL: Valhalla measured travel times (Epic 2, AD-8) -----------
+      # Uncomment to flip the active provider to the self-hosted Valhalla engine
+      # defined under the "valhalla" compose profile below. ONE engine serves all
+      # ground modes via dynamic costing (Drive->auto, Walk->pedestrian,
+      # Cycle->bicycle) — no per-mode backends. Start it with:
+      #   docker compose --profile valhalla up
+      # and pick your region with the single `tile_urls` env var on the valhalla
+      # service (set VALHALLA_TILE_URLS in .env). On first start it downloads the
+      # .pbf and BUILDS tiles; during that window routing is temporarily Estimated
+      # (smart-haversine) and self-heals to Measured once tiles finish and the
+      # background pass re-attempts (FR-13a). NFR7: Valhalla is self-hosted, so
+      # stop coordinates never leave the deployment (the only out-call is the
+      # build-time .pbf fetch). NFR8: enabling Valhalla brings the OSM/ODbL
+      # attribution obligation (surfaced via provider.Attribution).
+      # - TravelTime__Provider=Valhalla
+      # - TravelTime__Valhalla__BaseUrl=http://valhalla:8002
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health"]
       interval: 30s
@@ -61,41 +64,57 @@ services:
       retries: 3
       start_period: 10s
 
-  # --- OPTIONAL OSRM sidecars (Story 4.1, TRIP-OSRM-01) ---------------------
-  # Gated behind the "osrm" compose profile, so the default `docker compose up`
-  # (the Mock deployment) starts NONE of these. Enable with:
-  #   docker compose --profile osrm up
-  # One container per profile the operator wants. Each runs osrm-routed (MLD
-  # algorithm) against a region extract mounted READ-ONLY, on a distinct host
-  # port. Image is VERSION-PINNED (not :latest). Prepare the .osrm files once per
-  # profile (osrm-extract/-partition/-customize) per docs/osrm.md. The extracts
-  # live under ./appdata/osrm/<profile>/ — adjust paths/region to your deployment.
-  osrm-car:
-    image: ghcr.io/project-osrm/osrm-backend:v6.0.0
-    profiles: ["osrm"]
-    command: osrm-routed --algorithm mld /data/region.osrm
-    volumes:
-      - ./appdata/osrm/car:/data:ro
+  # --- OPTIONAL Valhalla measured-routing engine (Epic 2, AD-8) -------------
+  # Gated behind the "valhalla" compose profile, so the default `docker compose
+  # up` (the Mock/smart-haversine deployment) starts NONE of it. Enable with:
+  #   docker compose --profile valhalla up
+  # ONE engine serves all ground modes via dynamic costing (Drive->auto,
+  # Walk->pedestrian, Cycle->bicycle) — no per-profile sidecars, no manual
+  # extract/partition/customize. On first start (and whenever the .pbf changes)
+  # it auto-DOWNLOADS the region extract from `tile_urls` and auto-BUILDS tiles
+  # into ./appdata/valhalla (mapped to /custom_files). DURING THAT BUILD WINDOW
+  # Valhalla is UNREACHABLE and ground legs degrade to smart-haversine
+  # (Estimated) — the app self-heals to Measured once tiles finish and the
+  # background pass re-attempts (FR-13a). Image is IMMUTABLY PINNED to a specific
+  # version tag, NEVER :latest (AD-8, OQ-7). NFR7: the ONLY outbound access is
+  # this build-time .pbf fetch; routing requests never leave the internal compose
+  # network, so stop coordinates never egress.
+  valhalla:
+    image: ghcr.io/gis-ops/docker-valhalla/valhalla:3.5.1
+    profiles: ["valhalla"]
     ports:
-      - "5000:5000"
-    restart: unless-stopped
-
-  osrm-foot:
-    image: ghcr.io/project-osrm/osrm-backend:v6.0.0
-    profiles: ["osrm"]
-    command: osrm-routed --algorithm mld /data/region.osrm
+      # Published so the app reaches it at http://valhalla:8002 over the internal
+      # compose network (ValhallaOptions.BaseUrl default) and an operator can
+      # reach :8002 on the host. Port is NON-NEGOTIABLE — it must match the app's
+      # default BaseUrl.
+      - "8002:8002"
     volumes:
-      - ./appdata/osrm/foot:/data:ro
-    ports:
-      - "5001:5000"
+      # Persists built tiles across recreates so the multi-minute build is paid
+      # once, not on every `up`. The image auto-rebuilds when the source .pbf
+      # changes (use_tiles_ignore_pbf).
+      - ./appdata/valhalla:/custom_files
+    environment:
+      # The SINGLE knob an operator sets to choose their region (FR-12). Point it
+      # at a region extract URL (e.g. a Geofabrik .osm.pbf). Override via
+      # VALHALLA_TILE_URLS in .env. No extract/partition/customize steps — the
+      # image downloads and builds tiles on its own.
+      - tile_urls=${VALHALLA_TILE_URLS:-https://download.geofabrik.de/europe/monaco-latest.osm.pbf}
+      # Reuse already-built tiles when present (skip rebuild unless the .pbf
+      # changes); keep the tile tar so a recreate restarts fast.
+      - use_tiles_ignore_pbf=True
+      - build_tar=True
+      - server_threads=2
     restart: unless-stopped
-
-  osrm-bike:
-    image: ghcr.io/project-osrm/osrm-backend:v6.0.0
-    profiles: ["osrm"]
-    command: osrm-routed --algorithm mld /data/region.osrm
-    volumes:
-      - ./appdata/osrm/bike:/data:ro
-    ports:
-      - "5002:5000"
-    restart: unless-stopped
+    # The build window is operator-visible: until tiles are built and the engine
+    # answers, /status fails and the service shows "starting"/"unhealthy" in
+    # `docker compose ps`, while `docker compose logs valhalla` streams the
+    # image's own tile-build progress. During this window the app routes
+    # Estimated and self-heals to Measured once healthy (FR-13a). start_period
+    # must comfortably cover a region tile build (minutes→tens of minutes by
+    # region size — OQ-3, measured by the operator during first boot).
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8002/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 600s

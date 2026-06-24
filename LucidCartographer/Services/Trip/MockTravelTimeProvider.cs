@@ -19,6 +19,9 @@ public sealed class MockTravelTimeProvider(IOptions<TravelTimeOptions> options) 
     /// <summary>Haversine mock is not OSM-derived; attribution is the responsibility of the base map layer.</summary>
     public string? Attribution => null;
 
+    /// <summary>The haversine mock is estimate-only; it never produces measured road-network legs.</summary>
+    public bool ProducesMeasuredFidelity => false;
+
     public Task<TravelLegResult> GetLegAsync(
         TravelEndpoint from,
         TravelEndpoint to,

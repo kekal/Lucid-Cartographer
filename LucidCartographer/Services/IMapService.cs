@@ -49,7 +49,7 @@ public interface IMapService
 
     /// <summary>
     /// Set the routing-data attribution on the map's attribution control. When <paramref name="html"/> is non-null (an
-    /// OSM-based routing provider such as OSRM is active) the OSM/ODbL routing
+    /// OSM-based routing provider such as Valhalla is active) the OSM/ODbL routing
     /// attribution is added on top of the base OSM tile attribution; when null any prior routing attribution is removed.
     /// </summary>
     Task SetRoutingAttributionAsync(string? html);

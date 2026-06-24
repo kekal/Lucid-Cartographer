@@ -27,9 +27,46 @@ public static class TripServicesExtensions
         services.AddSingleton<TravelTimeProgressService>();
 
         // Mock provider (haversine): default for tests. Has no Attribution and no external deps.
-        // Production overload re-registers after this, so config-selected provider (e.g., OSRM) wins.
+        // Production overload re-registers after this, so config-selected provider (e.g., Valhalla) wins.
         services.AddSingleton<ITravelTimeProvider, MockTravelTimeProvider>();
         return services;
+    }
+
+    /// <summary>
+    /// Classifies a configured <c>TravelTime:Provider</c> value into the active selection.
+    /// </summary>
+    public enum ProviderSelection
+    {
+        /// <summary>Empty/missing or the explicit "Mock" default → smart-haversine.</summary>
+        Default,
+
+        /// <summary>The measured self-hosted Valhalla provider.</summary>
+        Valhalla,
+
+        /// <summary>A retired ("Osrm") or otherwise unrecognized id → falls back to the default with a warning.</summary>
+        RetiredOrUnknown,
+    }
+
+    /// <summary>
+    /// Pure, testable classification of the configured provider id. Empty/missing and "Mock"
+    /// resolve to <see cref="ProviderSelection.Default"/>; "Valhalla" to that provider; anything
+    /// else (including the retired "Osrm") to <see cref="ProviderSelection.RetiredOrUnknown"/>,
+    /// which the caller surfaces as a prominent warn-and-fall-back (FR-15, AD-7 — never fail-fast).
+    /// </summary>
+    public static ProviderSelection ClassifyProvider(string? providerId)
+    {
+        if (string.IsNullOrWhiteSpace(providerId)
+            || string.Equals(providerId, "Mock", StringComparison.OrdinalIgnoreCase))
+        {
+            return ProviderSelection.Default;
+        }
+
+        if (string.Equals(providerId, "Valhalla", StringComparison.OrdinalIgnoreCase))
+        {
+            return ProviderSelection.Valhalla;
+        }
+
+        return ProviderSelection.RetiredOrUnknown;
     }
 
     /// <summary>
@@ -40,32 +77,60 @@ public static class TripServicesExtensions
     {
         services.AddTripServices();
 
-        // Select provider by config: default is Mock (haversine), only "Osrm" swaps in OSRM provider.
-        // OSRM is opt-in, never the default. Hosted service consumes provider + pipeline.
+        // Select provider by config: default is Mock (smart-haversine), only "Valhalla"
+        // swaps in the measured Valhalla provider. Valhalla is opt-in, never the default.
+        // A retired ("Osrm") or unknown id never bricks boot — it warns prominently and
+        // falls back to the default (FR-15, AD-7).
         var providerId = configuration["TravelTime:Provider"];
-        if (string.Equals(providerId, "Osrm", StringComparison.OrdinalIgnoreCase))
+        switch (ClassifyProvider(providerId))
         {
-            // Bind OSRM options and register named HttpClient "osrm" with User-Agent.
-            // Self-hosted, so no egress guard needed.
-            services.Configure<OsrmOptions>(configuration.GetSection("TravelTime:Osrm"));
+            case ProviderSelection.Valhalla:
+                // Bind Valhalla options and register the named "valhalla" HttpClient.
+                // Self-hosted (coordinates never egress), so no egress guard needed.
+                services.Configure<ValhallaOptions>(configuration.GetSection("TravelTime:Valhalla"));
 
-            var timeoutSeconds = configuration.GetValue<int?>("TravelTime:Osrm:RequestTimeoutSeconds") ?? 10;
-            services.AddHttpClient(OsrmTravelTimeProvider.HttpClientName, c =>
-            {
-                c.Timeout = TimeSpan.FromSeconds(Math.Max(1, timeoutSeconds));
-                c.DefaultRequestHeaders.UserAgent.ParseAdd("LucidCartographer/1.0 (+osrm-routing)");
-            });
+                var timeoutSeconds = configuration.GetValue<int?>("TravelTime:Valhalla:RequestTimeoutSeconds") ?? 10;
+                services.AddHttpClient(ValhallaTravelTimeProvider.HttpClientName, c =>
+                {
+                    c.Timeout = TimeSpan.FromSeconds(Math.Max(1, timeoutSeconds));
+                });
 
-            services.AddSingleton<ITravelTimeProvider, OsrmTravelTimeProvider>();
-        }
-        else
-        {
-            services.AddSingleton<ITravelTimeProvider, MockTravelTimeProvider>();
+                services.AddSingleton<ITravelTimeProvider, ValhallaTravelTimeProvider>();
+                break;
+
+            case ProviderSelection.RetiredOrUnknown:
+                // Loud, high-level startup warning: this deployment is silently downgraded
+                // from Measured to Estimated. Selection runs before the app's ILogger exists,
+                // so emit via a one-off bootstrap logger, then register the default.
+                WarnRetiredProvider(providerId);
+                services.AddSingleton<ITravelTimeProvider, MockTravelTimeProvider>();
+                break;
+
+            default:
+                services.AddSingleton<ITravelTimeProvider, MockTravelTimeProvider>();
+                break;
         }
 
         services.AddHostedService<TravelTimeComputationBackgroundService>();
         services.Configure<TravelTimeOptions>(configuration.GetSection("TravelTime"));
         return services;
+    }
+
+    /// <summary>
+    /// Emits the prominent retired/unknown-provider warning. Uses a self-contained bootstrap
+    /// logger because provider selection happens during service registration, before the host's
+    /// logging pipeline is available.
+    /// </summary>
+    private static void WarnRetiredProvider(string? providerId)
+    {
+        using var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
+        var logger = loggerFactory.CreateLogger("LucidCartographer.Configuration.TripServices");
+        logger.LogWarning(
+            "TravelTime:Provider is set to '{ProviderId}', which is not a recognized provider " +
+            "(the OSRM provider has been retired). Falling back to the default smart-haversine " +
+            "estimate — routing is now ESTIMATED, not MEASURED. Set TravelTime:Provider=Valhalla " +
+            "(and start the 'valhalla' compose profile) to restore measured road times.",
+            providerId);
     }
 
     private static void TryAddSingletonWriteLock(this IServiceCollection services)

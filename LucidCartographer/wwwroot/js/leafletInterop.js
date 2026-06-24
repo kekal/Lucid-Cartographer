@@ -207,14 +207,15 @@
         }
     }
 
-    // TRIP-OSRM-02 (Story 4.2): decode a Google/OSRM encoded polyline (PRECISION 5)
-    // into a [[lat,lon],...] vertex array for the measured road-shaped leg. This MUST
-    // stay in lockstep with Story 4.1's OsrmTravelTimeProvider, which requests
-    // geometries=polyline at OsrmOptions.GeometryPrecision (default 5 → factor 1e5).
-    // If 4.1 ever moves to precision 6 (polyline6), change the 1e5 factor here to 1e6
-    // (TRIP-OSRM-01). Self-contained — no bundled library, no CDN (ARCH-HIGH-07:
-    // Leaflet is self-hosted). Returns null on any malformed input so drawTripLegs
-    // falls back to the straight dashed connector and never throws.
+    // Story 2.2 (AD-3): decode an encoded polyline into a [[lat,lon],...] vertex array
+    // for the measured road-shaped leg. The decoder targets Valhalla polyline6
+    // (ValhallaOptions.GeometryPrecision default 6 → factor 1e-6), matching the
+    // trip.legs[].shape Valhalla emits. Valhalla is the only measured provider (OSRM,
+    // the former precision-5 source, was removed in Epic 3), so the 1e-6 factor is
+    // unconditionally correct for every measured leg.
+    // Self-contained — no bundled library, no CDN (ARCH-HIGH-07: Leaflet is self-hosted).
+    // Returns null on any malformed input so drawTripLegs falls back to the straight
+    // dashed connector and never throws.
     function decodePolyline(encoded) {
         if (typeof encoded !== 'string' || encoded.length === 0) return null;
         try {
@@ -236,7 +237,7 @@
                     shift += 5;
                 } while (b >= 0x20 && index < len);
                 lng += ((result & 1) ? ~(result >> 1) : (result >> 1));
-                points.push([lat * 1e-5, lng * 1e-5]);
+                points.push([lat * 1e-6, lng * 1e-6]);
             }
             return points.length ? points : null;
         } catch (_) {
@@ -574,7 +575,7 @@
         // TRIP-OSRM-02 (Story 4.2, AC4): add or remove the routing-data attribution on
         // Leaflet's attribution control (on TOP of the base OSM tile attribution set in
         // initMap). Called once per map instance from MapPage with the active provider's
-        // OSM/ODbL attribution HTML when an OSM-based provider (OSRM) is active, or null
+        // OSM/ODbL attribution HTML when an OSM-based provider (Valhalla) is active, or null
         // under the default Mock (which declares none). Idempotent: it removes any
         // previously-added routing attribution first, so a repeat call (e.g. a
         // desktop<->mobile viewport flip re-running it) never double-prints it.

@@ -6,27 +6,27 @@ using Microsoft.Playwright;
 namespace LucidCartographer.Tests.Integration;
 
 /// <summary>
-/// Story 2.4 (FR-8/10, RD11) — end-to-end coverage of the "How to enable OSRM" link in
-/// the Trip View Mock-estimate note. The bUnit tests already assert the link's markup
-/// (href / target / rel / text); this exercises the part only an integration test can:
-/// actually CLICKING it must open the operator guide that the app SERVES, not a 404 /
-/// SPA fallback. Guards against the link silently rotting (e.g. the doc not being
-/// shipped — it is an embedded resource served by DocsEndpoints, since UseStaticFiles
-/// won't serve .md and the Docker image strips *.md).
+/// End-to-end coverage of the "How to enable Valhalla" link in the Trip View Mock-estimate
+/// note. The bUnit tests already assert the link's markup (href / target / rel / text); this
+/// exercises the part only an integration test can: actually CLICKING it must open the
+/// operator guide that the app SERVES, not a 404 / SPA fallback. Guards against the link
+/// silently rotting (e.g. the doc not being shipped — it is an embedded resource served by
+/// DocsEndpoints, since UseStaticFiles won't serve .md and the Docker image strips *.md).
+/// (Epic 3 retargeted this from the retired docs/osrm.md to docs/valhalla.md.)
 /// </summary>
 [Collection("Integration")]
-public class OsrmDocsLinkIntegrationTests : IntegrationTestBase
+public class ValhallaDocsLinkIntegrationTests : IntegrationTestBase
 {
-    private const string Collection = "OSRM Note Trip";
+    private const string Collection = "Valhalla Note Trip";
 
     private static string ToggleSelector => $"button[role='switch'][aria-label=\"{UiStrings.TripViewToggleAria}\"]";
     private static string StopPanelSelector => $"section[aria-label=\"{UiStrings.TripStopListAria}\"]";
 
-    // The Mock-estimate OSRM-recommendation note renders only when the VM RecommendsOsrm:
-    // a Mock/null provider (the integration host injects MockTravelTimeProvider) AND at
-    // least one NORMALLY Estimated, non-fallback leg. Seed each stop's outgoing leg as a
-    // Drive/Mock-Estimated cache row so the active legs resolve to Estimated (Any/Air
-    // would be Placeholder and suppress the note).
+    // The Mock-estimate measured-provider recommendation note renders only when the VM
+    // RecommendsMeasuredProvider: a Mock/null provider (the integration host injects
+    // MockTravelTimeProvider) AND at least one NORMALLY Estimated, non-fallback leg. Seed each
+    // stop's outgoing leg as a Drive/Mock-Estimated cache row so the active legs resolve to
+    // Estimated (Any/Air would be Placeholder and suppress the note).
     private async Task SeedMockEstimatedTripAsync()
     {
         await ImportTestFileAsync("sample.gpx", Collection, "#005bbf");
@@ -46,7 +46,7 @@ public class OsrmDocsLinkIntegrationTests : IntegrationTestBase
 
             // Estimated/Mock rows for every directional pair — a superset of the active
             // legs, so each drawn leg has a normal Mock-Estimated row (Source = Mock, NOT
-            // EstimatedFallback) and RecommendsOsrm is true.
+            // EstimatedFallback) and RecommendsMeasuredProvider is true.
             foreach (var from in poiIds)
             {
                 foreach (var to in poiIds)
@@ -71,7 +71,7 @@ public class OsrmDocsLinkIntegrationTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task ClickingOsrmLink_OpensServedOperatorGuide_NotA404()
+    public async Task ClickingValhallaLink_OpensServedOperatorGuide_NotA404()
     {
         await SeedMockEstimatedTripAsync();
         await NavigateAndWaitAsync("/");
@@ -81,10 +81,10 @@ public class OsrmDocsLinkIntegrationTests : IntegrationTestBase
         await Page.Locator(ToggleSelector).ClickAsync();
         await Page.WaitForSelectorAsync(StopPanelSelector, new() { Timeout = 10000 });
 
-        // The quiet OSRM-recommendation note carries the link by its exact localized text.
-        var link = Page.Locator($"a:has-text(\"{UiStrings.TripMockEstimateOsrmLink}\")");
+        // The quiet measured-provider recommendation note carries the link by its exact localized text.
+        var link = Page.Locator($"a:has-text(\"{UiStrings.TripMockEstimateValhallaLink}\")");
         await link.WaitForAsync(new() { Timeout = 10000 });
-        Assert.Equal(UiStrings.TripMockEstimateOsrmHref, await link.GetAttributeAsync("href"));
+        Assert.Equal(UiStrings.TripMockEstimateValhallaHref, await link.GetAttributeAsync("href"));
         Assert.Equal("_blank", await link.GetAttributeAsync("target"));
 
         // Clicking opens a new tab (target=_blank). Capture the popup AND its navigation
@@ -96,7 +96,7 @@ public class OsrmDocsLinkIntegrationTests : IntegrationTestBase
         });
         popup.Response += (_, r) =>
         {
-            if (r.Url.EndsWith("/docs/osrm.md", StringComparison.Ordinal))
+            if (r.Url.EndsWith("/docs/valhalla.md", StringComparison.Ordinal))
             {
                 docResponse = r;
             }
@@ -104,17 +104,17 @@ public class OsrmDocsLinkIntegrationTests : IntegrationTestBase
         await popup.WaitForLoadStateAsync(LoadState.Load);
 
         // The new tab landed on the served doc path...
-        Assert.EndsWith("/docs/osrm.md", popup.Url, StringComparison.Ordinal);
+        Assert.EndsWith("/docs/valhalla.md", popup.Url, StringComparison.Ordinal);
 
         // ...and the response was a real 200 for that path. (The popup's own navigation
         // response is the reliable source; the event handler above is a backstop.)
         var status = docResponse?.Status
-            ?? (await popup.Context.APIRequest.GetAsync($"{BaseUrl}/docs/osrm.md")).Status;
+            ?? (await popup.Context.APIRequest.GetAsync($"{BaseUrl}/docs/valhalla.md")).Status;
         Assert.Equal(200, status);
 
         // ...serving the OPERATOR GUIDE, not the Blazor SPA shell (a 404 would fall
-        // through to the app and render the layout, never this heading from osrm.md).
+        // through to the app and render the layout, never this heading from valhalla.md).
         var body = await popup.InnerTextAsync("body");
-        Assert.Contains("Enabling OSRM measured travel times", body, StringComparison.Ordinal);
+        Assert.Contains("Enabling Valhalla measured travel times", body, StringComparison.Ordinal);
     }
 }

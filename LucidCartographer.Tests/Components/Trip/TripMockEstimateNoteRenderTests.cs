@@ -13,9 +13,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace LucidCartographer.Tests.Components;
 
 /// <summary>
-/// Story 2.4 (FR-8/10, RD11): TripStopList renders the quiet OSRM-recommendation note
-/// (with the docs/osrm.md link) when <see cref="TripViewModel.RecommendsOsrm"/>, omits it
-/// otherwise, keeps it DISTINCT from the engine-unreachable fallback note, and the
+/// Story 2.4 (FR-8/10, RD11): TripStopList renders the quiet measured-provider recommendation
+/// note (with the docs/valhalla.md link) when <see cref="TripViewModel.RecommendsMeasuredProvider"/>,
+/// omits it otherwise, keeps it DISTINCT from the engine-unreachable fallback note, and the
 /// recompute control carries no fidelity-upgrade implication (FR-9).
 /// </summary>
 public class TripMockEstimateNoteRenderTests : BunitTestContext
@@ -69,7 +69,7 @@ public class TripMockEstimateNoteRenderTests : BunitTestContext
     }
 
     [Fact]
-    public async Task TripStopList_MockEstimated_ShowsOsrmRecommendationNote_WithDocsLink()
+    public async Task TripStopList_MockEstimated_ShowsMeasuredProviderRecommendationNote_WithDocsLink()
     {
         var factory = Seed();
         await AddSegmentAsync(factory, 1, 2, Fidelity.Estimated, TravelTimeSource.Mock);
@@ -85,11 +85,11 @@ public class TripMockEstimateNoteRenderTests : BunitTestContext
         cut.Markup.Should().Contain(UiStrings.TripMockEstimateNote);
         cut.FindAll("[role='status'][aria-live='polite']")
             .Should().NotContain(r => r.TextContent.Contains(UiStrings.TripMockEstimateNote, StringComparison.Ordinal));
-        // ...with the docs/osrm.md link (new tab, noopener).
-        var link = cut.Find($"a[href='{UiStrings.TripMockEstimateOsrmHref}']");
+        // ...with the docs/valhalla.md link (new tab, noopener).
+        var link = cut.Find($"a[href='{UiStrings.TripMockEstimateValhallaHref}']");
         link.GetAttribute("target").Should().Be("_blank");
         link.GetAttribute("rel").Should().Contain("noopener");
-        link.TextContent.Trim().Should().Be(UiStrings.TripMockEstimateOsrmLink);
+        link.TextContent.Trim().Should().Be(UiStrings.TripMockEstimateValhallaLink);
         // It is the recommendation, NOT the engine-unreachable fallback note.
         cut.Markup.Should().NotContain(UiStrings.TripApproximateEstimatesNote);
     }
@@ -113,11 +113,11 @@ public class TripMockEstimateNoteRenderTests : BunitTestContext
     }
 
     [Fact]
-    public async Task TripStopList_FallbackOnly_ShowsFallbackNote_NotOsrmRecommendation()
+    public async Task TripStopList_FallbackOnly_ShowsFallbackNote_NotMeasuredProviderRecommendation()
     {
         var factory = Seed();
         // The only estimates are engine-unreachable fallbacks — the fallback note owns
-        // this state; the OSRM-recommendation note must stay distinct (absent).
+        // this state; the measured-provider recommendation note must stay distinct (absent).
         await AddSegmentAsync(factory, 1, 2, Fidelity.Estimated, TravelTimeSource.EstimatedFallback);
         await AddSegmentAsync(factory, 2, 1, Fidelity.Estimated, TravelTimeSource.EstimatedFallback);
         await using var vm = await EnabledVmAsync(factory);
@@ -126,15 +126,15 @@ public class TripMockEstimateNoteRenderTests : BunitTestContext
 
         cut.Markup.Should().Contain(UiStrings.TripApproximateEstimatesNote);
         cut.Markup.Should().NotContain(UiStrings.TripMockEstimateNote);
-        cut.FindAll($"a[href='{UiStrings.TripMockEstimateOsrmHref}']").Should().BeEmpty();
+        cut.FindAll($"a[href='{UiStrings.TripMockEstimateValhallaHref}']").Should().BeEmpty();
     }
 
     [Fact]
-    public async Task TripStopList_MeasuredTrip_ShowsNoOsrmRecommendation()
+    public async Task TripStopList_MeasuredTrip_ShowsNoMeasuredProviderRecommendation()
     {
         var factory = Seed();
-        await AddSegmentAsync(factory, 1, 2, Fidelity.Measured, TravelTimeSource.Osrm);
-        await AddSegmentAsync(factory, 2, 1, Fidelity.Measured, TravelTimeSource.Osrm);
+        await AddSegmentAsync(factory, 1, 2, Fidelity.Measured, TravelTimeSource.Valhalla);
+        await AddSegmentAsync(factory, 2, 1, Fidelity.Measured, TravelTimeSource.Valhalla);
         await using var vm = await EnabledVmAsync(factory);
 
         var cut = RenderComponent<TripStopList>(p => p.Add(x => x.Vm, vm));

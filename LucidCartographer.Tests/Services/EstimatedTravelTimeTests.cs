@@ -45,10 +45,11 @@ public class EstimatedTravelTimeTests
     }
 
     [Fact]
-    public void Compute_MatchesExpectedHaversineAndPerModeSpeed()
+    public void Compute_AppliesPerModeDetourFactorThenSpeed()
     {
         var options = Options();
-        var expectedMeters = GeoUtils.HaversineDistance(From.Latitude, From.Longitude, To.Latitude, To.Longitude);
+        var haversine = GeoUtils.HaversineDistance(From.Latitude, From.Longitude, To.Latitude, To.Longitude);
+        var expectedMeters = haversine * options.DetourFactorFor(TravelMode.Drive);
 
         var drive = EstimatedTravelTime.Compute(From, To, TravelMode.Drive, options);
 
@@ -63,11 +64,15 @@ public class EstimatedTravelTimeTests
     [Fact]
     public void Compute_PerModeSpeed_ProducesStrictlyIncreasingDurations()
     {
+        // Equal detour factors isolate the per-mode speed effect on duration.
         var options = new TravelTimeOptions
         {
             DriveSpeedMetersPerSecond = 20.0,
             CycleSpeedMetersPerSecond = 5.0,
             WalkSpeedMetersPerSecond = 1.0,
+            DriveDetourFactor = 1.0,
+            CycleDetourFactor = 1.0,
+            WalkDetourFactor = 1.0,
         };
 
         var drive = EstimatedTravelTime.Compute(From, To, TravelMode.Drive, options);

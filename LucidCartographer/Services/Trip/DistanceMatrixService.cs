@@ -42,7 +42,12 @@ public sealed class DistanceMatrixService(
             return null;
         }
 
-        // Mode-invariant haversine distance for every pair; TSP order is identical regardless of travel mode.
+        // AD-1 critical guard (RD3): the TSP cost matrix uses RAW haversine distance and
+        // must NEVER be routed through the smart-haversine detour factor
+        // (TravelTimeOptions.DetourFactorFor). The detour factor lives only in the estimate
+        // path (EstimatedTravelTime.Compute); applying it here would make stop ordering
+        // vary with detour-factor config. Mode-invariant: TSP order is identical regardless
+        // of travel mode AND of detour-factor configuration.
         var n = stops.Count;
         var matrix = new double[n][];
         var fromCache = new bool[n][];

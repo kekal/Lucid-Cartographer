@@ -307,6 +307,7 @@ public class TravelTimeComputationBackgroundServiceTests
     {
         public string Source => "Throwing";
         public string? Attribution => null;
+        public bool ProducesMeasuredFidelity => false;
         public Task<TravelLegResult> GetLegAsync(TravelEndpoint from, TravelEndpoint to, string travelMode, CancellationToken ct) =>
             throw new InvalidOperationException("routing engine unreachable");
     }
@@ -316,6 +317,7 @@ public class TravelTimeComputationBackgroundServiceTests
     {
         public string Source => inner.Source;
         public string? Attribution => null;
+        public bool ProducesMeasuredFidelity => inner.ProducesMeasuredFidelity;
         public Task<TravelLegResult> GetLegAsync(TravelEndpoint from, TravelEndpoint to, string travelMode, CancellationToken ct) =>
             from.PoiId == 1
                 ? throw new InvalidOperationException("routing engine unreachable for the first leg")
@@ -430,50 +432,6 @@ public class TravelTimeComputationBackgroundServiceTests
         measured.DurationSeconds.Should().Be(999);
     }
 
-    // Story 4.1 (TRIP-OSRM-01, AC3): end-to-end degradation with the REAL OSRM
-    // provider. When OSRM returns code "NoRoute" the provider throws, and the loop's
-    // existing TRIP-DEGRADE-01 catch writes an Estimated row stamped
-    // Source = EstimatedFallback (never blank, never errors). Confirms the AC3 wiring
-    // through the production degradation branch — not a generic throwing stub.
-    private sealed class OsrmStubHandler(System.Net.HttpStatusCode status, string body) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(status)
-            {
-                Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
-            });
-    }
-
-    private sealed class OsrmStubFactory(HttpMessageHandler handler) : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name) => new(handler);
-    }
-
-    [Fact]
-    public async Task ProcessOnce_OsrmProviderNoRoute_DegradesToEstimatedFallback()
-    {
-        var factory = SeedDriveOpenPath(stops: 2);
-        var osrmProvider = new OsrmTravelTimeProvider(
-            new OsrmStubFactory(new OsrmStubHandler(
-                System.Net.HttpStatusCode.OK, "{\"code\":\"NoRoute\",\"routes\":[]}")),
-            Options.Create(new OsrmOptions { DriveBaseUrl = "http://osrm-car:5000" }),
-            Options.Create(new TravelTimeOptions { DriveSpeedMetersPerSecond = 20.0 }),
-            NullLogger<OsrmTravelTimeProvider>.Instance);
-
-        var service = BuildService(factory, new SqliteWriteLock(),
-            provider: osrmProvider, pipelines: NoRetryPipelines());
-
-        var act = async () => await service.ProcessOnceAsync(CancellationToken.None);
-        await act.Should().NotThrowAsync("a no-route leg degrades, never errors out of the loop");
-
-        await using var db = await factory.CreateDbContextAsync();
-        var row = await db.RouteSegments.SingleAsync();
-        row.Fidelity.Should().Be(Fidelity.Estimated, "the OSRM no-route leg falls back to a haversine estimate");
-        row.Source.Should().Be(TravelTimeSource.EstimatedFallback);
-        row.DurationSeconds.Should().BeGreaterThan(0, "never blank");
-        row.DistanceMeters.Should().BeGreaterThan(0);
-    }
-
     // TRIP-DEGRADE-01 (AC5) / TRIP-MANUAL-01 (Story 2.2 AC6): drive the
     // no-downgrade guard DIRECTLY. The production loop never re-queues an existing
     // key, so this is the only path that actually enters the guard branch — it is
@@ -512,5 +470,306 @@ public class TravelTimeComputationBackgroundServiceTests
         row.Source.Should().Be(existingSource);
         row.DurationSeconds.Should().Be(999, "the original duration is preserved");
         row.DistanceMeters.Should().Be(111);
+    }
+
+    // --- Story 2.3 (AD-2): capability-gated recompute / upgrade-eligibility ---
+
+    /// <summary>
+    /// A measured-capable stub: ProducesMeasuredFidelity=true, returns a Measured leg with a
+    /// recognisable source/geometry so an upgrade over a low-fidelity estimate is observable.
+    /// </summary>
+    private sealed class MeasuredStubProvider : ITravelTimeProvider
+    {
+        public string Source => "ValhallaStub";
+        public string? Attribution => null;
+        public bool ProducesMeasuredFidelity => true;
+        public Task<TravelLegResult> GetLegAsync(TravelEndpoint from, TravelEndpoint to, string travelMode, CancellationToken ct) =>
+            Task.FromResult(new TravelLegResult(
+                DurationSeconds: 1800, DistanceMeters: 25000,
+                Fidelity: Fidelity.Measured, GeometryPolyline: "stub_polyline"));
+    }
+
+    /// <summary>
+    /// A measured-capable provider that always throws — stands in for a reachable-but-failing
+    /// routing engine (e.g. a Valhalla no-route). Exercises the degrade branch on the new
+    /// recompute arm (ProducesMeasuredFidelity=true).
+    /// </summary>
+    private sealed class MeasuredThrowingProvider(Exception toThrow) : ITravelTimeProvider
+    {
+        public string Source => "ValhallaStub";
+        public string? Attribution => null;
+        public bool ProducesMeasuredFidelity => true;
+        public Task<TravelLegResult> GetLegAsync(TravelEndpoint from, TravelEndpoint to, string travelMode, CancellationToken ct) =>
+            throw toThrow;
+    }
+
+    /// <summary>Seeds an existing (1,2,Drive) row with the given fidelity/source for the roundtrip's 1→2 leg.</summary>
+    private static async Task SeedExistingLegAsync(IDbContextFactory<AppDbContext> factory, string fidelity, string source)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        db.RouteSegments.Add(new RouteSegment
+        {
+            FromPoiId = 1, ToPoiId = 2, TravelMode = TravelMode.Drive,
+            DurationSeconds = 4242, DistanceMeters = 5000,
+            Fidelity = fidelity, Source = source, ComputedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    [Theory]
+    [InlineData(TravelTimeSource.Mock)]
+    [InlineData(TravelTimeSource.EstimatedFallback)]
+    public async Task ProcessOnce_UpgradeEligibleRow_IsRecomputed_WhenProviderMeasuredCapable(string source)
+    {
+        // An Estimated row from Mock/EstimatedFallback is upgrade-eligible: a measured-capable
+        // provider must re-enqueue it and overwrite the low-fidelity estimate with a Measured value.
+        var factory = SeedRoundtripWithModes(mode1to2: TravelMode.Drive, mode2to1: TravelMode.AnyAir);
+        await SeedExistingLegAsync(factory, Fidelity.Estimated, source);
+
+        var service = BuildService(factory, new SqliteWriteLock(), provider: new MeasuredStubProvider());
+        await service.ProcessOnceAsync(CancellationToken.None);
+
+        await using var verify = await factory.CreateDbContextAsync();
+        var row = await verify.RouteSegments.SingleAsync(r => r.FromPoiId == 1 && r.ToPoiId == 2 && r.TravelMode == TravelMode.Drive);
+        row.Fidelity.Should().Be(Fidelity.Measured, "an upgrade-eligible row is recomputed to a measured value");
+        row.Source.Should().Be("ValhallaStub", "the measured provider's source replaces the estimate");
+        row.DurationSeconds.Should().Be(1800, "the measured value overwrites the old estimate");
+        row.GeometryPolyline.Should().Be("stub_polyline");
+    }
+
+    [Theory]
+    [InlineData(TravelTimeSource.Mock)]
+    [InlineData(TravelTimeSource.EstimatedFallback)]
+    public async Task ProcessOnce_UpgradeEligibleRow_IsLeftAlone_WhenProviderMock(string source)
+    {
+        // Same upgrade-eligible seed, but the default Mock provider (ProducesMeasuredFidelity=false)
+        // must NOT re-enqueue it — otherwise Mock would re-churn its own estimates forever (AC2).
+        var factory = SeedRoundtripWithModes(mode1to2: TravelMode.Drive, mode2to1: TravelMode.AnyAir);
+        await SeedExistingLegAsync(factory, Fidelity.Estimated, source);
+
+        var service = BuildService(factory, new SqliteWriteLock()); // default MockTravelTimeProvider
+        await service.ProcessOnceAsync(CancellationToken.None);
+
+        await using var verify = await factory.CreateDbContextAsync();
+        var row = await verify.RouteSegments.SingleAsync(r => r.FromPoiId == 1 && r.ToPoiId == 2 && r.TravelMode == TravelMode.Drive);
+        row.Fidelity.Should().Be(Fidelity.Estimated, "a Mock provider never re-enqueues its own estimate (no perpetual rework)");
+        row.Source.Should().Be(source);
+        row.DurationSeconds.Should().Be(4242, "the row is byte-for-byte unchanged under a Mock pass");
+    }
+
+    [Theory]
+    [InlineData(Fidelity.Manual, TravelTimeSource.Manual)]
+    [InlineData(Fidelity.Measured, TravelTimeSource.Valhalla)]
+    public async Task ProcessOnce_ManualOrMeasuredRow_IsNeverReEnqueued_EvenWhenMeasuredCapable(string fidelity, string source)
+    {
+        // Manual and Measured rows fail IsUpgradeEligible, so even a measured-capable provider
+        // never re-queues them — they are preserved exactly (AC3; the UpsertAsync guard is the
+        // second line of defence behind this read).
+        var factory = SeedRoundtripWithModes(mode1to2: TravelMode.Drive, mode2to1: TravelMode.AnyAir);
+        await SeedExistingLegAsync(factory, fidelity, source);
+
+        var service = BuildService(factory, new SqliteWriteLock(), provider: new MeasuredStubProvider());
+        await service.ProcessOnceAsync(CancellationToken.None);
+
+        await using var verify = await factory.CreateDbContextAsync();
+        var row = await verify.RouteSegments.SingleAsync(r => r.FromPoiId == 1 && r.ToPoiId == 2 && r.TravelMode == TravelMode.Drive);
+        row.Fidelity.Should().Be(fidelity, "a protected row is never re-enqueued nor downgraded");
+        row.Source.Should().Be(source);
+        row.DurationSeconds.Should().Be(4242, "the protected row's value is untouched");
+    }
+
+    [Fact]
+    public async Task ProcessOnce_EligibleFidelityButWrongSource_IsLeftAlone_WhenMeasuredCapable()
+    {
+        // Boundary: Estimated fidelity but a Source that is NOT Mock/EstimatedFallback
+        // (e.g. "Valhalla") fails the source half of the predicate ⇒ not upgrade-eligible.
+        var factory = SeedRoundtripWithModes(mode1to2: TravelMode.Drive, mode2to1: TravelMode.AnyAir);
+        await SeedExistingLegAsync(factory, Fidelity.Estimated, TravelTimeSource.Valhalla);
+
+        var service = BuildService(factory, new SqliteWriteLock(), provider: new MeasuredStubProvider());
+        await service.ProcessOnceAsync(CancellationToken.None);
+
+        await using var verify = await factory.CreateDbContextAsync();
+        var row = await verify.RouteSegments.SingleAsync(r => r.FromPoiId == 1 && r.ToPoiId == 2 && r.TravelMode == TravelMode.Drive);
+        row.Fidelity.Should().Be(Fidelity.Estimated, "the source half of the eligibility predicate matters");
+        row.Source.Should().Be(TravelTimeSource.Valhalla);
+        row.DurationSeconds.Should().Be(4242, "a non-Mock/-fallback estimate is left alone");
+    }
+
+    [Fact]
+    public async Task ProcessOnce_MeasuredCapableProviderThrows_DegradesLeg_WithoutAbortingBatch()
+    {
+        // A measured-capable provider that throws on the first leg must degrade THAT leg to an
+        // EstimatedFallback (one leg at a time) and still compute the second leg — never throwing
+        // out of ProcessOnceAsync (AC4, TRIP-DEGRADE-01, on the new recompute arm).
+        var factory = SeedDriveOpenPath(stops: 3);
+        var throwingFirst = new DegradeOnFirstLegProvider(new InvalidOperationException("routing engine unreachable"));
+        var service = BuildService(factory, new SqliteWriteLock(),
+            provider: throwingFirst, pipelines: NoRetryPipelines());
+
+        var act = async () => await service.ProcessOnceAsync(CancellationToken.None);
+        await act.Should().NotThrowAsync("a single leg's failure degrades, never aborts the batch");
+
+        await using var db = await factory.CreateDbContextAsync();
+        var rows = await db.RouteSegments.ToListAsync();
+        rows.Should().HaveCount(2, "both legs land a row — the failing first degrades, the second measures");
+        var degraded = rows.Single(r => r.FromPoiId == 1 && r.ToPoiId == 2);
+        degraded.Fidelity.Should().Be(Fidelity.Estimated);
+        degraded.Source.Should().Be(TravelTimeSource.EstimatedFallback, "the failing leg falls back to a haversine estimate");
+        var measured = rows.Single(r => r.FromPoiId == 2 && r.ToPoiId == 3);
+        measured.Fidelity.Should().Be(Fidelity.Measured, "the second leg computes normally via the measured provider");
+        measured.Source.Should().Be("ValhallaStub");
+    }
+
+    [Fact]
+    public async Task ProcessOnce_ValhallaRouteUnavailable_DegradesToEstimatedFallback()
+    {
+        // ValhallaRouteUnavailableException is a plain Exception (Story 2.2), so the existing
+        // general degrade catch handles it — NOT the cancellation re-throw. The leg degrades to
+        // an EstimatedFallback without aborting the pass (AC4).
+        var factory = SeedDriveOpenPath(stops: 2);
+        var service = BuildService(factory, new SqliteWriteLock(),
+            provider: new MeasuredThrowingProvider(new ValhallaRouteUnavailableException("no route")),
+            pipelines: NoRetryPipelines());
+
+        var act = async () => await service.ProcessOnceAsync(CancellationToken.None);
+        await act.Should().NotThrowAsync("a Valhalla no-route degrades, never errors out of the loop");
+
+        await using var db = await factory.CreateDbContextAsync();
+        var row = await db.RouteSegments.SingleAsync();
+        row.Fidelity.Should().Be(Fidelity.Estimated, "the Valhalla failure falls back to a haversine estimate");
+        row.Source.Should().Be(TravelTimeSource.EstimatedFallback);
+        row.DurationSeconds.Should().BeGreaterThan(0, "never blank");
+    }
+
+    [Fact]
+    public async Task ProcessOnce_PlaceholderUpgradeEligibleRow_IsRecomputed_WhenMeasuredCapable()
+    {
+        // Coverage gap: every other recompute test seeds Fidelity.Estimated, so the Placeholder
+        // arm of IsUpgradeEligible (fidelity is Estimated OR Placeholder) was never exercised.
+        // A Placeholder/Mock row on a ground leg is upgrade-eligible per AD-2's literal definition
+        // and must be recomputed to a Measured value under a measured-capable provider.
+        var factory = SeedRoundtripWithModes(mode1to2: TravelMode.Drive, mode2to1: TravelMode.AnyAir);
+        await SeedExistingLegAsync(factory, Fidelity.Placeholder, TravelTimeSource.Mock);
+
+        var service = BuildService(factory, new SqliteWriteLock(), provider: new MeasuredStubProvider());
+        await service.ProcessOnceAsync(CancellationToken.None);
+
+        await using var verify = await factory.CreateDbContextAsync();
+        var row = await verify.RouteSegments.SingleAsync(r => r.FromPoiId == 1 && r.ToPoiId == 2 && r.TravelMode == TravelMode.Drive);
+        row.Fidelity.Should().Be(Fidelity.Measured, "a Placeholder row is upgrade-eligible (the Placeholder arm of the predicate)");
+        row.Source.Should().Be("ValhallaStub", "the measured provider's source replaces the placeholder");
+        row.DurationSeconds.Should().Be(1800, "the measured value overwrites the placeholder estimate");
+    }
+
+    [Theory]
+    [InlineData(Fidelity.Manual, TravelTimeSource.Manual)]
+    [InlineData(Fidelity.Measured, TravelTimeSource.Valhalla)]
+    public async Task ProcessOnce_MixedBatch_UpgradesEligibleLeg_PreservesProtectedLeg_InOnePass(
+        string protectedFidelity, string protectedSource)
+    {
+        // Coverage gap: every recompute test seeds a SINGLE leg. This proves the per-leg
+        // eligibility decision is made independently WITHIN ONE PASS — an upgrade-eligible leg is
+        // recomputed while a protected (Manual/Measured) leg in the same batch is left untouched.
+        // SeedDriveOpenPath(3) yields two ground legs (1→2 and 2→3); seed 1→2 eligible and 2→3 protected.
+        var factory = SeedDriveOpenPath(stops: 3);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.RouteSegments.Add(new RouteSegment
+            {
+                FromPoiId = 1, ToPoiId = 2, TravelMode = TravelMode.Drive,
+                DurationSeconds = 4242, DistanceMeters = 5000,
+                Fidelity = Fidelity.Estimated, Source = TravelTimeSource.Mock, ComputedAt = DateTime.UtcNow,
+            });
+            db.RouteSegments.Add(new RouteSegment
+            {
+                FromPoiId = 2, ToPoiId = 3, TravelMode = TravelMode.Drive,
+                DurationSeconds = 999, DistanceMeters = 111,
+                Fidelity = protectedFidelity, Source = protectedSource, ComputedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = BuildService(factory, new SqliteWriteLock(), provider: new MeasuredStubProvider());
+        await service.ProcessOnceAsync(CancellationToken.None);
+
+        await using var verify = await factory.CreateDbContextAsync();
+        var upgraded = await verify.RouteSegments.SingleAsync(r => r.FromPoiId == 1 && r.ToPoiId == 2);
+        upgraded.Fidelity.Should().Be(Fidelity.Measured, "the eligible leg is upgraded in the same pass");
+        upgraded.Source.Should().Be("ValhallaStub");
+        upgraded.DurationSeconds.Should().Be(1800);
+
+        var preserved = await verify.RouteSegments.SingleAsync(r => r.FromPoiId == 2 && r.ToPoiId == 3);
+        preserved.Fidelity.Should().Be(protectedFidelity, "the protected leg is untouched even though a sibling leg was upgraded in the same batch");
+        preserved.Source.Should().Be(protectedSource);
+        preserved.DurationSeconds.Should().Be(999, "the protected leg's value is preserved ([TRIP-MANUAL-01], through the broadened read + upsert guard)");
+    }
+
+    // Story 2.6 (NFR-10 / FR-17, [TRIP-MANUAL-01]): the no-downgrade COUNTER-METRIC. Given BOTH a
+    // pre-existing Manual row AND a pre-existing Measured row, the estimate→measured progression (a
+    // full measured-provider pass) must leave BOTH rows byte-for-byte intact — duration, distance,
+    // fidelity, AND source all unchanged. No Manual/Measured cache row is ever downgraded or deleted
+    // as the ladder climbs from Estimated to Measured. This guards the already-built UpsertAsync
+    // guard + IsUpgradeEligible read-gate via the production ProcessOnce path; no new guard is added.
+    [Fact]
+    public async Task ProcessOnce_EstimateToMeasuredProgression_NeverDowngradesManualOrMeasuredRows_NFR10()
+    {
+        // SeedDriveOpenPath(3) yields two ground legs (1→2 and 2→3). Seed 1→2 Manual and 2→3 Measured,
+        // then run a measured-capable pass (the estimate→measured progression). Both protected rows
+        // must survive untouched.
+        var factory = SeedDriveOpenPath(stops: 3);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.RouteSegments.Add(new RouteSegment
+            {
+                FromPoiId = 1, ToPoiId = 2, TravelMode = TravelMode.Drive,
+                DurationSeconds = 5400, DistanceMeters = 123456,
+                Fidelity = Fidelity.Manual, Source = TravelTimeSource.Manual, ComputedAt = DateTime.UtcNow,
+            });
+            db.RouteSegments.Add(new RouteSegment
+            {
+                FromPoiId = 2, ToPoiId = 3, TravelMode = TravelMode.Drive,
+                DurationSeconds = 999, DistanceMeters = 111,
+                Fidelity = Fidelity.Measured, Source = TravelTimeSource.Valhalla, ComputedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // A measured-capable provider drives the estimate→measured progression. If the guard were
+        // absent it would happily overwrite these rows with its ValhallaStub values.
+        var service = BuildService(factory, new SqliteWriteLock(), provider: new MeasuredStubProvider());
+        await service.ProcessOnceAsync(CancellationToken.None);
+
+        await using var verify = await factory.CreateDbContextAsync();
+
+        var manual = await verify.RouteSegments.SingleAsync(r => r.FromPoiId == 1 && r.ToPoiId == 2);
+        manual.Fidelity.Should().Be(Fidelity.Manual, "a Manual row is never downgraded across the estimate→measured progression");
+        manual.Source.Should().Be(TravelTimeSource.Manual, "the Manual source is preserved byte-for-byte");
+        manual.DurationSeconds.Should().Be(5400, "the user's Manual duration is untouched");
+        manual.DistanceMeters.Should().Be(123456, "the Manual distance is untouched");
+
+        var measured = await verify.RouteSegments.SingleAsync(r => r.FromPoiId == 2 && r.ToPoiId == 3);
+        measured.Fidelity.Should().Be(Fidelity.Measured, "a Measured row is never downgraded across the estimate→measured progression");
+        measured.Source.Should().Be(TravelTimeSource.Valhalla, "the Measured source is preserved byte-for-byte");
+        measured.DurationSeconds.Should().Be(999, "the existing Measured duration is untouched");
+        measured.DistanceMeters.Should().Be(111, "the existing Measured distance is untouched");
+
+        // Counter-metric: neither protected row was deleted — exactly the two seeded rows remain.
+        (await verify.RouteSegments.CountAsync()).Should().Be(2,
+            "no protected row is deleted as the ladder climbs from Estimated to Measured (NFR-10)");
+    }
+
+    /// <summary>Measured-capable; throws the given exception on the first leg (PoiId 1), measures otherwise.</summary>
+    private sealed class DegradeOnFirstLegProvider(Exception toThrow) : ITravelTimeProvider
+    {
+        public string Source => "ValhallaStub";
+        public string? Attribution => null;
+        public bool ProducesMeasuredFidelity => true;
+        public Task<TravelLegResult> GetLegAsync(TravelEndpoint from, TravelEndpoint to, string travelMode, CancellationToken ct) =>
+            from.PoiId == 1
+                ? throw toThrow
+                : Task.FromResult(new TravelLegResult(
+                    DurationSeconds: 1800, DistanceMeters: 25000,
+                    Fidelity: Fidelity.Measured, GeometryPolyline: "stub_polyline"));
     }
 }

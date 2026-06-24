@@ -71,11 +71,11 @@ public class TripViewModelTravelTimeTests
     public async Task MeasuredLeg_WithGeometry_CarriesPolyline_AndIsMeasured()
     {
         var factory = Seed(placeable: 2);
-        // A Measured row with a precision-5 encoded polyline (the "_p~iF~ps|U" sample
-        // from the Google/OSRM algorithm reference). The other leg has none.
+        // A Measured row with an encoded polyline (the "_p~iF~ps|U" algorithm-reference
+        // sample). Geometry threads through verbatim regardless of source. The other leg has none.
         const string encoded = "_p~iF~ps|U_ulLnnqC_mqNvxq`@";
-        await AddSegmentAsync(factory, 1, 2, 600, 8000, Fidelity.Measured, TravelTimeSource.Osrm, encoded);
-        await AddSegmentAsync(factory, 2, 1, 600, 8000, Fidelity.Measured, TravelTimeSource.Osrm, encoded);
+        await AddSegmentAsync(factory, 1, 2, 600, 8000, Fidelity.Measured, TravelTimeSource.Valhalla, encoded);
+        await AddSegmentAsync(factory, 2, 1, 600, 8000, Fidelity.Measured, TravelTimeSource.Valhalla, encoded);
 
         await using var vm = await EnabledVmAsync(factory, 2);
 

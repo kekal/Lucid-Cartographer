@@ -392,13 +392,14 @@ public class TripViewIntegrationTests : IntegrationTestBase
         Assert.NotNull(initial);
         Assert.All(initial!, x => Assert.Null(x));
 
-        // A precision-5 encoded polyline (Google/OSRM reference sample).
+        // An encoded polyline (algorithm reference sample); presence-of-geometry is what
+        // the draw observes, not the decoded coordinates.
         const string encoded = "_p~iF~ps|U_ulLnnqC_mqNvxq`@";
 
         // Fill the cache with Measured rows (carrying geometry) for EVERY directional
         // placeable pair — the active roundtrip legs are a subset, so this guarantees
-        // each drawn leg now has a row. Mirrors what the OSRM background compute would
-        // persist when OSRM becomes available (Estimated→Measured upgrade, UX-DR9).
+        // each drawn leg now has a row. Mirrors what the Valhalla background compute would
+        // persist when the measured provider becomes available (Estimated→Measured upgrade, UX-DR9).
         await SeedDataAsync(async db =>
         {
             var col = db.PoiCollections.Single();
@@ -419,7 +420,7 @@ public class TripViewIntegrationTests : IntegrationTestBase
                         FromPoiId = from, ToPoiId = to, TravelMode = col.TravelMode,
                         DurationSeconds = 600, DistanceMeters = 8000,
                         Fidelity = Data.Entities.Fidelity.Measured,
-                        Source = LucidCartographer.Services.Trip.TravelTimeSource.Osrm,
+                        Source = LucidCartographer.Services.Trip.TravelTimeSource.Valhalla,
                         GeometryPolyline = encoded, ComputedAt = DateTime.UtcNow,
                     });
                 }

@@ -28,6 +28,22 @@ public sealed class TravelTimeOptions
     public double CycleSpeedMetersPerSecond { get; set; } = 4.2;
 
     /// <summary>
+    /// Drive detour/winding factor: multiplies the great-circle distance to approximate
+    /// real road distance before the duration is derived. [ASSUMPTION] default 1.3.
+    /// </summary>
+    public double DriveDetourFactor { get; set; } = 1.3;
+
+    /// <summary>
+    /// Cycle detour/winding factor (see <see cref="DriveDetourFactor"/>). [ASSUMPTION] default 1.2.
+    /// </summary>
+    public double CycleDetourFactor { get; set; } = 1.2;
+
+    /// <summary>
+    /// Walk detour/winding factor (see <see cref="DriveDetourFactor"/>). [ASSUMPTION] default 1.15.
+    /// </summary>
+    public double WalkDetourFactor { get; set; } = 1.15;
+
+    /// <summary>
     /// Idle poll interval in seconds when the compute queue is empty. The
     /// background service still wakes instantly on
     /// <see cref="TravelTimeTrigger.Signal"/>; this bounds the latency for legs
@@ -45,5 +61,18 @@ public sealed class TravelTimeOptions
         Data.Entities.TravelMode.Walk => WalkSpeedMetersPerSecond,
         Data.Entities.TravelMode.Cycle => CycleSpeedMetersPerSecond,
         _ => AssumedSpeedMetersPerSecond,
+    };
+
+    /// <summary>
+    /// Resolves the detour/winding factor for a travel mode, mirroring
+    /// <see cref="SpeedFor"/>. Any/Air returns 1.0 (no winding — air legs are
+    /// straight-line by nature and stay Placeholder regardless).
+    /// </summary>
+    public double DetourFactorFor(string travelMode) => travelMode switch
+    {
+        Data.Entities.TravelMode.Drive => DriveDetourFactor,
+        Data.Entities.TravelMode.Walk => WalkDetourFactor,
+        Data.Entities.TravelMode.Cycle => CycleDetourFactor,
+        _ => 1.0,
     };
 }

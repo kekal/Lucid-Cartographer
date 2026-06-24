@@ -166,8 +166,8 @@ public abstract class IntegrationTestBase : IAsyncLifetime
         _app = builder.Build();
         _app.UseAntiforgery();
         _app.UseStaticFiles();
-        // Mirror Program.cs: the in-app docs endpoint serves /docs/osrm.md (the Trip
-        // View "How to enable OSRM" link). The integration host composes the pipeline
+        // Mirror Program.cs: the in-app docs endpoint serves /docs/valhalla.md (the Trip
+        // View "How to enable Valhalla" link). The integration host composes the pipeline
         // by hand, so endpoints mapped in Program.cs must be re-mapped here or the
         // link 404s under test even though it works in production.
         _app.MapDocsEndpoints();

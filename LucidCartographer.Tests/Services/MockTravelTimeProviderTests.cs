@@ -38,6 +38,14 @@ public class MockTravelTimeProviderTests
     }
 
     [Fact]
+    public void ProducesMeasuredFidelity_IsFalse_HaversineIsEstimateOnly()
+    {
+        // Story 2.1 (AC 2): the haversine Mock is estimate-only, so its capability
+        // flag is false — a Mock-only deployment is never upgrade-eligible (AD-2).
+        DefaultProvider().ProducesMeasuredFidelity.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task GetLeg_AnyAir_MatchesHaversineAndAnyAirSpeed_AndIsPlaceholder()
     {
         const double speed = 13.8889; // Any/Air assumed speed
@@ -68,11 +76,16 @@ public class MockTravelTimeProviderTests
     [Fact]
     public async Task GetLeg_PerModeSpeed_ProducesDistinctDurations_ForSameDistance()
     {
+        // Equal detour factors keep the distance identical across modes so the test
+        // isolates the per-mode speed effect on duration.
         var options = new TravelTimeOptions
         {
             DriveSpeedMetersPerSecond = 20.0,
             CycleSpeedMetersPerSecond = 5.0,
             WalkSpeedMetersPerSecond = 1.0,
+            DriveDetourFactor = 1.0,
+            CycleDetourFactor = 1.0,
+            WalkDetourFactor = 1.0,
         };
         var provider = Provider(options);
 
