@@ -55,8 +55,8 @@ services:
       # stop coordinates never leave the deployment (the only out-call is the
       # build-time .pbf fetch). NFR8: enabling Valhalla brings the OSM/ODbL
       # attribution obligation (surfaced via provider.Attribution).
-      # - TravelTime__Provider=Valhalla
-      # - TravelTime__Valhalla__BaseUrl=http://valhalla:8002
+      - TravelTime__Provider=Valhalla
+      - TravelTime__Valhalla__BaseUrl=http://valhalla:8002
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health"]
       interval: 30s
@@ -81,7 +81,6 @@ services:
   # network, so stop coordinates never egress.
   valhalla:
     image: ghcr.io/gis-ops/docker-valhalla/valhalla:3.5.1
-    profiles: ["valhalla"]
     ports:
       # Published so the app reaches it at http://valhalla:8002 over the internal
       # compose network (ValhallaOptions.BaseUrl default) and an operator can

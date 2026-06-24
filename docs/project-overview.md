@@ -13,7 +13,7 @@ Core capabilities:
 - **Set operations** — union / intersect / subtract / dedup across collections with a configurable spatial tolerance.
 - **Export** — KML (flat or grouped by category), GPX, and push to a Google Maps saved list.
 - **MCP server** — an `/mcp` endpoint exposing POI/collection and trip tools to AI clients (Claude Code, Claude.ai connectors).
-- **Trip Planning** — an additive Trip View over a collection: on desktop it **takes over** the wide results region as a readable trip table; ordered Stops with map legs, **per-leg travel modes** (Walk/Drive/Cycle/Any-Air) and editable per-leg times with honest, reconciled Fidelity badging (displayed total == sum of per-leg, unit "min"), a multi-day schedule (date+time start, date-aware arrivals, HH:MM dwell, a "Time limit" with an "Over limit" chip), Start/Finish/roundtrip, TSP-Sort, and MCP-assisted ordering + per-leg modes. Travel times come from a pluggable `ITravelTimeProvider` (haversine **Mock** default; optional self-hosted **OSRM** for Measured road routing). See [trip-planning.md](./trip-planning.md).
+- **Trip Planning** — an additive Trip View over a collection: on desktop it **takes over** the wide results region as a readable trip table; ordered Stops with map legs, **per-leg travel modes** (Walk/Drive/Cycle/Any-Air) and editable per-leg times with honest, reconciled Fidelity badging (displayed total == sum of per-leg, unit "min"), a multi-day schedule (date+time start, date-aware arrivals, HH:MM dwell, a "Time limit" with an "Over limit" chip), Start/Finish/roundtrip, TSP-Sort, and MCP-assisted ordering + per-leg modes. Travel times come from a pluggable `ITravelTimeProvider` (smart-haversine **Mock** default — great-circle × per-mode detour factor ÷ speed; optional self-hosted **Valhalla** for Measured road routing). See [trip-planning.md](./trip-planning.md).
 
 ## Repository Structure
 
@@ -35,7 +35,7 @@ Core capabilities:
 | Geo | NetTopologySuite (GeoJSON/GPX), SharpKml, Geolocation, Fastenshtein | — | Parsing, distance, name similarity |
 | Auth | Cookie sessions + OpenIddict | 7.5.0 | OAuth 2.1 frontdoor for remote MCP |
 | AI integration | ModelContextProtocol.AspNetCore | 1.3.0 | `/mcp` endpoint (POI + trip tools) |
-| Trip routing | OSRM (optional sidecar) | `osrm-backend` v6.0.0 (pinned) | Opt-in Measured road routing; default is the in-process haversine Mock |
+| Trip routing | Valhalla (optional self-hosted) | `docker-valhalla` | Opt-in Measured road routing (one engine, dynamic costing per mode); default is the in-process smart-haversine Mock |
 | Tests | xUnit, FluentAssertions, Moq, bUnit, Playwright | — | Unit + component + integration |
 
 ## Architecture (at a glance)

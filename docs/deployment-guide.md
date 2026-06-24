@@ -30,15 +30,32 @@ docker-compose up
 | `MCP_API_KEY` | _(set)_ | required for `/mcp` when LAN bypass is off |
 | `OAuth__Issuer` | public https URL | enables the OAuth 2.1 frontdoor for Claude.ai connectors |
 
-## Optional: OSRM Measured routing
+## Optional: Valhalla Measured routing
 
-Trip Planning ships on the in-process haversine **Mock** provider (`TravelTime:Provider`
-unset/`Mock`) — no routing infrastructure. To enable **Measured** road routing, run the
-optional OSRM sidecars (gated behind the `osrm` compose profile, started only with
-`docker compose --profile osrm up -d`), prepare per-profile OSM extracts (car/foot/bike),
-and set `TravelTime__Provider=Osrm` + `TravelTime__Osrm__{Drive,Walk,Cycle}BaseUrl`.
-OSRM is self-hosted (no egress, NFR7) and carries OSM/ODbL attribution (NFR8). Full
-operator guide: **[osrm.md](./osrm.md)**.
+Trip Planning ships on the in-process smart-haversine **Mock** provider
+(`TravelTime:Provider` unset/`Mock`) — zero routing infrastructure. To enable
+**Measured** road routing, run the single self-hosted **Valhalla** engine, gated behind
+the `valhalla` compose profile (a plain `docker compose up` starts none of it):
+
+```bash
+docker compose --profile valhalla up -d
+```
+
+One engine serves all ground modes via dynamic costing (Drive→auto, Walk→pedestrian,
+Cycle→bicycle) — no per-mode backends and no manual extract/partition/customize. To
+enable it: start the profile, pick your region by setting `VALHALLA_TILE_URLS` in `.env`
+(the single region knob), and set `TravelTime__Provider=Valhalla` on the cartographer
+service (optionally `TravelTime__Valhalla__BaseUrl=http://valhalla:8002`, which is also
+the default). On first start (and whenever the `.pbf` changes) the container auto-downloads
+the region extract and builds its routing tiles into `./appdata/valhalla`; during that
+build window routing degrades to smart-haversine **Estimated** and self-heals to
+**Measured** once tiles finish (FR-13a). The engine is version-pinned
+(`ghcr.io/gis-ops/docker-valhalla/valhalla:3.5.1`, never `:latest`) and listens on
+`8002:8002`.
+
+Valhalla is self-hosted, so stop coordinates never egress — the only outbound is the
+build-time `.pbf` fetch (NFR7); enabling it brings the OSM/ODbL attribution obligation
+(NFR8). Full operator guide: **[valhalla.md](./valhalla.md)**.
 
 ## Authentication Hardening (read before exposing)
 

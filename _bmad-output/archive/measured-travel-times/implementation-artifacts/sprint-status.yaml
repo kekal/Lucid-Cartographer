@@ -1,0 +1,74 @@
+# generated: 2026-06-24
+# last_updated: 2026-06-24
+# project: maps_editor
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: {project-root}/_bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+
+generated: 2026-06-24
+last_updated: 2026-06-24
+# Story 2.6 → ready-for-dev (2026-06-24).
+# Story 2.5 → ready-for-dev (2026-06-24).
+# Story 2.4 → ready-for-dev (2026-06-24).
+# Story 2.3 → ready-for-dev (2026-06-24).
+# Story 2.2 → ready-for-dev (2026-06-24).
+# Story 2.1 → review (2026-06-24).
+# Epic 1 (smart-haversine) complete: 3/3 stories done, retrospective done.
+project: maps_editor
+project_key: NOKEY
+tracking_system: file-system
+story_location: "{project-root}/_bmad-output/implementation-artifacts"
+
+development_status:
+  # Epic 1: Smarter honest default (smart-haversine)
+  epic-1: done
+  1-1-configurable-per-mode-detour-factors: done
+  1-2-apply-the-detour-factor-in-the-single-estimate-path: done
+  1-3-keep-trip-ordering-mode-invariant-tsp-guard: done
+  epic-1-retrospective: done
+
+  # Epic 2: Self-hosted Valhalla measured routing (turnkey)
+  epic-2: done
+  2-1-provider-capability-seam-valhalla-source-and-attribution-scaffolding: done
+  2-2-valhallatraveltimeprovider-measured-all-ground-modes: done
+  2-3-capability-gated-recompute-trigger-and-degrade: done
+  2-4-config-di-selection-of-the-valhalla-provider: done
+  2-5-turnkey-docker-valhalla-compose-service-and-tile-build-window-degrade: done
+  2-6-nfr7-no-egress-verification-operator-doc-and-fidelity-ladder-confirmation: done
+  epic-2-retrospective: done
+
+  # Epic 3: Retire OSRM (removal & migration)
+  epic-3: done
+  3-1-prominent-warn-and-fallback-for-retired-unknown-provider-ids: done
+  3-2-one-time-invalidation-of-osrm-cache-rows: done
+  3-3-delete-all-hand-rolled-osrm-artifacts: done
+  epic-3-retrospective: done

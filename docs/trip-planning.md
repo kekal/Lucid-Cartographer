@@ -43,10 +43,11 @@ Flip Trip View on for a Collection and it becomes an ordered, mapped trip:
   drawn as badges in the stop list and on map markers.
 - **Legs** — straight connectors between consecutive Stops (plus the closing leg on
   a roundtrip), drawn on the map; road-shaped solid lines only when a Measured
-  (OSRM) provider supplied geometry.
+  (Valhalla) provider supplied geometry.
 - **Reorder** — drag or keyboard move-up/move-down (a11y path), TSP-Sort, or via MCP.
 - **Travel times** — per-leg duration/distance with an honest **Fidelity** badge,
-  from a pluggable provider; haversine **Mock** is the shipping default.
+  from a pluggable provider; the **smart-haversine Mock** (per-mode detour factors)
+  is the shipping default.
 - **Dwell + timeline** — per-Stop dwell minutes feed an itinerary timeline that
   obeys the aggregate "lowest-fidelity-wins" honesty rule.
 - **Start/Finish/roundtrip** — pin a Start (Order 1) and optional Finish (Order N);
@@ -59,7 +60,7 @@ display model, per-leg-mode VM projection, date-aware formatting, `UiStrings`) r
 mobile by nature — `MobileTripPanel` stays correct, only its new controls are deferred
 to the mirror phase (see "Deferred / tech-debt"). All copy routes through `UiStrings`.
 Design decisions are tagged with greppable `TRIP-*` comment codes (e.g. `TRIP-CACHE-01`,
-`TRIP-ORDER-01`, `TRIP-OSRM-01`, and the Wave-2 codes `TRIP-LEGMODE-01`,
+`TRIP-ORDER-01`, `TRIP-TRAVELTIME-01`, and the Wave-2 codes `TRIP-LEGMODE-01`,
 `TRIP-RECONCILE-01`, `TRIP-SCHEDULE-01`, `TRIP-MANUAL-01`).
 
 ## Wave 2 — Trip View realignment & honest schedule (RD1–RD13)
@@ -97,11 +98,13 @@ cache, sole `OrderIndex` writer, background compute) and added:
   displayed per-leg minutes** (TRIP-RECONCILE-01; the 90+90s → 4 min, not 3, invariant
   is unit-tested). Canonical seconds are never mutated. The minute unit is **"min"**
   (`UiStrings.TripDuration*`), disambiguated from distance **"m"**. `FidelityBadge`
-  tooltips self-explain in plain language. `TripViewModel.RecommendsOsrm` drives a
-  quiet Mock-default note ("all straight-line estimates — enable OSRM for measured road
-  times", linking `docs/osrm.md`) — distinct from the engine-unreachable fallback note
-  (`IsShowingApproximateEstimates`). That link is served by `Endpoints/DocsEndpoints.cs`
-  (`GET /docs/osrm.md`, embedded operator guide — see [api-contracts.md](./api-contracts.md));
+  tooltips self-explain in plain language. `TripViewModel.RecommendsMeasuredProvider`
+  drives a quiet Mock-default note ("Enable Valhalla for measured road times", linking
+  `docs/valhalla.md`) — gated on the capability seam
+  `ITravelTimeProvider.ProducesMeasuredFidelity != true` (not a provider-id string), so it
+  suppresses for **any** measured provider — distinct from the engine-unreachable fallback
+  note (`IsShowingApproximateEstimates`). That link is served by `Endpoints/DocsEndpoints.cs`
+  (`GET /docs/valhalla.md`, embedded operator guide — see [api-contracts.md](./api-contracts.md));
   it is **not** a wwwroot static file (`.md` is unserved and Docker-stripped). Icon-only controls carry native `title` tooltips
   at `aria-label` parity.
 - **Per-leg travel modes end-to-end (RD1/2/3/6/7, Epic 3).** See the dedicated
@@ -188,7 +191,8 @@ the haversine Mock is the universal Estimated fallback (FR-10).
 Task<TravelLegResult> GetLegAsync(
     TravelEndpoint from, TravelEndpoint to, string travelMode, CancellationToken ct);
 string  Source { get; }       // written to RouteSegment.Source
-string? Attribution { get; }  // OSM/ODbL HTML for the map, or null (TRIP-OSRM-02)
+string? Attribution { get; }  // OSM/ODbL HTML for the map, or null
+bool ProducesMeasuredFidelity { get; }  // capability seam: true only for measured providers
 ```
 
 - `TravelEndpoint(int PoiId, double Latitude, double Longitude)` — a **layer-local**
@@ -201,28 +205,36 @@ string? Attribution { get; }  // OSM/ODbL HTML for the map, or null (TRIP-OSRM-0
 
 ### Implementations (`Services/Trip/`)
 
-- **`MockTravelTimeProvider`** — shipping default, zero infra. Haversine × assumed
-  speed → **Estimated**; null geometry; null `Attribution` (a great-circle estimate
-  is not OSM-derived). **Deviation:** named `MockTravelTimeProvider`, not the plan's
-  `HaversineMockTravelTimeProvider`; and there is no `Providers/` subfolder — all
-  providers live directly under `Services/Trip/`.
-- **`OsrmTravelTimeProvider`** (`TRIP-OSRM-01`, Story 4.1, optional) — for
-  Drive/Walk/Cycle issues a per-leg OSRM `/route` query against the per-profile
-  backend (Drive→car, Walk→foot, Cycle→bike) and returns **Measured** with encoded
-  road geometry. **Deviations from AR-3:** it calls `/route` per leg only (no
-  `/table`; the matrix is built from the cache, not a provider call), and stores an
-  **encoded polyline** (`geometries=polyline`, precision 5) verbatim rather than
-  GeoJSON (more compact; decodes natively in Leaflet for Story 4.2). Any/Air is never
-  routed (returns a straight-line Placeholder, like Mock). Degrades **by throwing**
-  `OsrmRouteUnavailableException` on no-route/unreachable/timeout/HTTP-error/missing
-  geometry, so the background service substitutes the haversine Estimated value. NFR7:
-  self-hosted ⇒ no egress, no consent guard. There is **no** separate
-  `ManualTravelTimeProvider` — Manual times are written directly as `RouteSegment`
-  rows by the VM, never produced by a provider.
+- **`MockTravelTimeProvider`** — shipping default, zero infra, zero HTTP. **Smart**
+  haversine: great-circle distance × a per-mode **detour/winding factor** ÷ mode speed
+  → **Estimated**; null geometry; null `Attribution` (a great-circle estimate is not
+  OSM-derived); `ProducesMeasuredFidelity => false`. The detour factors live in
+  `TravelTimeOptions.DetourFactorFor(mode)` — Drive 1.3, Cycle 1.2, Walk 1.15, Any/Air
+  1.0 (all `[ASSUMPTION]` defaults, configurable under `TravelTime:*DetourFactor`). The
+  single estimate code path is `EstimatedTravelTime.Compute(...)` (DRY — reused by Mock
+  for ground modes and by the background-service fallback). **Deviation:** named
+  `MockTravelTimeProvider`, not the plan's `HaversineMockTravelTimeProvider`; and there
+  is no `Providers/` subfolder — all providers live directly under `Services/Trip/`.
+- **`ValhallaTravelTimeProvider`** (opt-in, **never** the default) — for
+  Drive/Walk/Cycle, POSTs a per-leg `/route` to **one self-hosted Valhalla engine**
+  that serves all ground modes via **dynamic costing** (Drive→auto, Walk→pedestrian,
+  Cycle→bicycle; `ValhallaOptions.CostingFor`). Single `BaseUrl` (default
+  `http://valhalla:8002`), one named HttpClient `"valhalla"`. Returns **Measured**:
+  duration (seconds, rounded), distance (km × 1000 = meters), and an encoded
+  **polyline6** geometry (precision 6). Coordinates are sent as `{lat, lon}` (opposite
+  of OSRM's lon,lat). `Source => "Valhalla"`, `ProducesMeasuredFidelity => true`,
+  `Attribution => UiStrings.TripRoutingAttributionValhalla` (OSM/ODbL). Any/Air is never
+  routed (returns a straight-line haversine Placeholder with **no** HTTP call, like
+  Mock). Degrades **by throwing** `ValhallaRouteUnavailableException` on
+  no-route/unreachable/timeout/HTTP-error/missing-geometry, so the background service
+  substitutes the smart-haversine Estimated value. NFR7: self-hosted ⇒ no egress, no
+  consent guard. There is **no** separate `ManualTravelTimeProvider` — Manual times are
+  written directly as `RouteSegment` rows by the VM, never produced by a provider.
 
 `EstimatedTravelTime.Compute(...)` (`Services/Trip/EstimatedTravelTime.cs`) is the
-shared haversine helper used by both the Mock provider and the degradation fallback.
-`TravelTimeSource` holds the provider-id constants (`Osrm`, `EstimatedFallback`, …).
+shared smart-haversine helper used by both the Mock provider and the degradation
+fallback. `TravelTimeSource` holds the source constants (`Mock`, `Manual`, `Valhalla`,
+`EstimatedFallback`).
 
 ## Background compute (`TravelTimeComputationBackgroundService`)
 
@@ -260,8 +272,9 @@ service owns deletes, and reads happen inline where needed. It deletes stale row
 the background compute refills them on the next trigger. Entry points:
 `InvalidateForPoiAsync(poiId)` (coordinates changed) and
 `InvalidateRecomputableForCollectionAsync(collectionId)` (the explicit "Recompute
-travel times" action, which clears Estimated/fallback rows so OSRM can upgrade them
-to Measured — `Estimated→Measured` is explicit, never silent).
+travel times" action, which clears Estimated/fallback rows so a Measured provider
+(Valhalla) can upgrade them to Measured — `Estimated→Measured` is explicit, never
+silent).
 
 ## Per-leg travel modes (Wave 2, RD1/2/3/6/7)
 
@@ -421,8 +434,8 @@ Start/Finish are separate set/clear tools rather than one `SetStartFinish`.
 owns a CTS, `IAsyncDisposable`) holds all trip state; the map page composes it. It
 delegates all order mutation to `ITripOrderingService`, subscribes to
 `TravelTimeProgressService`, and exposes `RoutingAttributionHtml` (read off the active
-provider's `Attribution`, pushed to Leaflet's attribution control — OSM/ODbL when OSRM
-is active, null under Mock). `TripProjections.cs` holds the VM's read-model record
+provider's `Attribution`, pushed to Leaflet's attribution control — OSM/ODbL when
+Valhalla is active, null under Mock). `TripProjections.cs` holds the VM's read-model record
 types.
 
 Razor components under `Components/Shared/Trip/`:
@@ -481,12 +494,15 @@ Two overloads:
   `SqliteWriteLock` singleton, registering a fallback only if no pipeline registered
   one first.
 - `AddTripServices(IConfiguration)` — production wiring. Calls the parameterless
-  overload, then selects the active provider by `TravelTime:Provider`: `Osrm` swaps in
-  `OsrmTravelTimeProvider` (binds `OsrmOptions`, registers the named `"osrm"`
-  HttpClient); anything else (missing / `Mock`) keeps the Mock (NFR9: OSRM is opt-in,
-  never default — last registration wins on resolve). Adds the hosted
-  `TravelTimeComputationBackgroundService` and binds `TravelTimeOptions`. `Program.cs`
-  calls this overload.
+  overload, then selects the active provider by `TravelTime:Provider` via
+  `ClassifyProvider(id)`: empty / `Mock` → **Default** (smart-haversine Mock);
+  `Valhalla` → swaps in `ValhallaTravelTimeProvider` (binds `ValhallaOptions`, registers
+  the named `"valhalla"` HttpClient); **anything else — including the retired `Osrm`** →
+  `RetiredOrUnknown`, which logs a prominent startup warning ("routing is now ESTIMATED
+  not MEASURED") and falls back to the Mock default. It **never fail-fasts** (FR-15,
+  AD-7); Valhalla is opt-in, never default — last registration wins on resolve. Adds the
+  hosted `TravelTimeComputationBackgroundService` and binds `TravelTimeOptions`.
+  `Program.cs` calls this overload.
 
 ## Extension points
 
@@ -498,7 +514,7 @@ Two overloads:
   writes to `ITripOrderingService`. Auto-discovered, inherits the `/mcp` auth.
 - **Swap the map renderer** — leg geometry flows VM → `LeafletMapService` →
   `leafletInterop.js`; the server-side `RouteSegment` cache stays the single source of
-  truth (the map widget never calls OSRM directly).
+  truth (the map widget never calls the routing engine directly).
 
 ## Deferred / known tech-debt (Wave 2)
 
@@ -517,9 +533,22 @@ Two overloads:
   follow-up should make `SetOutgoingTravelModeAsync` delete/migrate the leg's Manual row
   on mode change.
 
-## Operating OSRM
+## Operating Valhalla
 
-OSRM is an optional, opt-in docker-compose sidecar — **not** a launch dependency; the
-default Mock deployment needs none of it. See **[osrm.md](./osrm.md)** for the full
-operator guide (preparing per-profile extracts, the `osrm` compose profile, pointing
-the app at the backends, and upgrading existing Estimated legs to Measured).
+Valhalla is an optional, opt-in self-hosted routing engine — **not** a launch
+dependency; the default smart-haversine Mock deployment needs none of it. One engine
+serves all ground modes via dynamic costing. See **[valhalla.md](./valhalla.md)** for
+the full operator guide (building region tiles from a `.pbf`, the compose service,
+pointing the app at `TravelTime:Provider=Valhalla` + `BaseUrl`, and upgrading existing
+Estimated legs to Measured). NFR7 privacy: Valhalla is self-hosted, so stop coordinates
+never egress — the **only** outbound call is the build-time region `.pbf` fetch (from
+`tile_urls`, e.g. Geofabrik); a Mock deployment makes **zero** HTTP at all. Both are
+covered by an automated no-egress test (`NoEgressTests`).
+
+### Retiring OSRM cache rows
+
+A one-time startup migration `StartupCleanupService.PurgeOsrmCacheRowsAsync` (FR-16,
+AD-6) deletes stale `RouteSegment` rows with `Source == "OSRM"` (and `Fidelity !=
+Manual`) under `SqliteWriteLock` so the active provider recomputes them. It is
+idempotent / self-retiring and **never** touches Manual rows. No schema or migration
+change accompanies it (still 13 app migrations).

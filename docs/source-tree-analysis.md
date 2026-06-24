@@ -31,8 +31,8 @@ maps_editor/
 │   │   ├── AuthEndpoints.cs       #   /auth/login, /logout
 │   │   ├── OAuthEndpoints.cs      #   /connect/authorize|token|register
 │   │   ├── PoiImageEndpoints.cs   #   /api/poi-image/{id} (ETag/304)
-│   │   ├── DocsEndpoints.cs       #   /docs/osrm.md (embedded operator guide; Trip OSRM link)
-│   │   ├── Docs/osrm.md           #   embedded-resource copy of the OSRM operator guide
+│   │   ├── DocsEndpoints.cs       #   /docs/valhalla.md (embedded operator guide; Trip Valhalla link)
+│   │   ├── Docs/valhalla.md       #   embedded-resource copy of the Valhalla operator guide
 │   │   ├── NoVncProxyEndpoint.cs  #   /google-session/novnc/** (HTTP+WS proxy)
 │   │   └── McpApiKeyFilter.cs     #   /mcp auth filter
 │   │
@@ -44,10 +44,14 @@ maps_editor/
 │   │   ├── Operations/            #   SetOperationService, PoiMatcher, PoiDeduplication(+BackgroundService)
 │   │   ├── Export/                #   IFileExporter (GPX/KML), GoogleMapsListExporter, ExportBackgroundService
 │   │   ├── Mcp/                   #   PoiReadTools, PoiWriteTools, EnrichmentTools, TripTools, prompts/resources
-│   │   ├── Trip/                  #   Trip Planning: ITravelTimeProvider (Mock/OSRM), RouteSegment cache +
-│   │   │                          #   invalidation, TravelTimeComputationBackgroundService, TripOrderingService,
+│   │   ├── Trip/                  #   Trip Planning: ITravelTimeProvider — MockTravelTimeProvider (default,
+│   │   │                          #   smart-haversine via EstimatedTravelTime, the single DRY estimate path) +
+│   │   │                          #   ValhallaTravelTimeProvider (opt-in measured; ValhallaOptions,
+│   │   │                          #   ValhallaRouteUnavailableException); TravelTimeOptions (speeds + per-mode
+│   │   │                          #   detour factors + IdlePollSeconds); RouteSegment cache + invalidation,
+│   │   │                          #   TravelTimeComputationBackgroundService, TripOrderingService,
 │   │   │                          #   TspSolver, DistanceMatrixService, ItineraryTimeline (see trip-planning.md)
-│   │   ├── StartupCleanupService.cs   # ENTRY: one-shot startup (migrate, seed admin, vacuum)
+│   │   ├── StartupCleanupService.cs   # ENTRY: one-shot startup (migrate, seed admin, vacuum, purge legacy OSRM cache rows)
 │   │   ├── PoiService.cs, LeafletMapService.cs, ViewportService.cs, UiStrings.cs
 │   │   └── SqliteWriteLock.cs, GeoUtils.cs, PoiUrlHelper.cs, ...   # shared helpers
 │   │
@@ -70,7 +74,7 @@ maps_editor/
 ## Entry Points
 
 - **`Program.cs`** — process bootstrap (builder → register → pipeline → `MapRazorComponents<App>()`).
-- **`Services/StartupCleanupService.cs`** (`IHostedService`) — runs once on boot: applies migrations, seeds the admin user, sweeps temp files, revives stuck imported POIs, vacuums sessions.
+- **`Services/StartupCleanupService.cs`** (`IHostedService`) — runs once on boot: applies migrations, seeds the admin user, sweeps temp files, revives stuck imported POIs, vacuums sessions, and one-time purges legacy `Source="OSRM"` RouteSegment cache rows (so the active provider recomputes them).
 - **`Components/App.razor` / `Routes.razor`** — Blazor root + routing.
 - Background services started at boot: enrichment, deduplication, import (Coravel), export.
 
