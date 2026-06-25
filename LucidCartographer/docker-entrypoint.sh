@@ -5,6 +5,14 @@
 # solely through the app's authenticated same-origin proxy (/google-session/novnc).
 set -e
 
+# Create the optional Valhalla tile dir on the mounted /data volume so the
+# valhalla service's bind mount (./appdata/valhalla) has a source — older Compose
+# won't auto-create a missing bind-mount source. World-writable because the
+# Valhalla container runs as a different uid than this app and must own/enter it
+# (we run non-root here, so chmod is the most we can grant). No-op when unused.
+mkdir -p /data/valhalla
+chmod 0777 /data/valhalla
+
 export DISPLAY="${DISPLAY:-:99}"
 DISPLAY_NUM="${DISPLAY#:}"
 

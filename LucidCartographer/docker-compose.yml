@@ -87,10 +87,15 @@ services:
       # reach :8002 on the host. Port is NON-NEGOTIABLE — it must match the app's
       # default BaseUrl.
       - "8002:8002"
+    # Starts after cartographer so the app's entrypoint has created ./appdata/valhalla
+    # (the bind-mount source below) — older Compose won't auto-create a missing one.
+    depends_on:
+      - cartographer
     volumes:
       # Persists built tiles across recreates so the multi-minute build is paid
       # once, not on every `up`. The image auto-rebuilds when the source .pbf
-      # changes (use_tiles_ignore_pbf).
+      # changes (use_tiles_ignore_pbf). Source dir is created by the cartographer
+      # entrypoint (mkdir -p /data/valhalla), so no host pre-creation is needed.
       - ./appdata/valhalla:/custom_files
     environment:
       # The SINGLE knob an operator sets to choose their region (FR-12). Point it
