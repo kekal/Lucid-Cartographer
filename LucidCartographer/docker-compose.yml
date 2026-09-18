@@ -93,8 +93,8 @@ services:
       - cartographer
     volumes:
       # Persists built tiles across recreates so the multi-minute build is paid
-      # once, not on every `up`. The image auto-rebuilds when the source .pbf
-      # changes (use_tiles_ignore_pbf). Source dir is created by the cartographer
+      # once, not on every `up`. A tile_urls change triggers a rebuild (see the
+      # entrypoint below). Source dir is created by the cartographer
       # entrypoint (mkdir -p /data/valhalla), so no host pre-creation is needed.
       - ./appdata/valhalla:/custom_files
     environment:
@@ -103,11 +103,31 @@ services:
       # VALHALLA_TILE_URLS in .env. No extract/partition/customize steps — the
       # image downloads and builds tiles on its own.
       - tile_urls=${VALHALLA_TILE_URLS:-https://download.geofabrik.de/europe/monaco-latest.osm.pbf}
-      # Reuse already-built tiles when present (skip rebuild unless the .pbf
-      # changes); keep the tile tar so a recreate restarts fast.
+      # Reuse already-built tiles when present; keep the tile tar so a recreate
+      # restarts fast. A tile_urls change is handled by the entrypoint below.
       - use_tiles_ignore_pbf=True
       - build_tar=True
       - server_threads=2
+    # The image downloads tile_urls only when /custom_files holds no .pbf, so a
+    # new region would be ignored. Remember the tile_urls the tiles were built
+    # from and drop old tiles/PBFs when it changes. The stamp is written only
+    # once the service answers, so an interrupted build starts over.
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        stamp=/custom_files/.tile_urls
+        if [ "$$(cat "$$stamp" 2>/dev/null)" != "$$tile_urls" ]; then
+          echo "INFO: tile_urls changed, discarding old tiles and PBFs"
+          sudo -n rm -rf "$$stamp" /custom_files/valhalla_tiles /custom_files/valhalla_tiles.tar /custom_files/file_hashes.txt /custom_files/*.pbf
+        fi
+        (
+          until curl -fs http://localhost:8002/status >/dev/null; do sleep 30; done
+          printf '%s' "$$tile_urls" | sudo -n tee "$$stamp" >/dev/null
+        ) &
+        exec /valhalla/scripts/run.sh "$$@"
+      - valhalla-entrypoint
+    command: ["build_tiles"]
     restart: unless-stopped
     # The build window is operator-visible: until tiles are built and the engine
     # answers, /status fails and the service shows "starting"/"unhealthy" in

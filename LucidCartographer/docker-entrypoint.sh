@@ -10,11 +10,16 @@ set -e
 # won't auto-create a missing bind-mount source. World-writable because the
 # Valhalla container runs as a different uid than this app and must own/enter it
 # (we run non-root here, so chmod is the most we can grant). No-op when unused.
-mkdir -p /data/valhalla
-chmod 0777 /data/valhalla
+mkdir -p /data/valhalla || true
+chmod 0777 /data/valhalla 2>/dev/null || true
 
 export DISPLAY="${DISPLAY:-:99}"
 DISPLAY_NUM="${DISPLAY#:}"
+
+# A restarted (not recreated) container keeps /tmp, so the previous run's lock
+# and socket survive; Xvfb then refuses to start and the wait below passes on
+# the dead socket. Clear them first.
+rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.tX${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}"
 
 # Virtual framebuffer for the headful browser.
 Xvfb "$DISPLAY" -screen 0 1280x900x24 -nolisten tcp &
